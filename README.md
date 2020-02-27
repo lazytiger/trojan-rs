@@ -1,5 +1,12 @@
 # Trojan-rs
-A trojan server and proxy programs written in Rust
+***A trojan server and proxy programs written in Rust.***
+
+* ***For server mode, protocol is compatible with original trojan except
+UDP Associate does not support domain address type (maybe later?) If 
+you are not ok with that, you can use original version, it should work
+perfectly with the proxy mode.***
+* ***For proxy mode, it use tproxy to relay all udp and tcp packets, and it
+should work with the original server in both route or local type.***
 
 ## How to use it
 ```bash
@@ -34,15 +41,15 @@ For a server [-M server], the following parameter is required
 
 For a proxy [-M proxy] , the following parameter is required
 * -h trojan server address
-* -M proxy mode
 
 common parameters as following:
 * -i max idle time in seconds udp conections
 * -l log file path, is not specified log to console.
 * -L log level
 * -a listen address
-* -m marker used for OUTPUT identification
+* -m marker used for OUTPUT identification, you could use it in iptables
 * -p password for handshake, server mode may provide more than one
+* -M mode selection
 
 ## IPTABLES settings.
 
