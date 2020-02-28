@@ -32,7 +32,9 @@ udp的请求转发目前似乎只有一种方式，就是tproxy。
 TPROXY一般是通过IP_TRANSPARENT选项来实现，它有两个作用
 * 可以使得socket bind到任意地址
 * 可以使得socket接收到来自iptables TPROXY转发的请求
-所以，我们得给udp socket和tcp listener都设置这个选项也可以拦截到请求，这个是在socket层面的，配合上面的iptables规则来使用
+
+所以，我们得给udp socket和tcp listener都设置这个选项也可以拦截到请求，这个是在socket层面的，配合上面的iptables规则来使用.
+关于TPROXY的更详细的解释大家可以参考[这篇文章](https://powerdns.org/tproxydoc/tproxy.md.html)
 
 ## 策略路由
 当linux路由的时候，它仅会把它认为是本地请求的包路由到本地，其他的包要么丢弃，要求从网络接口上送出去。那我们怎么才能保证
