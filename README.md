@@ -1,5 +1,9 @@
 # Trojan-rs
+
 [![Build Status](https://travis-ci.com/lazytiger/trojan-rs.svg?branch=master)](https://travis-ci.com/lazytiger/trojan-rs)
+[![GitHub issues](https://img.shields.io/github/issues/lazytiger/trojan-rs)](https://github.com/lazytiger/trojan-rs/issues)
+[![GitHub license](https://img.shields.io/github/license/lazytiger/trojan-rs)](https://github.com/lazytiger/trojan-rs/blob/master/LICENSE)
+[![Releases](https://img.shields.io/github/v/release/lazytiger/trojan-rs.svg?include_prereleases)](https://github.com/lazytiger/trojan-rs/releases)
 
 ***[Trojan](https://github.com/trojan-gfw/trojan) server and proxy programs written in Rust.***
 
