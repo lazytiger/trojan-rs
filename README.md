@@ -103,3 +103,5 @@ iptables -t mangle -A OUTPUT -j TROJAN_LOCAL
 # Flush all the rules to effect immediately
 ip route flush cache
 ```
+
+You can get more about iptables rules in [PRINCIPLE.md](https://github.com/lazytiger/trojan-rs/blob/master/PRINCIPLE.md)
