@@ -1,11 +1,11 @@
 # Trojan-rs
 ***[Trojan](https://github.com/trojan-gfw/trojan) server and proxy programs written in Rust.***
 
-* ***For server mode, protocol is compatible with [original trojan](https://github.com/trojan-gfw/trojan) except
+* ***For the server mode, the protocol is compatible with [original trojan](https://github.com/trojan-gfw/trojan) except
 UDP Associate does not support domain address type (maybe later?) If 
-you are not ok with that, you can use original version, it should work
+you are not ok with that, you can use the original version, it should work
 perfectly with the proxy mode.***
-* ***For proxy mode, it use tproxy to relay all udp and tcp packets, and it
+* ***For the proxy mode, it uses TPROXY to relay all UDP and TCP packets, and it
 should work with the [original server](https://github.com/trojan-gfw/trojan) in both route or local type.***
 
 ## How to use it
@@ -33,22 +33,22 @@ OPTIONS:
     -A, --remote-addr <remote-addr>          http backend server address [default: 127.0.0.1:80]
 ```
 
-For a server [-M server], the following parameter is required
+For a server [-M server], the following parameters are required
 * -c certificate file
 * -k private key file
-* -d dns cache time
-* -A backend http server address
+* -d DNS cache time
+* -A backend HTTP server address
 
-For a proxy [-M proxy] , the following parameter is required
+For a proxy [-M proxy], the following parameters are required
 * -h trojan server address
 
 common parameters as following:
-* -i max idle time in seconds udp conections
+* -i max idle time in seconds UDP connections
 * -l log file path, is not specified log to console.
 * -L log level
-* -a listen address
+* -a listening address
 * -m marker used for OUTPUT identification, you could use it in iptables
-* -p password for handshake, server mode may provide more than one
+* -p password for the handshake, server mode may provide more than one
 * -M mode selection
 
 ## IPTABLES settings.
@@ -56,7 +56,7 @@ common parameters as following:
 A workable example as follows.
 lanlist and byplist is ipset which you can create by ipset command.
 
-> IMPORTANT your trojan server ip should included in byplist or lanlist, otherwise route loop should occur. 
+> IMPORTANT your trojan server IP should be included in byplist or lanlist, otherwise, route loop should occur. 
 
 ```bash
 # Add any tproxy policy rules
@@ -64,7 +64,7 @@ ip rule add fwmark 1 table 100
 ip route add local 0.0.0.0/0 dev lo table 100
 
 # --------------- Route Rules Begin ---------------------------
-# Create new chain for router
+# Create a new chain for router
 iptables -t mangle -N TROJAN_ROUTE
 
 # Ignore LANs and any other addresses you'd like to bypass the proxy
