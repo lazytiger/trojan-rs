@@ -71,5 +71,6 @@ mark为1，这与我们上面的策略路由里用到的mark是一样的。其�
 第一个是告诉linux它自己要有路由功能，于是PREROUTING会生效，
 第二个是告诉linux，localhost也是需要路由的
 
-## 总结
-大家在写iptables的时候特别需要注意的是，到代理服务器的ip一定要排除到PREROUTING里，否则又会形成路由回环。
+## 趟坑总结
+* 大家在写iptables的时候特别需要注意的是，到代理服务器的ip一定要排除到PREROUTING里，否则又会形成路由回环。
+* rustls与mio共同使用时，记得一定要用level而不能用edge，猜测可能是rustls因为某些原因并没有将socket读到WouldBlock
