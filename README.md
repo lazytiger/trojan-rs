@@ -1,4 +1,6 @@
 # Trojan-rs
+[![Build Status](https://img.shields.io/travis/lazyiger/trojan-rs.svg)](https://travis-ci.com/lazytiger/trojan-rs)
+
 ***[Trojan](https://github.com/trojan-gfw/trojan) server and proxy programs written in Rust.***
 
 * ***For the server mode, the protocol is compatible with [original trojan](https://github.com/trojan-gfw/trojan) except

@@ -2,12 +2,6 @@ sudo: false
 language: rust
 jobs:
   include:
-    - os: windows
-      rust: stable
-
-    - os: osx
-      rust: stable
-
     - os: linux
       rust: stable
 
