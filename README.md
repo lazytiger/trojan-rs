@@ -1,12 +1,12 @@
 # Trojan-rs
-***A trojan server and proxy programs written in Rust.***
+***[Trojan](https://github.com/trojan-gfw/trojan) server and proxy programs written in Rust.***
 
-* ***For server mode, protocol is compatible with original trojan except
+* ***For server mode, protocol is compatible with [original trojan](https://github.com/trojan-gfw/trojan) except
 UDP Associate does not support domain address type (maybe later?) If 
 you are not ok with that, you can use original version, it should work
 perfectly with the proxy mode.***
 * ***For proxy mode, it use tproxy to relay all udp and tcp packets, and it
-should work with the original server in both route or local type.***
+should work with the [original server](https://github.com/trojan-gfw/trojan) in both route or local type.***
 
 ## How to use it
 ```bash
