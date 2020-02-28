@@ -82,7 +82,7 @@ iptables -t mangle -A TROJAN_ROUTE -p tcp -m set ! --match-set chslist dst -j TP
 iptables -t mangle -A TROJAN_ROUTE -p udp -m set ! --match-set chslist dst -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 1
 
 # Apply the route rules
-iptables -t mangle -A PREROUTING -p tcp -j TROJAN_ROUTE
+iptables -t mangle -A PREROUTING -j TROJAN_ROUTE
 # ---------------- Route Rules End -----------------------------
 
 
