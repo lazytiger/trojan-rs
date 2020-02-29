@@ -1,6 +1,6 @@
-use clap::{Clap};
+use clap::Clap;
 
-use crate::config::{Opts, Mode};
+use crate::config::{Mode, Opts};
 
 mod server;
 mod config;
@@ -17,10 +17,10 @@ fn main() {
         Mode::Proxy(_) => {
             log::warn!("trojan started in proxy mode");
             proxy::run(&mut opts);
-        },
+        }
         Mode::Server(_) => {
             log::warn!("trojan started in server mode");
             server::run(&mut opts);
-        },
+        }
     }
 }

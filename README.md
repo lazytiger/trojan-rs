@@ -16,46 +16,62 @@ should work with the [original server](https://github.com/trojan-gfw/trojan) in 
 
 ## How to use it
 ```bash
+hoping@HopingPC:~/workspace/trojan-rs$ trojan --help
+trojan 0.2
+Hoping White
+a trojan implementation using rust
+
 USAGE:
-    trojan [OPTIONS] --password <password>...
+    trojan [OPTIONS] --local-addr <local-addr> --password <password>... <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -i, --idle-timeout <idle-timeout>    time in seconds before closing an inactive connection [default: 300]
+    -a, --local-addr <local-addr>        listen address for server
+    -l, --log-file <log-file>            log file path
+    -L, --log-level <log-level>          log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5
+                                         for off [default: 2]
+    -m, --marker <marker>                set marker used by tproxy [default: 255]
+    -p, --password <password>...         passwords for negotiation
+
+SUBCOMMANDS:
+    help      Prints this message or the help of the given subcommand(s)
+    proxy
+    server
+
+hoping@HopingPC:~/workspace/trojan-rs$ trojan help proxy
+trojan-proxy
+
+USAGE:
+    trojan proxy --hostname <hostname>
 
 FLAGS:
         --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
+    -h, --hostname <hostname>    trojan server hostname
+
+hoping@HopingPC:~/workspace/trojan-rs$ trojan help server
+trojan-server
+
+USAGE:
+    trojan server [OPTIONS] --cert <cert> --key <key>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
     -c, --cert <cert>                        certificate file path
     -d, --dns-cache-time <dns-cache-time>    time in seconds for dns query cache [default: 300]
-    -h, --hostname <hostname>                trojan server hostname
-    -i, --idle-timeout <idle-timeout>        time in seconds before closing an inactive connection [default: 300]
     -k, --key <key>                          private key file path
-    -a, --local-addr <local-addr>            listen address for server [default: 0.0.0.0:443]
-    -l, --log-file <log-file>                log file path
-    -L, --log-level <log-level>              log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for
-                                             error, 5 for off [default: 2]
-    -m, --marker <marker>                    set marker used by tproxy [default: 255]
-    -M, --mode <mode>                        program mode, valid options are server and proxy [default: server]
-    -p, --password <password>...             passwords for negotiation
-    -A, --remote-addr <remote-addr>          http backend server address [default: 127.0.0.1:80]
+    -r, --remote-addr <remote-addr>          http backend server address [default: 127.0.0.1:80]
+
 ```
-
-For a server [-M server], the following parameters are required
-* -c certificate file
-* -k private key file
-* -d DNS cache time
-* -A backend HTTP server address
-
-For a proxy [-M proxy], the following parameters are required
-* -h trojan server address
-
-common parameters as following:
-* -i max idle time in seconds UDP connections
-* -l log file path, is not specified log to console.
-* -L log level
-* -a listening address
-* -m marker used for OUTPUT identification, you could use it in iptables
-* -p password for the handshake, server mode may provide more than one
-* -M mode selection
 
 ## IPTABLES settings.
 

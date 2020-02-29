@@ -16,7 +16,7 @@ pub struct DnsEntry {
 #[clap(version = "0.2", author = "Hoping White", about = "a trojan implementation using rust")]
 pub struct Opts {
     #[clap(subcommand)]
-    pub mode:Mode,
+    pub mode: Mode,
     #[clap(short, long, help = "log file path")]
     pub log_file: Option<String>,
     #[clap(short = "a", long, help = "listen address for server")]
@@ -49,9 +49,9 @@ pub struct Opts {
 
 #[derive(Clap)]
 pub enum Mode {
-    #[clap(name="proxy")]
+    #[clap(name = "proxy", about = "run in proxy mode")]
     Proxy(ProxyArgs),
-    #[clap(name="server")]
+    #[clap(name = "server", about = "run in server mode")]
     Server(ServerArgs),
 }
 
@@ -74,14 +74,14 @@ pub struct ServerArgs {
 }
 
 impl Opts {
-    pub fn server_args(&self) ->&ServerArgs {
+    pub fn server_args(&self) -> &ServerArgs {
         match self.mode {
             Mode::Server(ref args) => args,
             _ => panic!("not in server mode"),
         }
     }
 
-    pub fn proxy_args(&self) ->&ProxyArgs {
+    pub fn proxy_args(&self) -> &ProxyArgs {
         match self.mode {
             Mode::Proxy(ref args) => args,
             _ => panic!("not in proxy mode"),
@@ -94,7 +94,7 @@ impl Opts {
                 let back_addr: SocketAddr = args.remote_addr.parse().unwrap();
                 self.back_addr = Some(back_addr);
                 self.dns_cache_duration = Duration::new(args.dns_cache_time, 0);
-            },
+            }
             Mode::Proxy(ref args) => {
                 let mut hostname = args.hostname.clone();
                 if !hostname.ends_with(".") {
