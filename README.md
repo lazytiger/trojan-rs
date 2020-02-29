@@ -82,7 +82,7 @@ lanlist and byplist is ipset which you can create by ipset command.
 
 ```bash
 # Add any tproxy policy rules
-ip rule add fwmark 1 table 100
+ip rule add fwmark 0xff table 100
 ip route add local 0.0.0.0/0 dev lo table 100
 
 # --------------- Route Rules Begin ---------------------------
