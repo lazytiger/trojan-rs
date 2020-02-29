@@ -95,8 +95,8 @@ iptables -t mangle -A TROJAN_ROUTE -m set --match-set byplist dst -j RETURN
 iptables -t mangle -A TROJAN_ROUTE -m set --match-set chslist dst -j RETURN
 
 # Anything else should be redirected to shadowsocks's local port
-iptables -t mangle -A TROJAN_ROUTE -p tcp -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 1
-iptables -t mangle -A TROJAN_ROUTE -p udp -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 1
+iptables -t mangle -A TROJAN_ROUTE -p tcp -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 0xff
+iptables -t mangle -A TROJAN_ROUTE -p udp -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 0xff
 
 # Apply the route rules
 iptables -t mangle -A PREROUTING -j TROJAN_ROUTE
@@ -116,9 +116,9 @@ iptables -t mangle -A TROJAN_LOCAL -m set --match-set chslist dst -j RETURN
 iptables -t mangle -A TROJAN_LOCAL -m mark --mark 0xff -j RETURN
 
 # Mark tcp 80, 443, udp 53 to reroute.
-iptables -t mangle -A TROJAN_LOCAL -p udp --dport 53 -j MARK --set-xmark 1
-iptables -t mangle -A TROJAN_LOCAL -p tcp --dport 80 -j MARK --set-xmark 1
-iptables -t mangle -A TROJAN_LOCAL -p tcp --dport 443 -j MARK --set-xmark 1
+iptables -t mangle -A TROJAN_LOCAL -p udp --dport 53 -j MARK --set-xmark 0xff
+iptables -t mangle -A TROJAN_LOCAL -p tcp --dport 80 -j MARK --set-xmark 0xff
+iptables -t mangle -A TROJAN_LOCAL -p tcp --dport 443 -j MARK --set-xmark 0xff
 
 # Apply the local rules
 iptables -t mangle -A OUTPUT -j TROJAN_LOCAL
