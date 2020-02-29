@@ -60,7 +60,7 @@ pub fn run(opts: &mut Opts) {
     poll.register(&udp_listener, Token(UDP_LISTENER), Ready::readable(), PollOpt::edge()).unwrap();
 
 
-    let hostname = DNSNameRef::try_from_ascii(opts.hostname.as_ref().unwrap().as_bytes()).unwrap().to_owned();
+    let hostname = DNSNameRef::try_from_ascii(opts.proxy_args().hostname.as_bytes()).unwrap().to_owned();
     let mut config = ClientConfig::new();
     config.root_store.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     let config = Arc::new(config);

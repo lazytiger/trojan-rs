@@ -13,31 +13,21 @@ pub struct DnsEntry {
 }
 
 #[derive(Clap)]
-#[clap(version = "0.1", author = "Hoping White", about = "a trojan implementation using rust")]
+#[clap(version = "0.2", author = "Hoping White", about = "a trojan implementation using rust")]
 pub struct Opts {
-    #[clap(short = "c", long = "cert", help = "certificate file path")]
-    pub cert: Option<String>,
-    #[clap(short = "k", long = "key", help = "private key file path")]
-    pub key: Option<String>,
-    #[clap(short = "l", long = "log-file", help = "log file path")]
+    #[clap(subcommand)]
+    pub mode:Mode,
+    #[clap(short, long, help = "log file path")]
     pub log_file: Option<String>,
-    #[clap(short = "a", long = "local-addr", default_value = "0.0.0.0:443", help = "listen address for server")]
+    #[clap(short = "a", long, help = "listen address for server")]
     pub local_addr: String,
-    #[clap(short = "A", long = "remote-addr", default_value = "127.0.0.1:80", help = "http backend server address")]
-    pub remote_addr: String,
-    #[clap(required = true, short = "p", long = "password", help = "passwords for negotiation")]
+    #[clap(required = true, short, long, help = "passwords for negotiation")]
     password: Vec<String>,
-    #[clap(short = "L", long = "log-level", default_value = "2", help = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off")]
+    #[clap(short = "L", long, default_value = "2", help = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off")]
     pub log_level: u8,
-    #[clap(short = "d", long = "dns-cache-time", default_value = "300", help = "time in seconds for dns query cache")]
-    dns_cache_time: u64,
-    #[clap(short = "m", long = "marker", default_value = "255", help = "set marker used by tproxy")]
+    #[clap(short, long, default_value = "255", help = "set marker used by tproxy")]
     pub marker: u8,
-    #[clap(short = "M", long = "mode", default_value = "server", help = "program mode, valid options are server and proxy")]
-    pub mode: String,
-    #[clap(short = "h", long = "hostname", help = "trojan server hostname")]
-    pub hostname: Option<String>,
-    #[clap(short = "i", long = "idle-timeout", default_value = "300", help = "time in seconds before closing an inactive connection")]
+    #[clap(short, long, default_value = "300", help = "time in seconds before closing an inactive connection")]
     pub idle_timeout: u64,
     #[clap(skip)]
     dns_cache_duration: Duration,
@@ -57,37 +47,75 @@ pub struct Opts {
     pub idle_duration: Duration,
 }
 
-impl Opts {
-    pub fn setup(&mut self) {
-        if self.mode == "server" {
-            if self.cert.is_none() || self.key.is_none() {
-                panic!("server mode require both cert and key file");
-            }
-            let back_addr: SocketAddr = self.remote_addr.parse().unwrap();
-            self.back_addr = Some(back_addr);
-        } else {
-            if self.hostname.is_none() {
-                panic!("proxy mode require hostname");
-            }
-            let mut hostname = self.hostname.as_ref().unwrap().clone();
-            if !hostname.ends_with(".") {
-                hostname.push('.');
-            }
-            let resolver = Resolver::from_system_conf().unwrap();
-            let response = resolver.lookup_ip(hostname.as_str()).unwrap();
-            while let Some(ip) = response.iter().next() {
-                if ip.is_ipv4() {
-                    self.back_addr.replace(SocketAddr::new(ip, 443));
-                    break;
-                } else if self.back_addr.is_none() {
-                    self.back_addr.replace(SocketAddr::new(ip, 443));
-                }
-            }
-            if self.back_addr.is_none() {
-                panic!("resolve host {} failed", hostname);
-            }
+#[derive(Clap)]
+pub enum Mode {
+    #[clap(name="proxy")]
+    Proxy(ProxyArgs),
+    #[clap(name="server")]
+    Server(ServerArgs),
+}
 
-            log::info!("server address is {}", self.back_addr.as_ref().unwrap());
+#[derive(Clap)]
+pub struct ProxyArgs {
+    #[clap(short, long, help = "trojan server hostname")]
+    pub hostname: String,
+}
+
+#[derive(Clap)]
+pub struct ServerArgs {
+    #[clap(short, long, help = "certificate file path")]
+    pub cert: String,
+    #[clap(short, long, help = "private key file path")]
+    pub key: String,
+    #[clap(short, long, default_value = "127.0.0.1:80", help = "http backend server address")]
+    pub remote_addr: String,
+    #[clap(short, long, default_value = "300", help = "time in seconds for dns query cache")]
+    dns_cache_time: u64,
+}
+
+impl Opts {
+    pub fn server_args(&self) ->&ServerArgs {
+        match self.mode {
+            Mode::Server(ref args) => args,
+            _ => panic!("not in server mode"),
+        }
+    }
+
+    pub fn proxy_args(&self) ->&ProxyArgs {
+        match self.mode {
+            Mode::Proxy(ref args) => args,
+            _ => panic!("not in proxy mode"),
+        }
+    }
+
+    pub fn setup(&mut self) {
+        match self.mode {
+            Mode::Server(ref args) => {
+                let back_addr: SocketAddr = args.remote_addr.parse().unwrap();
+                self.back_addr = Some(back_addr);
+                self.dns_cache_duration = Duration::new(args.dns_cache_time, 0);
+            },
+            Mode::Proxy(ref args) => {
+                let mut hostname = args.hostname.clone();
+                if !hostname.ends_with(".") {
+                    hostname.push('.');
+                }
+                let resolver = Resolver::from_system_conf().unwrap();
+                let response = resolver.lookup_ip(hostname.as_str()).unwrap();
+                while let Some(ip) = response.iter().next() {
+                    if ip.is_ipv4() {
+                        self.back_addr.replace(SocketAddr::new(ip, 443));
+                        break;
+                    } else if self.back_addr.is_none() {
+                        self.back_addr.replace(SocketAddr::new(ip, 443));
+                    }
+                }
+                if self.back_addr.is_none() {
+                    panic!("resolve host {} failed", hostname);
+                }
+
+                log::info!("server address is {}", self.back_addr.as_ref().unwrap());
+            }
         }
         let empty_addr = if self.back_addr.as_ref().unwrap().is_ipv4() {
             SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
@@ -95,7 +123,6 @@ impl Opts {
             SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
         };
         self.empty_addr.replace(empty_addr);
-        self.dns_cache_duration = Duration::new(self.dns_cache_time, 0);
         self.idle_duration = Duration::new(self.idle_timeout, 0);
         self.digest_pass();
     }

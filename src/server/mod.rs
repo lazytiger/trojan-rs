@@ -19,18 +19,18 @@ mod resolver;
 fn init_config(opts: &Opts) -> Arc<ServerConfig> {
     let mut config = ServerConfig::new(NoClientAuth::new());
     config.key_log = Arc::new(KeyLogFile::new());
-    let cert_file = File::open(opts.cert.as_ref().unwrap()).unwrap();
+    let cert_file = File::open(opts.server_args().cert.clone()).unwrap();
     let mut buff_reader = BufReader::new(cert_file);
     let cert_chain = certs(&mut buff_reader).unwrap();
     let key_der = {
-        let key_file = File::open(opts.key.as_ref().unwrap()).unwrap();
+        let key_file = File::open(opts.server_args().key.clone()).unwrap();
         let mut buff_reader = BufReader::new(key_file);
         let keys = pkcs8_private_keys(&mut buff_reader).unwrap();
         if let Some(key) = keys.get(0) {
             log::info!("pkcs8 private key found");
             key.clone()
         } else {
-            let key_file = File::open(opts.key.as_ref().unwrap()).unwrap();
+            let key_file = File::open(opts.server_args().key.clone()).unwrap();
             let mut buff_reader = BufReader::new(key_file);
             let keys = rsa_private_keys(&mut buff_reader).unwrap();
             if let Some(key) = keys.get(0) {

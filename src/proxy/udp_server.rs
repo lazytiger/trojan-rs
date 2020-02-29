@@ -250,7 +250,7 @@ impl Connection {
                     break;
                 }
                 Err(err) => {
-                    log::error!("connection:{} write to server failed:{}", self.index(), err);
+                    log::warn!("connection:{} write to server failed:{}", self.index(), err);
                     self.closing = true;
                     break;
                 }
@@ -264,7 +264,7 @@ impl Connection {
             match self.server_session.read_tls(&mut self.server) {
                 Ok(size) => {
                     if size == 0 {
-                        log::error!("connection:{} read from server failed with eof", self.index());
+                        log::warn!("connection:{} read from server failed with eof", self.index());
                         self.closing = true;
                         return;
                     }

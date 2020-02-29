@@ -261,7 +261,7 @@ impl Connection {
 
     fn try_read_client(&mut self) {
         if let Err(err) = self.client_session.read_backend(&mut self.client) {
-            log::error!("connection:{} read from client failed:{}", self.index(), err);
+            log::warn!("connection:{} read from client failed:{}", self.index(), err);
             self.closing = true;
             return;
         }
@@ -271,7 +271,7 @@ impl Connection {
         }
         self.client_received = true;
         if let Err(err) = self.server_session.write_all(data.as_ref()) {
-            log::error!("connection:{} write to server failed:{}", self.index(), err);
+            log::warn!("connection:{} write to server failed:{}", self.index(), err);
             self.closing = true;
             return;
         }
@@ -281,7 +281,7 @@ impl Connection {
     fn try_send_client(&mut self) {
         if self.client_session.wants_write() {
             if let Err(err) = self.client_session.write_backend(&mut self.client) {
-                log::error!("connection:{} write to client failed:{}", self.index(), err);
+                log::warn!("connection:{} write to client failed:{}", self.index(), err);
                 return;
             }
         }
@@ -305,7 +305,7 @@ impl Connection {
                     break;
                 }
                 Err(err) => {
-                    log::error!("connection:{} send to client failed:{}", self.index(), err);
+                    log::warn!("connection:{} send to client failed:{}", self.index(), err);
                     self.closing = true;
                     return;
                 }
@@ -318,7 +318,7 @@ impl Connection {
             match self.server_session.read_tls(&mut self.server) {
                 Ok(size) => {
                     if size == 0 {
-                        log::error!("connection:{} read from server failed with eof", self.index());
+                        log::warn!("connection:{} read from server failed with eof", self.index());
                         self.closing = true;
                         return;
                     }
@@ -337,14 +337,14 @@ impl Connection {
         }
 
         if let Err(err) = self.server_session.process_new_packets() {
-            log::warn!("connection:{} process new packets failed:{}", self.index(), err);
+            log::error!("connection:{} process new packets failed:{}", self.index(), err);
             self.closing = true;
             return;
         }
 
         let mut buffer = Vec::new();
         if let Err(err) = self.server_session.read_to_end(&mut buffer) {
-            log::warn!("connection:{} read from session failed:{}", self.index(), err);
+            log::error!("connection:{} read from session failed:{}", self.index(), err);
             self.closing = true;
             return;
         }
@@ -365,7 +365,7 @@ impl Connection {
                     break;
                 }
                 Err(err) => {
-                    log::error!("connection:{} write to server failed:{}", self.index(), err);
+                    log::warn!("connection:{} write to server failed:{}", self.index(), err);
                     self.closing = true;
                     return;
                 }
