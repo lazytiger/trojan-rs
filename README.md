@@ -92,10 +92,11 @@ iptables -t mangle -N TROJAN_ROUTE
 # Ignore LANs and any other addresses you'd like to bypass the proxy
 iptables -t mangle -A TROJAN_ROUTE -m set --match-set lanlist dst -j RETURN
 iptables -t mangle -A TROJAN_ROUTE -m set --match-set byplist dst -j RETURN
+iptables -t mangle -A TROJAN_ROUTE -m set --match-set chslist dst -j RETURN
 
 # Anything else should be redirected to shadowsocks's local port
-iptables -t mangle -A TROJAN_ROUTE -p tcp -m set ! --match-set chslist dst -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 1
-iptables -t mangle -A TROJAN_ROUTE -p udp -m set ! --match-set chslist dst -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 1
+iptables -t mangle -A TROJAN_ROUTE -p tcp -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 1
+iptables -t mangle -A TROJAN_ROUTE -p udp -j TPROXY --on-port 60080 --on-ip 127.0.0.1 --tproxy-mark 1
 
 # Apply the route rules
 iptables -t mangle -A PREROUTING -j TROJAN_ROUTE
@@ -109,6 +110,7 @@ iptables -t mangle -N TROJAN_LOCAL
 # Ignore Lans and any other address you'd like to bypass the proxy
 iptables -t mangle -A TROJAN_LOCAL -m set --match-set lanlist dst -j RETURN
 iptables -t mangle -A TROJAN_LOCAL -m set --match-set byplist dst -j RETURN
+iptables -t mangle -A TROJAN_LOCAL -m set --match-set chslist dst -j RETURN
 
 # Ignore packets sent from trojan itself.
 iptables -t mangle -A TROJAN_LOCAL -m mark --mark 0xff -j RETURN
