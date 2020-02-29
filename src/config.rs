@@ -57,7 +57,7 @@ pub enum Mode {
 
 #[derive(Clap)]
 pub struct ProxyArgs {
-    #[clap(short, long, help = "trojan server hostname")]
+    #[clap(short = "H", long, help = "trojan server hostname")]
     pub hostname: String,
 }
 

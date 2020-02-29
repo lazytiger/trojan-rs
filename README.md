@@ -49,11 +49,11 @@ USAGE:
     trojan proxy --hostname <hostname>
 
 FLAGS:
-        --help       Prints help information
+    -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -h, --hostname <hostname>    trojan server hostname
+    -H, --hostname <hostname>    trojan server hostname
 
 hoping@HopingPC:~/workspace/trojan-rs$ trojan help server
 trojan-server
