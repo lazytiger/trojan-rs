@@ -1,4 +1,5 @@
-use clap::Clap;
+use clap::{App, AppSettings, FromArgMatches};
+use clap::derive::IntoApp;
 
 use crate::config::{Mode, Opts};
 
@@ -10,7 +11,10 @@ mod proxy;
 mod session;
 
 fn main() {
-    let mut opts = Opts::parse();
+    let mut app: App = <Opts as IntoApp>::into_app();
+    app.set(AppSettings::AllowExternalSubcommands);
+    let mut opts = <Opts as FromArgMatches>::from_arg_matches(&app.get_matches());
+
     config::setup_logger(&opts.log_file, opts.log_level);
     opts.setup();
     match opts.mode {

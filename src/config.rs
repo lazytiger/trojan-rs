@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::{Duration, Instant};
-
 use clap::Clap;
 use crypto::digest::Digest;
 use crypto::sha2::Sha224;
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::time::{Duration, Instant};
 use trust_dns_resolver::Resolver;
 
 pub struct DnsEntry {
@@ -21,8 +20,8 @@ pub struct Opts {
     pub log_file: Option<String>,
     #[clap(short = "a", long, help = "listen address for server")]
     pub local_addr: String,
-    #[clap(required = true, short, long, help = "passwords for negotiation")]
-    password: Vec<String>,
+    #[clap(short, long, help = "passwords for negotiation")]
+    password: String,
     #[clap(short = "L", long, default_value = "2", help = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off")]
     pub log_level: u8,
     #[clap(short, long, default_value = "255", help = "set marker used by tproxy")]
@@ -32,7 +31,7 @@ pub struct Opts {
     #[clap(skip)]
     dns_cache_duration: Duration,
     #[clap(skip)]
-    sha_pass: Vec<String>,
+    sha_pass: String,
     #[clap(skip)]
     pub pass_len: usize,
     #[clap(skip)]
@@ -129,28 +128,24 @@ impl Opts {
 
     fn digest_pass(&mut self) {
         let mut encoder = Sha224::new();
-        self.sha_pass.clear();
-        for pass in &self.password {
-            encoder.reset();
-            encoder.input(pass.as_bytes());
-            let result = encoder.result_str();
-            self.pass_len = result.len();
-            log::info!("sha224({}) = {}, length = {}", pass, result, self.pass_len);
-            self.sha_pass.push(result);
-        }
+        encoder.reset();
+        encoder.input(self.password.as_bytes());
+        let result = encoder.result_str();
+        self.pass_len = result.len();
+        log::info!("sha224({}) = {}, length = {}", self.password, result, self.pass_len);
+        self.sha_pass = result;
     }
 
     pub fn check_pass(&self, pass: &str) -> Option<&String> {
-        for i in 0..self.sha_pass.len() {
-            if self.sha_pass[i].eq(pass) {
-                return Some(&self.password[i]);
-            }
+        if self.sha_pass.eq(pass) {
+            Some(&self.password)
+        } else {
+            None
         }
-        None
     }
 
     pub fn get_pass(&self) -> &String {
-        self.sha_pass.get(0).unwrap()
+        &self.sha_pass
     }
 
     pub fn update_dns(&mut self, domain: String, address: IpAddr) {
