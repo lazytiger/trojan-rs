@@ -70,6 +70,8 @@ pub struct ServerArgs {
     pub remote_addr: String,
     #[clap(short, long, default_value = "300", help = "time in seconds for dns query cache")]
     dns_cache_time: u64,
+    #[clap(short = "n", long, help = "alpn protocol supported")]
+    pub alpn: Vec<String>,
 }
 
 impl Opts {

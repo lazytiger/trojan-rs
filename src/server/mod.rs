@@ -42,7 +42,13 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
         }
     };
     config.set_single_cert(cert_chain, key_der).unwrap();
-    config.set_protocols(vec!["h2".into(), "http/1.1".into()].as_slice());
+    let mut protocols: Vec<Vec<u8>> = Vec::new();
+    for protocol in &opts.server_args().alpn {
+        protocols.push(protocol.as_str().into());
+    }
+    if !protocols.is_empty() {
+        config.set_protocols(&protocols);
+    }
     Arc::new(config)
 }
 
