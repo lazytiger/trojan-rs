@@ -42,6 +42,7 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
         }
     };
     config.set_single_cert(cert_chain, key_der).unwrap();
+    config.set_protocols(vec!["h2".into(), "http/1.1".into()].as_slice());
     Arc::new(config)
 }
 
