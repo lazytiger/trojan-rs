@@ -67,9 +67,11 @@ mark为1，这与我们上面的策略路由里用到的mark是一样的。其�
 其实到这里的时候原理性的东西基本上都说完了，唯一剩下的就是一些sysctl的参数了
 >net.ipv4.ip_forward=1<br>
 >net.ipv4.conf.all.route_localnet = 1<br>
+>net.ipv4.conf.eth0.rp_filter = 0<br>
 
 第一个是告诉linux它自己要有路由功能，于是PREROUTING会生效，
 第二个是告诉linux，localhost也是需要路由的
+第三个是告诉linux，不要检查源地址，否则在路由出去的时候会被linux丢弃，如果是本地透明代理这一条则不需要
 
 ## 趟坑总结
 * 大家在写iptables的时候特别需要注意的是，到代理服务器的ip一定要排除到PREROUTING里，否则又会形成路由回环。
