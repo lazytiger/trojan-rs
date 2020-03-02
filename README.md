@@ -39,8 +39,8 @@ OPTIONS:
 
 SUBCOMMANDS:
     help      Prints this message or the help of the given subcommand(s)
-    proxy
-    server
+    proxy     run in proxy mode
+    server    run in server mode
 
 hoping@HopingPC:~/workspace/trojan-rs$ trojan help proxy
 trojan-proxy
