@@ -1,9 +1,10 @@
-use clap::Clap;
-use crypto::digest::Digest;
-use crypto::sha2::Sha224;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
+
+use clap::Clap;
+use crypto::digest::Digest;
+use crypto::sha2::Sha224;
 use trust_dns_resolver::Resolver;
 
 pub struct DnsEntry {
@@ -26,7 +27,7 @@ pub struct Opts {
     pub log_level: u8,
     #[clap(short, long, default_value = "255", help = "set marker used by tproxy")]
     pub marker: u8,
-    #[clap(short, long, default_value = "300", help = "time in seconds before closing an inactive connection")]
+    #[clap(short, long, default_value = "60", help = "time in seconds before closing an inactive connection")]
     pub idle_timeout: u64,
     #[clap(skip)]
     dns_cache_duration: Duration,

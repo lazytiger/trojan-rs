@@ -80,6 +80,7 @@ impl TlsServer {
         for (index, conn) in &mut self.conns {
             if conn.timeout(check_active_time) {
                 list.push(*index);
+                log::warn!("connection:{} timeout, close now", index);
                 conn.close_now(poll)
             }
         }

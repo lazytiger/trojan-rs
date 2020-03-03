@@ -1,5 +1,6 @@
-use bytes::{Buf, BytesMut};
 use std::io::{Error, ErrorKind, Read, Result, Write};
+
+use bytes::{Buf, BytesMut};
 
 pub struct TcpSession {
     pub recv_buf: BytesMut,

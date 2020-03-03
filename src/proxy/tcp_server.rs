@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
+use std::net::Shutdown;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpListener, TcpStream};
-use mio::tcp::Shutdown;
 use rustls::{ClientConfig, ClientSession, Session, WriteVAdapter};
 use webpki::DNSName;
 
