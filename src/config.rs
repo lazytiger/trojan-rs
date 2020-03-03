@@ -13,7 +13,7 @@ pub struct DnsEntry {
 }
 
 #[derive(Clap)]
-#[clap(version = "0.2", author = "Hoping White", about = "a trojan implementation using rust")]
+#[clap(version = "0.3", author = "Hoping White", about = "a trojan implementation using rust")]
 pub struct Opts {
     #[clap(subcommand)]
     pub mode: Mode,
@@ -27,7 +27,7 @@ pub struct Opts {
     pub log_level: u8,
     #[clap(short, long, default_value = "255", help = "set marker used by tproxy")]
     pub marker: u8,
-    #[clap(short, long, default_value = "60", help = "time in seconds before closing an inactive connection")]
+    #[clap(short, long, default_value = "120", help = "time in seconds before closing an inactive connection")]
     pub idle_timeout: u64,
     #[clap(skip)]
     dns_cache_duration: Duration,
