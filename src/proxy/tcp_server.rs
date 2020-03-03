@@ -181,7 +181,7 @@ impl Connection {
                 }
 
                 if event.readiness().is_writable() {
-                    self.try_send_client();
+                    self.try_send_client(&[]);
                 }
             }
             2 => {
@@ -195,6 +195,7 @@ impl Connection {
             }
             _ => {
                 log::error!("invalid token found in tcp listener");
+                self.closing = true;
                 return;
             }
         }
@@ -278,12 +279,21 @@ impl Connection {
         self.try_send_server();
     }
 
-    fn try_send_client(&mut self) {
+    fn try_send_client(&mut self, buffer: &[u8]) {
         if self.client_session.wants_write() {
-            if let Err(err) = self.client_session.write_backend(&mut self.client) {
-                log::warn!("connection:{} write to client failed:{}", self.index(), err);
+            if let Err(err) = self.client_session.write_all(buffer) {
+                log::error!("connection:{} write to client session failed:{}", self.index(), err);
+                self.closing = true;
                 return;
+            } else if let Err(err) = self.client_session.write_backend(&mut self.client) {
+                log::warn!("connection:{} write to client failed:{}", self.index(), err);
+                self.closing = true;
+                return;
+            } else {
+                log::info!("connection:{} write to client done", self.index());
             }
+        } else {
+            self.do_send_client(buffer);
         }
     }
 
@@ -349,7 +359,9 @@ impl Connection {
             return;
         }
 
-        self.do_send_client(buffer.as_slice());
+        if !buffer.is_empty() {
+            self.try_send_client(buffer.as_slice());
+        }
     }
 
     fn try_send_server(&mut self) {
