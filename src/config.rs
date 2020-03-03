@@ -25,7 +25,7 @@ pub struct Opts {
     password: String,
     #[clap(short = "L", long, default_value = "2", help = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off")]
     pub log_level: u8,
-    #[clap(short, long, default_value = "255", help = "set marker used by tproxy")]
+    #[clap(short, long, default_value = "1", help = "set marker used by tproxy")]
     pub marker: u8,
     #[clap(short, long, default_value = "120", help = "time in seconds before closing an inactive connection")]
     pub idle_timeout: u64,

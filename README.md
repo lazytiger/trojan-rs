@@ -17,25 +17,25 @@ should work with the [original server](https://github.com/trojan-gfw/trojan) in 
 ## How to use it
 ```bash
 hoping@HopingPC:~/workspace/trojan-rs$ trojan --help
-trojan 0.2
+trojan 0.3
 Hoping White
 a trojan implementation using rust
 
 USAGE:
-    trojan [OPTIONS] --local-addr <local-addr> --password <password>... <SUBCOMMAND>
+    trojan [OPTIONS] --local-addr <local-addr> --password <password> <SUBCOMMAND>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -i, --idle-timeout <idle-timeout>    time in seconds before closing an inactive connection [default: 300]
+    -i, --idle-timeout <idle-timeout>    time in seconds before closing an inactive connection [default: 120]
     -a, --local-addr <local-addr>        listen address for server
     -l, --log-file <log-file>            log file path
     -L, --log-level <log-level>          log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5
                                          for off [default: 2]
-    -m, --marker <marker>                set marker used by tproxy [default: 255]
-    -p, --password <password>...         passwords for negotiation
+    -m, --marker <marker>                set marker used by tproxy [default: 1]
+    -p, --password <password>            passwords for negotiation
 
 SUBCOMMANDS:
     help      Prints this message or the help of the given subcommand(s)
@@ -66,6 +66,7 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
+    -n, --alpn <alpn>...                     alpn protocol supported
     -c, --cert <cert>                        certificate file path
     -d, --dns-cache-time <dns-cache-time>    time in seconds for dns query cache [default: 300]
     -k, --key <key>                          private key file path
