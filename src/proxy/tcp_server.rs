@@ -215,7 +215,7 @@ impl Connection {
         let _ = self.server.shutdown(Shutdown::Both);
         let _ = self.client.shutdown(Shutdown::Both);
         self.closed = true;
-        log::warn!("connection:{} closed, {} byte read, {} byte sent", self.index(), self.client_recv, self.client_sent);
+        log::warn!("connection:{} closed, target address {}, {} byte read, {} byte sent", self.index(), self.dst_addr, self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
