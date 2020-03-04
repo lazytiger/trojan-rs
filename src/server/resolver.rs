@@ -1,6 +1,7 @@
 use std::io::Error;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 use mio::{Evented, Poll, PollOpt, Ready, Registration, Token};
 use trust_dns_resolver::Resolver;
@@ -8,6 +9,7 @@ use trust_dns_resolver::Resolver;
 pub struct EventedResolver {
     registration: Registration,
     address: Arc<Mutex<Option<IpAddr>>>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl EventedResolver {
@@ -18,17 +20,17 @@ impl EventedResolver {
         let (registration, set_readiness) = Registration::new2();
         let address = Arc::new(Mutex::new(None));
         let address2 = address.clone();
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             if let Ok(resolver) = Resolver::from_system_conf() {
                 if let Ok(response) = resolver.lookup_ip(domain.as_str()) {
                     let mut address = address2.lock().unwrap();
-                    while let Some(addr) = response.iter().next() {
+                    for addr in response.iter() {
                         if address.is_none() {
                             address.replace(addr);
                         } else if addr.is_ipv4() {
                             address.replace(addr);
                         }
-                        if address.unwrap().is_ipv4() {
+                        if address.as_ref().unwrap().is_ipv4() {
                             break;
                         }
                     }
@@ -41,6 +43,7 @@ impl EventedResolver {
         EventedResolver {
             registration,
             address,
+            handle: Some(handle),
         }
     }
 
@@ -64,3 +67,9 @@ impl Evented for EventedResolver {
     }
 }
 
+impl Drop for EventedResolver {
+    fn drop(&mut self) {
+        //FIXME is this necessary?
+        let _ = self.handle.take().unwrap().join();
+    }
+}
