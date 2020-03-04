@@ -38,6 +38,8 @@ struct Connection {
     server_readiness: Ready,
     closing: bool,
     closed: bool,
+    client_recv: usize,
+    client_sent: usize,
 }
 
 impl UdpServer {
@@ -148,6 +150,8 @@ impl Connection {
             server_readiness: Ready::readable() | Ready::writable(),
             closing: false,
             closed: false,
+            client_recv: 0,
+            client_sent: 0,
         }
     }
 
@@ -182,6 +186,7 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
+        self.client_sent += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
         if let Err(err) = self.server_session.write_all(self.recv_buffer.as_ref()) {
@@ -214,6 +219,7 @@ impl Connection {
         let _ = poll.deregister(&self.server);
         let _ = self.server.shutdown(Shutdown::Both);
         self.closed = true;
+        log::warn!("connection:{} closed, {} bytes read, {} bytes sent", self.index(), self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
@@ -296,6 +302,7 @@ impl Connection {
         }
 
         if !buffer.is_empty() {
+            self.client_recv += buffer.len();
             self.try_send_client(buffer.as_slice(), opts, udp_cache);
         }
     }

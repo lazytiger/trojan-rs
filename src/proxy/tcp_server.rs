@@ -35,7 +35,8 @@ struct Connection {
     server_readiness: Ready,
     closed: bool,
     closing: bool,
-    client_received: bool,
+    client_recv: usize,
+    client_sent: usize,
 }
 
 impl TcpServer {
@@ -140,7 +141,8 @@ impl Connection {
             closed: false,
             closing: false,
             client_session: TcpSession::new(),
-            client_received: false,
+            client_recv: 0,
+            client_sent: 0,
         }
     }
 
@@ -213,6 +215,7 @@ impl Connection {
         let _ = self.server.shutdown(Shutdown::Both);
         let _ = self.client.shutdown(Shutdown::Both);
         self.closed = true;
+        log::warn!("connection:{} closed, {} byte read, {} byte sent", self.index(), self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
@@ -235,7 +238,7 @@ impl Connection {
         }
 
         changed = false;
-        if self.server_session.wants_write() && self.client_received && !self.server_readiness.is_writable() {
+        if self.server_session.wants_write() && self.client_sent > 0 && !self.server_readiness.is_writable() {
             self.server_readiness.insert(Ready::writable());
             changed = true;
         }
@@ -270,7 +273,7 @@ impl Connection {
         if data.is_empty() {
             return;
         }
-        self.client_received = true;
+        self.client_sent += data.len();
         if let Err(err) = self.server_session.write_all(data.as_ref()) {
             log::warn!("connection:{} write to server failed:{}", self.index(), err);
             self.closing = true;
@@ -360,6 +363,7 @@ impl Connection {
         }
 
         if !buffer.is_empty() {
+            self.client_recv += buffer.len();
             self.try_send_client(buffer.as_slice());
         }
     }
