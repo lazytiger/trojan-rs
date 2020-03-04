@@ -6,7 +6,7 @@ use std::time::Instant;
 use bytes::{Buf, BytesMut};
 use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpStream, UdpSocket};
-use rustls::{ServerSession, Session, WriteVAdapter};
+use rustls::{ServerSession, Session};
 
 use crate::config::Opts;
 use crate::proto::{CONNECT, MAX_UDP_SIZE, Sock5Address, TrojanRequest, UdpAssociate, UdpParseResult};
@@ -162,7 +162,7 @@ impl Connection {
                 log::debug!("connection:{} finished proxy write", self.index);
                 break;
             }
-            match self.proxy_session.writev_tls(&mut WriteVAdapter::new(&mut self.proxy)) {
+            match self.proxy_session.write_tls(&mut self.proxy) {
                 Ok(size) => {
                     log::debug!("connection:{} sent {} bytes to proxy", self.index, size);
                 }

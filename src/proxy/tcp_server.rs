@@ -7,7 +7,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpListener, TcpStream};
-use rustls::{ClientConfig, ClientSession, Session, WriteVAdapter};
+use rustls::{ClientConfig, ClientSession, Session};
 use webpki::DNSName;
 
 use crate::config::Opts;
@@ -373,7 +373,7 @@ impl Connection {
             if !self.server_session.wants_write() {
                 return;
             }
-            match self.server_session.writev_tls(&mut WriteVAdapter::new(&mut self.server)) {
+            match self.server_session.write_tls(&mut self.server) {
                 Ok(size) => {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
                 }
