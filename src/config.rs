@@ -63,9 +63,9 @@ pub struct ProxyArgs {
 
 #[derive(Clap)]
 pub struct ServerArgs {
-    #[clap(short, long, help = "certificate file path")]
+    #[clap(short, long, help = "certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA")]
     pub cert: String,
-    #[clap(short, long, help = "private key file path")]
+    #[clap(short, long, help = "private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format.")]
     pub key: String,
     #[clap(short, long, default_value = "127.0.0.1:80", help = "http backend server address")]
     pub remote_addr: String,

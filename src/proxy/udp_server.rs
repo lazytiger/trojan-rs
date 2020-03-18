@@ -98,6 +98,8 @@ impl UdpServer {
                         if let Some(conn) = self.conns.get_mut(&index) {
                             let payload = &self.recv_buffer.as_slice()[..size];
                             conn.send_request(payload, &dst_addr);
+                        } else {
+                            log::error!("impossible, connection should be found now");
                         }
                     }
                     Err(err) if err.kind() == ErrorKind::WouldBlock => {
