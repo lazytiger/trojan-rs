@@ -67,9 +67,12 @@ FLAGS:
 
 OPTIONS:
     -n, --alpn <alpn>...                     alpn protocol supported
-    -c, --cert <cert>                        certificate file path
+    -c, --cert <cert>                        certificate file path, This should contain PEM-format certificates in the
+                                             right order (the first certificate should certify KEYFILE, the last should
+                                             be a root CA
     -d, --dns-cache-time <dns-cache-time>    time in seconds for dns query cache [default: 300]
-    -k, --key <key>                          private key file path
+    -k, --key <key>                          private key file path,  This should be a RSA private key or PKCS8-encoded
+                                             private key, in PEM format.
     -r, --remote-addr <remote-addr>          http backend server address [default: 127.0.0.1:80]
 
 ```
