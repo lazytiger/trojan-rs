@@ -280,33 +280,25 @@ impl Connection {
     }
 
     fn try_read_tcp_target(&mut self) {
-        match self.status {
-            Status::TCPForward => {
-                match self.target_session.read_backend(self.tcp_target.as_mut().unwrap()) {
-                    Err(err) => {
-                        log::warn!("connection:{} read from target failed:{}", self.index, err);
-                        self.closing = true;
-                        return;
-                    }
-                    Ok(size) => {
-                        log::debug!("connection:{} read {} bytes from target", self.index, size);
-                    }
-                }
-
-                let buffer = self.target_session.read_all();
-                if !buffer.is_empty() {
-                    if let Err(err) = self.proxy_session.write_all(buffer.bytes()) {
-                        log::error!("connection:{} write to proxy failed:{}", self.index, err);
-                        self.closing = true;
-                        return;
-                    } else {
-                        self.try_send_proxy();
-                    }
-                }
-            }
-            Status::UDPForward => {}
-            _ => {
+        match self.target_session.read_backend(self.tcp_target.as_mut().unwrap()) {
+            Err(err) => {
+                log::warn!("connection:{} read from target failed:{}", self.index, err);
+                self.closing = true;
                 return;
+            }
+            Ok(size) => {
+                log::debug!("connection:{} read {} bytes from target", self.index, size);
+            }
+        }
+
+        let buffer = self.target_session.read_all();
+        if !buffer.is_empty() {
+            if let Err(err) = self.proxy_session.write_all(buffer.bytes()) {
+                log::error!("connection:{} write to proxy failed:{}", self.index, err);
+                self.closing = true;
+                return;
+            } else {
+                self.try_send_proxy();
             }
         }
     }
@@ -384,7 +376,6 @@ impl Connection {
                         }
                     } else {
                         if self.try_setup_udp_target(opts, poll) {
-                            self.udp_send_buffer.extend_from_slice(buffer);
                             self.status = Status::UDPForward;
                         } else {
                             return;
