@@ -30,7 +30,7 @@ impl TlsServer {
         loop {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
-                    log::debug!("get new connection, toke:{}, address:{}", self.next_id, addr);
+                    log::debug!("get new connection, token:{}, address:{}", self.next_id, addr);
                     let session = ServerSession::new(&self.config);
                     let index = self.next_index();
                     let mut conn = Connection::new(index, stream, session);
