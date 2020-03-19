@@ -10,7 +10,6 @@ edition = "2018"
 clap = { git = "https://github.com/clap-rs/clap/" }
 mio = "0.6"
 log = "0.4"
-fern = "0.5"
 chrono = "0.4"
 libc = "0.2"
 rustls = "0.17"
@@ -22,3 +21,7 @@ webpki-roots = "0.19"
 webpki = "0.21"
 mio-extras = "2.0"
 socket2 = "0.3"
+
+[dependencies.fern]
+version = "0.6"
+features = ["reopen-03"]
