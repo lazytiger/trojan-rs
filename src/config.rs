@@ -197,7 +197,7 @@ pub fn setup_logger(logfile: &Option<String>, level: u8) {
         })
         .level(level);
     if logfile.is_some() {
-        cfg_if::cfg_if!{
+        cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 let path = std::path::Path::new(logfile.as_ref().unwrap().as_str());
                 builder = builder.chain(fern::log_reopen(path, Some(libc::SIGUSR2)).unwrap());
