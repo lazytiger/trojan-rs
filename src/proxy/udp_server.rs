@@ -203,12 +203,12 @@ impl Connection {
     }
 
     fn ready(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, udp_cache: &mut UdpSvrCache) {
-        if event.readiness().is_writable() {
-            self.try_send_server();
-        }
-
         if event.readiness().is_readable() {
             self.try_read_server(opts, udp_cache);
+        }
+
+        if event.readiness().is_writable() {
+            self.try_send_server();
         }
 
         self.reregister(poll);
@@ -225,6 +225,9 @@ impl Connection {
     }
 
     fn reregister(&mut self, poll: &Poll) {
+        if self.closing {
+            return;
+        }
         let mut changed = false;
         if self.server_session.wants_write() && !self.server_readiness.is_writable() {
             self.server_readiness.insert(Ready::writable());
@@ -244,6 +247,9 @@ impl Connection {
     }
 
     fn try_send_server(&mut self) {
+        if self.closing {
+            return;
+        }
         log::info!("connection:{} trying to send udp bytes to server", self.index());
         loop {
             if !self.server_session.wants_write() {
@@ -268,6 +274,9 @@ impl Connection {
     }
 
     fn try_read_server(&mut self, opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
+        if self.closing {
+            return;
+        }
         loop {
             match self.server_session.read_tls(&mut self.server) {
                 Ok(size) => {

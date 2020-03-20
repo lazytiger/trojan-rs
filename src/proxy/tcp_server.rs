@@ -219,6 +219,9 @@ impl Connection {
     }
 
     fn reregister(&mut self, poll: &Poll) {
+        if self.closing {
+            return;
+        }
         let mut changed = false;
         if self.client_session.wants_write() && !self.client_readiness.is_writable() {
             self.client_readiness.insert(Ready::writable());
@@ -264,6 +267,9 @@ impl Connection {
     }
 
     fn try_read_client(&mut self) {
+        if self.closing {
+            return;
+        }
         if let Err(err) = self.client_session.read_backend(&mut self.client) {
             log::warn!("connection:{} read from client failed:{}", self.index(), err);
             self.closing = true;
@@ -283,6 +289,9 @@ impl Connection {
     }
 
     fn try_send_client(&mut self, buffer: &[u8]) {
+        if self.closing {
+            return;
+        }
         if self.client_session.wants_write() {
             if let Err(err) = self.client_session.write_all(buffer) {
                 log::error!("connection:{} write to client session failed:{}", self.index(), err);
@@ -327,6 +336,9 @@ impl Connection {
     }
 
     fn try_read_server(&mut self) {
+        if self.closing {
+            return;
+        }
         loop {
             match self.server_session.read_tls(&mut self.server) {
                 Ok(size) => {
@@ -369,6 +381,9 @@ impl Connection {
     }
 
     fn try_send_server(&mut self) {
+        if self.closing {
+            return;
+        }
         loop {
             if !self.server_session.wants_write() {
                 return;
