@@ -191,8 +191,11 @@ impl Connection {
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
         if self.dst_addr.is_none() || self.dst_addr.as_ref().unwrap() != dst_addr {
-            log::warn!("connection:{} target address changed to {}", self.index(), dst_addr);
             self.dst_addr.replace(*dst_addr);
+            log::warn!("connection:{} changed, target address:{},  {} bytes read, {} bytes sent",
+                self.index(), self.dst_addr.as_ref().unwrap(), self.client_recv, self.client_sent);
+            self.client_recv = 0;
+            self.client_sent = 0;
         }
         self.client_sent += payload.len();
         self.recv_buffer.clear();
