@@ -69,7 +69,11 @@ impl Connection {
     }
 
     pub fn timeout(&self, recent_active_time: Instant) -> bool {
-        self.last_active_time < recent_active_time
+        if self.udp_target.is_some() {
+            self.last_active_time < recent_active_time
+        } else {
+            false
+        }
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
