@@ -31,6 +31,7 @@ pub struct UdpServer {
 struct Connection {
     index: usize,
     src_addr: SocketAddr,
+    dst_addr: Option<SocketAddr>,
     server_session: ClientSession,
     server: TcpStream,
     send_buffer: BytesMut,
@@ -145,6 +146,7 @@ impl Connection {
         Connection {
             index,
             src_addr,
+            dst_addr: None,
             server_session: session,
             server: stream,
             send_buffer: BytesMut::new(),
@@ -188,6 +190,10 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
+        if self.dst_addr.is_none() || self.dst_addr.as_ref().unwrap() != dst_addr {
+            log::warn!("connection:{} target address changed to {}", self.index(), dst_addr);
+            self.dst_addr.replace(*dst_addr);
+        }
         self.client_sent += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
@@ -221,7 +227,8 @@ impl Connection {
         let _ = poll.deregister(&self.server);
         let _ = self.server.shutdown(Shutdown::Both);
         self.closed = true;
-        log::warn!("connection:{} closed, {} bytes read, {} bytes sent", self.index(), self.client_recv, self.client_sent);
+        log::warn!("connection:{} closed, target address:{},  {} bytes read, {} bytes sent",
+            self.index(), self.dst_addr.as_ref().unwrap(), self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
