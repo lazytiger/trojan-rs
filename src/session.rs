@@ -17,7 +17,7 @@ impl TcpSession {
     pub fn read_backend<T: Read>(&mut self, reader: &mut T) -> Result<usize> {
         let mut total = 0;
         loop {
-            self.recv_buf.reserve(1024);
+            self.recv_buf.reserve(2048);
             let len = self.recv_buf.remaining();
             let cap = self.recv_buf.capacity();
             unsafe {
@@ -29,6 +29,9 @@ impl TcpSession {
                 Ok(size) => {
                     log::debug!("read {} bytes from backend", size);
                     if size == 0 {
+                        if buffer.len() == 0 {
+                            log::error!("buffer length is zero, something wrong");
+                        }
                         return Err(Error::from(ErrorKind::UnexpectedEof));
                     } else {
                         unsafe {
@@ -45,6 +48,9 @@ impl TcpSession {
                     break;
                 }
                 Err(err) => {
+                    unsafe {
+                        self.recv_buf.set_len(len);
+                    }
                     return Err(err);
                 }
             }
