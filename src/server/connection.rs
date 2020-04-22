@@ -80,13 +80,10 @@ impl Connection {
 
     pub fn close_now(&mut self, poll: &Poll) {
         let secs = self.client_time.elapsed().as_secs();
-        let target_addr = if self.target_addr.is_some() {
-            *self.target_addr.as_ref().unwrap()
-        } else {
-            *self.proxy.peer_addr().as_ref().unwrap()
+        if self.target_addr.is_some() {
+            log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
+                self.index, self.target_addr.as_ref().unwrap(), secs,  self.client_recv, self.client_sent);
         };
-        log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
-            self.index, target_addr, secs,  self.client_recv, self.client_sent);
         self.closed = true;
 
         let _ = poll.deregister(&self.proxy);
@@ -352,6 +349,7 @@ impl Connection {
             Sock5Address::Domain(domain, _) => {
                 if self.command != CONNECT {
                     //udp associate bind at 0.0.0.0:0, ignore all domain
+                    self.target_addr.replace(*opts.empty_addr.as_ref().unwrap());
                     return true;
                 }
                 log::info!("connection:{} has to resolve {}", self.index, domain);
