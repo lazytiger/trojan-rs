@@ -181,7 +181,6 @@ impl Connection {
             match self.proxy_session.write_tls(&mut self.proxy) {
                 Ok(size) => {
                     log::debug!("connection:{} sent {} bytes to proxy", self.index, size);
-                    self.proxy_recv += size;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     log::debug!("connection:{} can't write anymore proxy", self.index);
@@ -228,6 +227,7 @@ impl Connection {
                         self.closing = true;
                         return;
                     }
+                    self.proxy_recv += size;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     break;
@@ -251,7 +251,6 @@ impl Connection {
                         self.closing = true;
                         return;
                     }
-                    self.proxy_sent += size;
                     log::debug!("connection:{} got {} bytes proxy data", self.index, size);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -280,6 +279,7 @@ impl Connection {
         }
 
         if !buffer.is_empty() {
+            self.proxy_sent += buffer.len();
             self.dispatch(buffer.as_slice(), opts, poll);
         }
     }
@@ -319,6 +319,7 @@ impl Connection {
                 self.closing = true;
                 return;
             } else {
+                self.proxy_recv += buffer.len();
                 self.try_send_proxy();
             }
         }
@@ -542,6 +543,7 @@ impl Connection {
                             log::debug!("connection:{} write {} bytes to udp target:{}", self.index, size, packet.address);
                             buffer = &packet.payload[packet.length..];
                             self.target_sent += size;
+                            self.proxy_sent += size;
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                             self.udp_send_buffer.extend_from_slice(buffer);
