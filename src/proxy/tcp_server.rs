@@ -3,6 +3,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
@@ -37,6 +38,7 @@ struct Connection {
     closing: bool,
     client_recv: usize,
     client_sent: usize,
+    client_time: Instant,
 }
 
 impl TcpServer {
@@ -143,6 +145,7 @@ impl Connection {
             client_session: TcpSession::new(),
             client_recv: 0,
             client_sent: 0,
+            client_time: Instant::now(),
         }
     }
 
@@ -215,7 +218,8 @@ impl Connection {
         let _ = self.server.shutdown(Shutdown::Both);
         let _ = self.client.shutdown(Shutdown::Both);
         self.closed = true;
-        log::warn!("connection:{} closed, target address {}, {} byte read, {} byte sent", self.index(), self.dst_addr, self.client_recv, self.client_sent);
+        let secs = self.client_time.elapsed().as_secs();
+        log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {

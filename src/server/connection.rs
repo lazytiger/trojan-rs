@@ -41,6 +41,9 @@ pub struct Connection {
     sock5_addr: Sock5Address,
     command: u8,
     last_active_time: Instant,
+    client_recv: usize,
+    client_sent: usize,
+    client_time: Instant,
 }
 
 impl Connection {
@@ -65,6 +68,9 @@ impl Connection {
             command: 0,
             sock5_addr: Sock5Address::None,
             last_active_time: Instant::now(),
+            client_sent: 0,
+            client_recv: 0,
+            client_time: Instant::now(),
         }
     }
 
@@ -73,7 +79,14 @@ impl Connection {
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
-        log::info!("connection:{} is closing", self.index);
+        let secs = self.client_time.elapsed().as_secs();
+        let target_addr = if self.target_addr.is_some() {
+            *self.target_addr.as_ref().unwrap()
+        } else {
+            *self.proxy.peer_addr().as_ref().unwrap()
+        };
+        log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
+            self.index, target_addr, secs,  self.client_recv, self.client_sent);
         self.closed = true;
 
         let _ = poll.deregister(&self.proxy);

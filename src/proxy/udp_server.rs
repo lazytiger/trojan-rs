@@ -4,6 +4,7 @@ use std::net::Shutdown;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
@@ -41,6 +42,7 @@ struct Connection {
     closed: bool,
     client_recv: usize,
     client_sent: usize,
+    client_time: Instant,
 }
 
 impl UdpServer {
@@ -156,6 +158,7 @@ impl Connection {
             closed: false,
             client_recv: 0,
             client_sent: 0,
+            client_time: Instant::now(),
         }
     }
 
@@ -192,10 +195,12 @@ impl Connection {
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
         if self.dst_addr.is_none() || self.dst_addr.as_ref().unwrap() != dst_addr {
             self.dst_addr.replace(*dst_addr);
-            log::warn!("connection:{} changed, target address:{},  {} bytes read, {} bytes sent",
-                self.index(), self.dst_addr.as_ref().unwrap(), self.client_recv, self.client_sent);
+            let secs = self.client_time.elapsed().as_secs();
+            log::warn!("connection:{} changed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
+                self.index(), self.dst_addr.as_ref().unwrap(), secs, self.client_recv, self.client_sent);
             self.client_recv = 0;
             self.client_sent = 0;
+            self.client_time = Instant::now();
         }
         self.client_sent += payload.len();
         self.recv_buffer.clear();
@@ -230,8 +235,9 @@ impl Connection {
         let _ = poll.deregister(&self.server);
         let _ = self.server.shutdown(Shutdown::Both);
         self.closed = true;
-        log::warn!("connection:{} closed, target address:{},  {} bytes read, {} bytes sent",
-            self.index(), self.dst_addr.as_ref().unwrap(), self.client_recv, self.client_sent);
+        let secs = self.client_time.elapsed().as_secs();
+        log::warn!("connection:{} closed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
+            self.index(), self.dst_addr.as_ref().unwrap(), secs, self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
