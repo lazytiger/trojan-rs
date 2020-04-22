@@ -150,9 +150,6 @@ impl Connection {
     }
 
     fn try_resolve(&mut self, opts: &mut Opts, poll: &Poll) {
-        if self.closing {
-            return;
-        }
         if let Sock5Address::Domain(domain, port) = &self.sock5_addr {
             if let Some(address) = self.resolver.as_ref().unwrap().address() {
                 log::info!("connection:{} got resolve result {} = {}", self.index, domain, address);
@@ -172,9 +169,6 @@ impl Connection {
     }
 
     fn try_send_proxy(&mut self) {
-        if self.closing {
-            return;
-        }
         loop {
             if !self.proxy_session.wants_write() {
                 log::debug!("connection:{} finished proxy write", self.index);
@@ -198,9 +192,6 @@ impl Connection {
     }
 
     fn try_send_tcp_target(&mut self) {
-        if self.closing {
-            return;
-        }
         match self.target_session.write_backend(self.tcp_target.as_mut().unwrap()) {
             Err(err) => {
                 log::warn!("connection:{} write to target failed:{}", self.index, err);
@@ -214,9 +205,6 @@ impl Connection {
     }
 
     fn try_read_udp_target(&mut self) {
-        if self.closing {
-            return;
-        }
         let udp_socket = self.udp_target.as_ref().unwrap();
         loop {
             match udp_socket.recv_from(self.udp_recv_body.as_mut_slice()) {
@@ -250,9 +238,6 @@ impl Connection {
     }
 
     fn try_read_proxy(&mut self, opts: &mut Opts, poll: &Poll) {
-        if self.closing {
-            return;
-        }
         loop {
             match self.proxy_session.read_tls(&mut self.proxy) {
                 Ok(size) => {
@@ -309,9 +294,6 @@ impl Connection {
     }
 
     fn try_read_tcp_target(&mut self) {
-        if self.closing {
-            return;
-        }
         match self.target_session.read_backend(self.tcp_target.as_mut().unwrap()) {
             Err(err) => {
                 log::warn!("connection:{} read from target failed:{}", self.index, err);
@@ -520,9 +502,6 @@ impl Connection {
     }
 
     fn try_send_udp_target(&mut self, buffer: &[u8], opts: &mut Opts) {
-        if self.closing {
-            return;
-        }
         if self.udp_send_buffer.is_empty() {
             self.do_send_udp_target(buffer, opts);
         } else {
