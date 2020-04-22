@@ -279,7 +279,6 @@ impl Connection {
         }
 
         if !buffer.is_empty() {
-            self.proxy_sent += buffer.len();
             self.dispatch(buffer.as_slice(), opts, poll);
         }
     }
@@ -405,6 +404,7 @@ impl Connection {
                     }
                 }
                 Status::TCPForward => {
+                    self.proxy_sent += buffer.len();
                     self.do_send_tcp_target(buffer);
                     break;
                 }
@@ -522,6 +522,7 @@ impl Connection {
         loop {
             match UdpAssociate::parse(buffer, opts) {
                 UdpParseResult::Packet(packet) => {
+                    self.proxy_sent += packet.length;
                     if self.target_addr.is_none() {
                         self.target_addr.replace(packet.address);
                     } else if self.target_addr.as_ref().unwrap() != &packet.address {
@@ -543,7 +544,6 @@ impl Connection {
                             log::debug!("connection:{} write {} bytes to udp target:{}", self.index, size, packet.address);
                             buffer = &packet.payload[packet.length..];
                             self.target_sent += size;
-                            self.proxy_sent += size;
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                             self.udp_send_buffer.extend_from_slice(buffer);
