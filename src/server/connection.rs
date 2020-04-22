@@ -186,6 +186,7 @@ impl Connection {
             match self.proxy_session.write_tls(&mut self.proxy) {
                 Ok(size) => {
                     log::debug!("connection:{} sent {} bytes to proxy", self.index, size);
+                    self.client_sent += size;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     log::debug!("connection:{} can't write anymore proxy", self.index);
@@ -262,6 +263,7 @@ impl Connection {
                         self.closing = true;
                         return;
                     }
+                    self.client_recv += size;
                     log::debug!("connection:{} got {} bytes proxy data", self.index, size);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
