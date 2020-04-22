@@ -257,7 +257,7 @@ impl Connection {
             match self.proxy_session.read_tls(&mut self.proxy) {
                 Ok(size) => {
                     if size == 0 {
-                        log::info!("connection:{} encounter eof from proxy", self.index);
+                        log::warn!("connection:{} encounter eof from proxy", self.index);
                         self.closing = true;
                         return;
                     }
@@ -268,7 +268,7 @@ impl Connection {
                     break;
                 }
                 Err(err) => {
-                    log::debug!("connection:{} got proxy read error:{}", self.index, err);
+                    log::warn!("connection:{} got proxy read error:{}", self.index, err);
                     self.closing = true;
                     return;
                 }
