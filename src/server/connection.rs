@@ -350,7 +350,6 @@ impl Connection {
             Sock5Address::Domain(domain, _) => {
                 if self.command != CONNECT {
                     //udp associate bind at 0.0.0.0:0, ignore all domain
-                    self.target_addr.replace(*opts.empty_addr.as_ref().unwrap());
                     return true;
                 }
                 log::info!("connection:{} has to resolve {}", self.index, domain);
@@ -537,7 +536,9 @@ impl Connection {
         loop {
             match UdpAssociate::parse(buffer, opts) {
                 UdpParseResult::Packet(packet) => {
-                    if self.target_addr.is_none() || self.target_addr.as_ref().unwrap() != &packet.address {
+                    if self.target_addr.is_none() {
+                        self.target_addr.replace(packet.address);
+                    } else if self.target_addr.as_ref().unwrap() != &packet.address {
                         let secs = self.target_time.elapsed().as_secs();
                         log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
                             self.index, self.target_addr.as_ref().unwrap(), secs,  self.target_recv, self.target_sent);

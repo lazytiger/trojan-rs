@@ -193,7 +193,9 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
-        if self.dst_addr.is_none() || self.dst_addr.as_ref().unwrap() != dst_addr {
+        if self.dst_addr.is_none() {
+            self.dst_addr.replace(*dst_addr);
+        } else if self.dst_addr.as_ref().unwrap() != dst_addr {
             self.dst_addr.replace(*dst_addr);
             let secs = self.client_time.elapsed().as_secs();
             log::warn!("connection:{} changed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
