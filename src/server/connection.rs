@@ -41,9 +41,9 @@ pub struct Connection {
     sock5_addr: Sock5Address,
     command: u8,
     last_active_time: Instant,
-    client_recv: usize,
-    client_sent: usize,
-    client_time: Instant,
+    target_recv: usize,
+    target_sent: usize,
+    target_time: Instant,
 }
 
 impl Connection {
@@ -68,9 +68,9 @@ impl Connection {
             command: 0,
             sock5_addr: Sock5Address::None,
             last_active_time: Instant::now(),
-            client_sent: 0,
-            client_recv: 0,
-            client_time: Instant::now(),
+            target_sent: 0,
+            target_recv: 0,
+            target_time: Instant::now(),
         }
     }
 
@@ -79,10 +79,10 @@ impl Connection {
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
-        let secs = self.client_time.elapsed().as_secs();
+        let secs = self.target_time.elapsed().as_secs();
         if self.target_addr.is_some() {
             log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
-                self.index, self.target_addr.as_ref().unwrap(), secs,  self.client_recv, self.client_sent);
+                self.index, self.target_addr.as_ref().unwrap(), secs,  self.target_recv, self.target_sent);
         };
         self.closed = true;
 
@@ -183,7 +183,6 @@ impl Connection {
             match self.proxy_session.write_tls(&mut self.proxy) {
                 Ok(size) => {
                     log::debug!("connection:{} sent {} bytes to proxy", self.index, size);
-                    self.client_sent += size;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     log::debug!("connection:{} can't write anymore proxy", self.index);
@@ -209,6 +208,7 @@ impl Connection {
             }
             Ok(size) => {
                 log::debug!("connection:{} write {} bytes to target", self.index, size);
+                self.target_sent += size;
             }
         }
     }
@@ -221,6 +221,7 @@ impl Connection {
         loop {
             match udp_socket.recv_from(self.udp_recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
+                    self.target_recv += size;
                     log::debug!("connection:{} got {} bytes udp data from:{}", self.index, size, addr);
                     self.udp_recv_head.clear();
                     UdpAssociate::generate(&mut self.udp_recv_head, &addr, size as u16);
@@ -260,7 +261,6 @@ impl Connection {
                         self.closing = true;
                         return;
                     }
-                    self.client_recv += size;
                     log::debug!("connection:{} got {} bytes proxy data", self.index, size);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -320,6 +320,7 @@ impl Connection {
             }
             Ok(size) => {
                 log::debug!("connection:{} read {} bytes from target", self.index, size);
+                self.target_recv += size;
             }
         }
 
@@ -536,6 +537,15 @@ impl Connection {
         loop {
             match UdpAssociate::parse(buffer, opts) {
                 UdpParseResult::Packet(packet) => {
+                    if self.target_addr.is_none() || self.target_addr.as_ref().unwrap() != &packet.address {
+                        let secs = self.target_time.elapsed().as_secs();
+                        log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
+                            self.index, self.target_addr.as_ref().unwrap(), secs,  self.target_recv, self.target_sent);
+                        self.target_addr.replace(packet.address);
+                        self.target_time = Instant::now();
+                        self.target_sent = 0;
+                        self.target_recv = 0;
+                    }
                     match self.udp_target.as_ref().unwrap().send_to(&packet.payload[..packet.length], &packet.address) {
                         Ok(size) => {
                             if size != packet.length {
@@ -545,6 +555,7 @@ impl Connection {
                             }
                             log::debug!("connection:{} write {} bytes to udp target:{}", self.index, size, packet.address);
                             buffer = &packet.payload[packet.length..];
+                            self.target_sent += size;
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                             self.udp_send_buffer.extend_from_slice(buffer);
