@@ -66,7 +66,7 @@ impl Connection {
             proxy_readiness: Ready::readable(),
             target_readiness: Ready::readable(),
             status: Status::HandShake,
-            target_session: TcpSession::new(),
+            target_session: TcpSession::new(index),
             command: 0,
             sock5_addr: Sock5Address::None,
             last_active_time: Instant::now(),
@@ -230,6 +230,7 @@ impl Connection {
                     self.proxy_recv += size;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    log::debug!("connection:{} write to session blocked", self.index);
                     break;
                 }
                 Err(err) => {
@@ -546,6 +547,7 @@ impl Connection {
                             self.target_sent += size;
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            log::debug!("connection:{} write to udp target blocked", self.index);
                             self.udp_send_buffer.extend_from_slice(buffer);
                             break;
                         }
@@ -562,6 +564,7 @@ impl Connection {
                     return;
                 }
                 UdpParseResult::Continued => {
+                    log::trace!("connection:{} got partial request", self.index);
                     self.udp_send_buffer.extend_from_slice(buffer);
                     break;
                 }

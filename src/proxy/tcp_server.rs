@@ -142,7 +142,7 @@ impl Connection {
             server_readiness: Ready::readable() | Ready::writable(),
             closed: false,
             closing: false,
-            client_session: TcpSession::new(),
+            client_session: TcpSession::new(index),
             client_recv: 0,
             client_sent: 0,
             client_time: Instant::now(),

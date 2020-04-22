@@ -5,13 +5,15 @@ use bytes::{Buf, BytesMut};
 pub struct TcpSession {
     pub recv_buf: BytesMut,
     pub send_buf: BytesMut,
+    pub index: usize,
 }
 
 impl TcpSession {
-    pub fn new() -> TcpSession {
+    pub fn new(index: usize) -> TcpSession {
         TcpSession {
             recv_buf: BytesMut::new(),
             send_buf: BytesMut::new(),
+            index,
         }
     }
     pub fn read_backend<T: Read>(&mut self, reader: &mut T) -> Result<usize> {
@@ -24,13 +26,13 @@ impl TcpSession {
                 self.recv_buf.set_len(cap);
             }
             let buffer = &mut self.recv_buf.as_mut()[len..];
-            log::debug!("read from backend, len:{}, cap:{}, buffer:{}", len, cap, buffer.len());
+            log::debug!("connection:{} read from backend, len:{}, cap:{}, buffer:{}", self.index, len, cap, buffer.len());
             match reader.read(buffer) {
                 Ok(size) => {
-                    log::debug!("read {} bytes from backend", size);
+                    log::debug!("connection:{} read {} bytes from backend", self.index, size);
                     if size == 0 {
                         if buffer.len() == 0 {
-                            log::error!("buffer length is zero, something wrong");
+                            log::error!("connection:{} buffer length is zero, something wrong", self.index);
                         }
                         return Err(Error::from(ErrorKind::UnexpectedEof));
                     } else {
@@ -44,7 +46,7 @@ impl TcpSession {
                     unsafe {
                         self.recv_buf.set_len(len);
                     }
-                    log::debug!("read from backend blocked");
+                    log::debug!("connection:{} read from backend blocked", self.index);
                     break;
                 }
                 Err(err) => {
@@ -68,10 +70,10 @@ impl TcpSession {
                 Ok(size) => {
                     self.send_buf.advance(size);
                     len += size;
-                    log::debug!("session write {} byte to backend", size);
+                    log::debug!("connection:{} session write {} byte to backend", self.index, size);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    log::debug!("session write blocked, remaining:{}", self.send_buf.len());
+                    log::debug!("connection:{} session write blocked, remaining:{}", self.index, self.send_buf.len());
                     break;
                 }
                 Err(err) => {
