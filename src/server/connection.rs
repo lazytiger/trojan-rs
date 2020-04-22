@@ -41,6 +41,8 @@ pub struct Connection {
     sock5_addr: Sock5Address,
     command: u8,
     last_active_time: Instant,
+    proxy_recv: usize,
+    proxy_sent: usize,
     target_recv: usize,
     target_sent: usize,
     target_time: Instant,
@@ -68,6 +70,8 @@ impl Connection {
             command: 0,
             sock5_addr: Sock5Address::None,
             last_active_time: Instant::now(),
+            proxy_recv: 0,
+            proxy_sent: 0,
             target_sent: 0,
             target_recv: 0,
             target_time: Instant::now(),
@@ -81,8 +85,8 @@ impl Connection {
     pub fn close_now(&mut self, poll: &Poll) {
         let secs = self.target_time.elapsed().as_secs();
         if self.target_addr.is_some() {
-            log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
-                self.index, self.target_addr.as_ref().unwrap(), secs,  self.target_recv, self.target_sent);
+            log::warn!("connection:{} closed, target address {}, {} seconds, proxy {} bytes read, {} bytes sent,  target {} bytes read, {} bytes sent",
+                self.index, self.target_addr.as_ref().unwrap(), secs, self.proxy_recv, self.proxy_sent, self.target_recv, self.target_sent);
         };
         self.closed = true;
 
@@ -177,6 +181,7 @@ impl Connection {
             match self.proxy_session.write_tls(&mut self.proxy) {
                 Ok(size) => {
                     log::debug!("connection:{} sent {} bytes to proxy", self.index, size);
+                    self.proxy_recv += size;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     log::debug!("connection:{} can't write anymore proxy", self.index);
@@ -246,6 +251,7 @@ impl Connection {
                         self.closing = true;
                         return;
                     }
+                    self.proxy_sent += size;
                     log::debug!("connection:{} got {} bytes proxy data", self.index, size);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -519,8 +525,8 @@ impl Connection {
                         self.target_addr.replace(packet.address);
                     } else if self.target_addr.as_ref().unwrap() != &packet.address {
                         let secs = self.target_time.elapsed().as_secs();
-                        log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent",
-                            self.index, self.target_addr.as_ref().unwrap(), secs,  self.target_recv, self.target_sent);
+                        log::warn!("connection:{} changed, target address {}, {} seconds, proxy {} bytes read, {} bytes sent, target {} bytes read, {} bytes sent",
+                            self.index, self.target_addr.as_ref().unwrap(), secs, self.proxy_recv, self.proxy_sent, self.target_recv, self.target_sent);
                         self.target_addr.replace(packet.address);
                         self.target_time = Instant::now();
                         self.target_sent = 0;

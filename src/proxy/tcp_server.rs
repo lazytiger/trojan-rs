@@ -219,7 +219,7 @@ impl Connection {
         let _ = self.client.shutdown(Shutdown::Both);
         self.closed = true;
         let secs = self.client_time.elapsed().as_secs();
-        log::warn!("connection:{} closed, target address {}, {} seconds,  {} byte read, {} byte sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
+        log::warn!("connection:{} closed, target address {}, {} seconds,  {} bytes read, {} bytes sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
