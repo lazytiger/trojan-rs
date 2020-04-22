@@ -247,7 +247,7 @@ impl Connection {
             return;
         }
         let mut changed = false;
-        if self.server_session.wants_write() && !self.server_readiness.is_writable() {
+        if self.server_session.wants_write() {
             self.server_readiness.insert(Ready::writable());
             changed = true;
         }
