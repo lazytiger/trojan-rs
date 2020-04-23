@@ -295,12 +295,18 @@ impl Connection {
                 log::error!("connection:{} write to client session failed:{}", self.index(), err);
                 self.closing = true;
                 return;
-            } else if let Err(err) = self.client_session.write_backend(&mut self.client) {
-                log::warn!("connection:{} write to client failed:{}", self.index(), err);
-                self.closing = true;
-                return;
             } else {
-                log::info!("connection:{} write to client done", self.index());
+                match self.client_session.write_backend(&mut self.client) {
+                    Err(err) => {
+                        log::warn!("connection:{} write to client failed:{}", self.index(), err);
+                        self.closing = true;
+                        return;
+                    }
+                    Ok(size) => {
+                        log::info!("connection:{} write {} bytes to client done", self.index(), size);
+                        self.client_recv += size;
+                    }
+                }
             }
         } else {
             self.do_send_client(buffer);
