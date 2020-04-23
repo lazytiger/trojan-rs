@@ -325,7 +325,6 @@ impl Connection {
         }
 
         if !buffer.is_empty() {
-            self.client_recv += buffer.len();
             self.try_send_client(buffer.as_slice(), opts, udp_cache);
         }
     }
@@ -348,6 +347,7 @@ impl Connection {
                     break;
                 }
                 UdpParseResult::Packet(packet) => {
+                    self.client_recv += packet.length;
                     let payload = &packet.payload[..packet.length];
                     udp_cache.send_to(self.src_addr, packet.address, payload);
                     buffer = &packet.payload[packet.length..];
