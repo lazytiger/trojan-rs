@@ -321,7 +321,7 @@ impl Connection {
             match self.client.write(buffer) {
                 Ok(size) => {
                     buffer = &buffer[size..];
-                    self.client_recv += buffer.len();
+                    self.client_recv += size;
                     log::info!("connection:{} send {} bytes to client", self.index(), size);
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
