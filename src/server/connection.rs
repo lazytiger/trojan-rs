@@ -525,7 +525,6 @@ impl Connection {
         loop {
             match UdpAssociate::parse(buffer, opts) {
                 UdpParseResult::Packet(packet) => {
-                    self.proxy_sent += packet.length;
                     if self.target_addr.is_none() {
                         self.target_addr.replace(packet.address);
                     } else if self.target_addr.as_ref().unwrap() != &packet.address {
@@ -536,7 +535,10 @@ impl Connection {
                         self.target_time = Instant::now();
                         self.target_sent = 0;
                         self.target_recv = 0;
+                        self.proxy_sent = 0;
+                        self.proxy_recv = 0;
                     }
+                    self.proxy_sent += packet.length;
                     match self.udp_target.as_ref().unwrap().send_to(&packet.payload[..packet.length], &packet.address) {
                         Ok(size) => {
                             if size != packet.length {
