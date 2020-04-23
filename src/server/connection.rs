@@ -382,6 +382,7 @@ impl Connection {
                                 log::error!("connection:{} write to target session failed:{}", self.index, err);
                                 return;
                             } else {
+                                self.proxy_sent += buffer.len();
                                 buffer = &[];
                             }
                         }
@@ -489,6 +490,7 @@ impl Connection {
             }
             match conn.write(buffer) {
                 Ok(size) => {
+                    self.target_sent += size;
                     buffer = &buffer[size..];
                     log::debug!("connection:{} send {} bytes data to target", self.index, size);
                 }
