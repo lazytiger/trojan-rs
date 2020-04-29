@@ -581,7 +581,7 @@ impl Connection {
             return;
         }
         let mut changed = false;
-        if self.proxy_session.wants_write() {
+        if self.proxy_session.wants_write() && !self.proxy_readiness.is_writable() {
             self.proxy_readiness.insert(Ready::writable());
             changed = true;
             log::info!("connection:{} add writable to proxy", self.index)

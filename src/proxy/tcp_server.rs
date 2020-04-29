@@ -227,7 +227,7 @@ impl Connection {
             return;
         }
         let mut changed = false;
-        if self.client_session.wants_write() {
+        if self.client_session.wants_write() && !self.client_readiness.is_writable() {
             self.client_readiness.insert(Ready::writable());
             changed = true;
         }
@@ -245,7 +245,7 @@ impl Connection {
         }
 
         changed = false;
-        if self.server_session.wants_write() && self.client_sent > 0 {
+        if self.server_session.wants_write() && self.client_sent > 0 && !self.server_readiness.is_writable() {
             self.server_readiness.insert(Ready::writable());
             changed = true;
         }
