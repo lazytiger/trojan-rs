@@ -22,21 +22,53 @@ impl UdpSvrCache {
         }
     }
 
-    pub fn send_to(&mut self, src_addr: SocketAddr, dst_addr: SocketAddr, payload: &[u8]) {
+    pub fn send_to(&mut self, src_addr: SocketAddr, dst_addr: SocketAddr, mut payload: &[u8]) {
         let last_active_time = Instant::now();
         if !self.conns.contains_key(&dst_addr) {
             log::info!("socket:{} not found, create a new one", dst_addr);
             let socket = new_socket(dst_addr, true);
             let socket = UdpSocket::from_socket(socket.into_udp_socket()).unwrap();
-            self.conns.insert(dst_addr, CacheEntry { socket, last_active_time });
+            self.conns.insert(
+                dst_addr,
+                CacheEntry {
+                    socket,
+                    last_active_time,
+                },
+            );
         }
 
-        log::info!("socket is ready, sending {} bytes from {} to {}", payload.len(), dst_addr, src_addr);
+        log::info!(
+            "socket is ready, sending {} bytes from {} to {}",
+            payload.len(),
+            dst_addr,
+            src_addr
+        );
         let entry = self.conns.get_mut(&dst_addr).unwrap();
         entry.last_active_time = last_active_time;
-        if let Err(err) = entry.socket.send_to(payload, &src_addr) {
-            log::error!("send udp data from {} to {} failed {}", dst_addr, src_addr, err);
-            return;
+        loop {
+            match entry.socket.send_to(payload, &src_addr) {
+                Ok(size) => {
+                    log::debug!(
+                        "send {} bytes upd data from {} to {}",
+                        size,
+                        dst_addr,
+                        src_addr
+                    );
+                    if size == payload.len() {
+                        break;
+                    }
+                    payload = &payload[size..];
+                }
+                Err(err) => {
+                    log::error!(
+                        "send udp data from {} to {} failed {}",
+                        dst_addr,
+                        src_addr,
+                        err
+                    );
+                    return;
+                }
+            }
         }
     }
 
