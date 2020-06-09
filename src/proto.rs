@@ -6,7 +6,7 @@ use crate::config::Opts;
 
 pub const CONNECT: u8 = 0x01;
 pub const UDP_ASSOCIATE: u8 = 0x03;
-pub const MAX_UDP_SIZE: usize = 8192;
+pub const MAX_UDP_SIZE: usize = 65536;
 const IPV4: u8 = 0x01;
 const DOMAIN: u8 = 0x03;
 const IPV6: u8 = 0x04;
@@ -26,7 +26,10 @@ pub struct TrojanRequest<'a> {
 impl<'a> TrojanRequest<'a> {
     pub fn parse(mut buffer: &'a [u8], opts: &mut Opts) -> Option<TrojanRequest<'a>> {
         if buffer.len() < opts.pass_len {
-            log::debug!("data length:{} is too short for a trojan request", buffer.len());
+            log::debug!(
+                "data length:{} is too short for a trojan request",
+                buffer.len()
+            );
             return None;
         }
 
@@ -40,7 +43,11 @@ impl<'a> TrojanRequest<'a> {
 
         buffer = &buffer[opts.pass_len..];
         if buffer.len() < 2 || buffer[0] != b'\r' || buffer[1] != b'\n' {
-            log::error!("unknown protocol, expected CRLF, {:#X}{:#X}", buffer[0], buffer[1]);
+            log::error!(
+                "unknown protocol, expected CRLF, {:#X}{:#X}",
+                buffer[0],
+                buffer[1]
+            );
             return None;
         }
 
@@ -50,7 +57,10 @@ impl<'a> TrojanRequest<'a> {
             return None;
         }
         if buffer[0] != CONNECT && buffer[0] != UDP_ASSOCIATE {
-            log::error!("unknown protocol, expected valid command, found:{}", buffer[0]);
+            log::error!(
+                "unknown protocol, expected valid command, found:{}",
+                buffer[0]
+            );
             return None;
         }
 
@@ -93,7 +103,10 @@ fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Soc
                 return None;
             }
             let port = to_u16(&buffer[4..]);
-            let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(buffer[0], buffer[1], buffer[2], buffer[3]), port));
+            let addr = SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::new(buffer[0], buffer[1], buffer[2], buffer[3]),
+                port,
+            ));
             Some((6, Sock5Address::Socket(addr)))
         }
         DOMAIN => {
@@ -120,16 +133,21 @@ fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Soc
                 log::error!("unknown protocol, invalid ipv6 address");
                 return None;
             }
-            let addr = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::new(
-                to_u16(buffer),
-                to_u16(&buffer[2..]),
-                to_u16(&buffer[4..]),
-                to_u16(&buffer[6..]),
-                to_u16(&buffer[8..]),
-                to_u16(&buffer[10..]),
-                to_u16(&buffer[12..]),
-                to_u16(&buffer[14..]),
-            ), to_u16(&buffer[16..]), 0, 0));
+            let addr = SocketAddr::V6(SocketAddrV6::new(
+                Ipv6Addr::new(
+                    to_u16(buffer),
+                    to_u16(&buffer[2..]),
+                    to_u16(&buffer[4..]),
+                    to_u16(&buffer[6..]),
+                    to_u16(&buffer[8..]),
+                    to_u16(&buffer[10..]),
+                    to_u16(&buffer[12..]),
+                    to_u16(&buffer[14..]),
+                ),
+                to_u16(&buffer[16..]),
+                0,
+                0,
+            ));
             Some((18, Sock5Address::Socket(addr)))
         }
         _ => {
@@ -177,13 +195,11 @@ impl<'a> UdpAssociate<'a> {
                 return UdpParseResult::InvalidProtocol;
             }
             match addr {
-                Sock5Address::Socket(address) => {
-                    UdpParseResult::Packet(UdpAssociate {
-                        address,
-                        length,
-                        payload: &buffer[4..],
-                    })
-                }
+                Sock5Address::Socket(address) => UdpParseResult::Packet(UdpAssociate {
+                    address,
+                    length,
+                    payload: &buffer[4..],
+                }),
                 _ => {
                     log::warn!("udp packet only accept ip address");
                     UdpParseResult::InvalidProtocol
