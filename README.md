@@ -80,7 +80,7 @@ OPTIONS:
 ## IPTABLES settings.
 
 A workable example as follows.
-lanlist and byplist is ipset which you can create by ipset command.
+lanlist and byplist are ipsets which you can create by ipset command.
 
 > IMPORTANT your trojan server IP should be included in byplist or lanlist, otherwise, route loop should occur. 
 
