@@ -19,7 +19,7 @@ pub struct Opts {
     pub mode: Mode,
     #[clap(short, long, help = "log file path")]
     pub log_file: Option<String>,
-    #[clap(short = "a", long, help = "listen address for server")]
+    #[clap(short = "a", long, help = "listen address for server, format like 0.0.0.0:443")]
     pub local_addr: String,
     #[clap(short, long, help = "passwords for negotiation")]
     password: String,
