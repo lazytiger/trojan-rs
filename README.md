@@ -30,7 +30,7 @@ FLAGS:
 
 OPTIONS:
     -i, --idle-timeout <idle-timeout>    time in seconds before closing an inactive connection [default: 120]
-    -a, --local-addr <local-addr>        listen address for server
+    -a, --local-addr <local-addr>        listen address for server, format like 0.0.0.0:443
     -l, --log-file <log-file>            log file path
     -L, --log-level <log-level>          log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5
                                          for off [default: 2]
