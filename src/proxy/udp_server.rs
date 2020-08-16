@@ -124,7 +124,7 @@ impl UdpServer {
         }
     }
 
-    fn alloc_conn(&mut self, opts:&mut Opts, poll:&Poll) {
+    fn alloc_conn(&mut self, opts: &mut Opts, poll: &Poll) {
         for _i in 0..opts.proxy_args().pool_size {
             if let Some(mut conn) = self.new_conn(opts) {
                 conn.setup(opts, poll, None);
@@ -133,7 +133,7 @@ impl UdpServer {
         }
     }
 
-    fn new_conn(&mut self, opts:&mut Opts) ->Option<Connection> {
+    fn new_conn(&mut self, opts: &mut Opts) -> Option<Connection> {
         let server = match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
             Ok(server) => {
                 if let Err(err) = sys::set_mark(&server, opts.marker) {
@@ -161,14 +161,14 @@ impl UdpServer {
         }
     }
 
-    fn get_conn(&mut self, opts: &mut Opts, poll:&Poll) -> Option<Connection> {
+    fn get_conn(&mut self, opts: &mut Opts, poll: &Poll) -> Option<Connection> {
         if opts.proxy_args().pool_size == 0 {
             self.new_conn(opts)
         } else {
             if self.pool.is_empty() {
                 self.alloc_conn(opts, poll);
             }
-            if self.pool.is_empty(){
+            if self.pool.is_empty() {
                 None
             } else {
                 let key = *self.pool.keys().nth(0).unwrap();
@@ -214,8 +214,11 @@ impl Connection {
         token.0 / 3
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll, src_addr:Option<SocketAddr>) -> bool {
-        if src_addr.is_some() {
+    fn setup(&mut self, opts: &mut Opts, poll: &Poll, src_addr: Option<SocketAddr>) -> bool {
+        if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
+            log::warn!("connection:{} register failed:{}", self.index(), err);
+            false
+        } else if src_addr.is_some() {
             self.recv_buffer.clear();
             TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
             self.src_addr = src_addr;
@@ -226,12 +229,7 @@ impl Connection {
                 true
             }
         } else {
-            if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-                log::warn!("connection:{} register failed:{}", self.index(), err);
-                false
-            } else {
-                true
-            }
+            true
         }
     }
 
