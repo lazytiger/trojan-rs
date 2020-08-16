@@ -70,7 +70,7 @@ impl TcpServer {
                         Ok(dst_addr) => {
                             log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
                             if let Some(mut conn) = self.get_conn(opts, poll) {
-                                if conn.setup(opts, poll, Some(dst_addr)) {
+                                if conn.setup(opts, poll, Some(dst_addr), Some(client)) {
                                     self.conns.insert(conn.index(), conn);
                                 } else {
                                     continue;
@@ -96,16 +96,16 @@ impl TcpServer {
         }
     }
 
-    fn alloc_conn(&mut self, opts:&mut Opts, poll:&Poll) {
+    fn alloc_conn(&mut self, opts: &mut Opts, poll: &Poll) {
         for _i in 0..opts.proxy_args().pool_size {
             if let Some(mut conn) = self.new_conn(opts) {
-                conn.setup(opts, poll, None);
+                conn.setup(opts, poll, None, None);
                 self.pool.insert(conn.index(), conn);
             }
         }
     }
 
-    fn new_conn(&mut self, opts:&mut Opts) ->Option<Connection> {
+    fn new_conn(&mut self, opts: &mut Opts) -> Option<Connection> {
         let server = match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
             Ok(server) => {
                 if let Err(err) = sys::set_mark(&server, opts.marker) {
@@ -133,14 +133,14 @@ impl TcpServer {
         }
     }
 
-    fn get_conn(&mut self, opts: &mut Opts, poll:&Poll) -> Option<Connection> {
+    fn get_conn(&mut self, opts: &mut Opts, poll: &Poll) -> Option<Connection> {
         if opts.proxy_args().pool_size == 0 {
             self.new_conn(opts)
         } else {
             if self.pool.is_empty() {
                 self.alloc_conn(opts, poll);
             }
-            if self.pool.is_empty(){
+            if self.pool.is_empty() {
                 None
             } else {
                 let key = *self.pool.keys().nth(0).unwrap();
@@ -183,7 +183,7 @@ impl Connection {
             client: None,
             server,
             server_session: session,
-            client_readiness: Ready::readable(),
+            client_readiness: Ready::empty(),
             server_readiness: Ready::readable() | Ready::writable(),
             closed: false,
             closing: false,
@@ -198,27 +198,29 @@ impl Connection {
         self.closed
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll, dst_addr: Option<SocketAddr>) -> bool {
-        let mut request = BytesMut::new();
+    fn setup(&mut self, opts: &mut Opts, poll: &Poll, dst_addr: Option<SocketAddr>, client: Option<TcpStream>) -> bool {
         if dst_addr.is_some() {
+            let mut request = BytesMut::new();
             self.dst_addr = dst_addr;
+            self.client = client;
+            self.client_readiness = Ready::readable();
             TrojanRequest::generate(&mut request, CONNECT, self.dst_addr.as_ref().unwrap(), opts);
-        }
-        if let Err(err) = self.server_session.write_all(request.as_ref()) {
-            log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
-            false
-        } else if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-            log::warn!("connection:{} register server failed:{}", self.index(), err);
-            false
-        } else if let Some(ref client) = self.client {
-            if let Err(err) = poll.register(client, self.client_token(), self.client_readiness, PollOpt::edge()) {
+            if let Err(err) = self.server_session.write_all(request.as_ref()) {
+                log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
+                false
+            } else if let Err(err) = poll.register(self.client.as_ref().unwrap(), self.client_token(), self.client_readiness, PollOpt::edge()) {
                 log::warn!("connection:{} register client failed:{}", self.index(), err);
                 false
             } else {
                 true
             }
         } else {
-            true
+            if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
+                log::warn!("connection:{} register server failed:{}", self.index(), err);
+                false
+            } else {
+                true
+            }
         }
     }
 

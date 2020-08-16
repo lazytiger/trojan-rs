@@ -215,19 +215,23 @@ impl Connection {
     }
 
     fn setup(&mut self, opts: &mut Opts, poll: &Poll, src_addr:Option<SocketAddr>) -> bool {
-        self.recv_buffer.clear();
         if src_addr.is_some() {
+            self.recv_buffer.clear();
             TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
             self.src_addr = src_addr;
-        }
-        if let Err(err) = self.server_session.write_all(self.recv_buffer.as_ref()) {
-            log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
-            false
-        } else if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-            log::warn!("connection:{} register failed:{}", self.index(), err);
-            false
+            if let Err(err) = self.server_session.write_all(self.recv_buffer.as_ref()) {
+                log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
+                false
+            } else {
+                true
+            }
         } else {
-            true
+            if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
+                log::warn!("connection:{} register failed:{}", self.index(), err);
+                false
+            } else {
+                true
+            }
         }
     }
 
