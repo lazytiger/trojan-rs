@@ -97,7 +97,8 @@ impl TcpServer {
     }
 
     fn alloc_conn(&mut self, opts: &mut Opts, poll: &Poll) {
-        for _i in 0..opts.proxy_args().pool_size {
+        let size = self.pool.len();
+        for _i in size..opts.proxy_args().pool_size {
             if let Some(conn) = self.new_conn(opts, poll) {
                 self.pool.insert(conn.index(), conn);
             }
@@ -137,9 +138,7 @@ impl TcpServer {
         if opts.proxy_args().pool_size == 0 {
             self.new_conn(opts, poll)
         } else {
-            if self.pool.is_empty() {
-                self.alloc_conn(opts, poll);
-            }
+            self.alloc_conn(opts, poll);
             if self.pool.is_empty() {
                 None
             } else {
