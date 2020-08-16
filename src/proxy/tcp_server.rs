@@ -199,7 +199,10 @@ impl Connection {
     }
 
     fn setup(&mut self, opts: &mut Opts, poll: &Poll, dst_addr: Option<SocketAddr>, client: Option<TcpStream>) -> bool {
-        if dst_addr.is_some() {
+        if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
+            log::warn!("connection:{} register server failed:{}", self.index(), err);
+            false
+        } else if dst_addr.is_some() {
             let mut request = BytesMut::new();
             self.dst_addr = dst_addr;
             self.client = client;
@@ -215,12 +218,7 @@ impl Connection {
                 true
             }
         } else {
-            if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-                log::warn!("connection:{} register server failed:{}", self.index(), err);
-                false
-            } else {
-                true
-            }
+           true
         }
     }
 
