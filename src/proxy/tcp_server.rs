@@ -20,6 +20,7 @@ use crate::sys;
 pub struct TcpServer {
     tcp_listener: TcpListener,
     conns: HashMap<usize, Connection>,
+    pool: HashMap<usize, Connection>,
     config: Arc<ClientConfig>,
     hostname: DNSName,
     next_id: usize,
@@ -27,8 +28,8 @@ pub struct TcpServer {
 
 struct Connection {
     index: usize,
-    dst_addr: SocketAddr,
-    client: TcpStream,
+    dst_addr: Option<SocketAddr>,
+    client: Option<TcpStream>,
     client_session: TcpSession,
     server: TcpStream,
     server_session: ClientSession,
@@ -48,6 +49,7 @@ impl TcpServer {
             config,
             hostname,
             conns: HashMap::new(),
+            pool: HashMap::new(),
             next_id: MIN_INDEX,
         }
     }
@@ -67,29 +69,14 @@ impl TcpServer {
                     match sys::get_oridst_addr(&client) {
                         Ok(dst_addr) => {
                             log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
-                            match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
-                                Ok(server) => {
-                                    if let Err(err) = sys::set_mark(&server, opts.marker) {
-                                        log::error!("set mark failed:{}", err);
-                                        continue;
-                                    } else if let Err(err) = server.set_nodelay(true) {
-                                        log::error!("set nodelay:{}", err);
-                                        continue;
-                                    } else {
-                                        let session = ClientSession::new(&self.config, self.hostname.as_ref());
-                                        let mut conn = Connection::new(self.next_index(), dst_addr, session, client, server);
-                                        if conn.setup(opts, poll) {
-                                            self.conns.insert(conn.index(), conn);
-                                        } else {
-                                            conn.close_now(poll);
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    //FIXME should refresh dns now?
-                                    log::error!("connection to server failed:{}", err);
+                            if let Some(mut conn) = self.get_conn(opts, poll) {
+                                if conn.setup(opts, poll, Some(dst_addr)) {
+                                    self.conns.insert(conn.index(), conn);
+                                } else {
                                     continue;
                                 }
+                            } else {
+                                log::error!("alloc new connection failed")
                             }
                         }
                         Err(err) => {
@@ -109,15 +96,73 @@ impl TcpServer {
         }
     }
 
+    fn alloc_conn(&mut self, opts:&mut Opts, poll:&Poll) {
+        for _i in 0..opts.proxy_args().pool_size {
+            if let Some(mut conn) = self.new_conn(opts) {
+                conn.setup(opts, poll, None);
+                self.pool.insert(conn.index(), conn);
+            }
+        }
+    }
+
+    fn new_conn(&mut self, opts:&mut Opts) ->Option<Connection> {
+        let server = match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
+            Ok(server) => {
+                if let Err(err) = sys::set_mark(&server, opts.marker) {
+                    log::error!("set mark failed:{}", err);
+                    None
+                } else if let Err(err) = server.set_nodelay(true) {
+                    log::error!("set nodelay:{}", err);
+                    None
+                } else {
+                    Some(server)
+                }
+            }
+            Err(err) => {
+                //FIXME should refresh dns now?
+                log::error!("connection to server failed:{}", err);
+                None
+            }
+        };
+        if let Some(server) = server {
+            let session = ClientSession::new(&self.config, self.hostname.as_ref());
+            let conn = Connection::new(self.next_index(), session, server);
+            Some(conn)
+        } else {
+            None
+        }
+    }
+
+    fn get_conn(&mut self, opts: &mut Opts, poll:&Poll) -> Option<Connection> {
+        if opts.proxy_args().pool_size == 0 {
+            self.new_conn(opts)
+        } else {
+            if self.pool.is_empty() {
+                self.alloc_conn(opts, poll);
+            }
+            if self.pool.is_empty(){
+                None
+            } else {
+                let key = *self.pool.keys().nth(0).unwrap();
+                self.pool.remove(&key)
+            }
+        }
+    }
+
     pub fn ready(&mut self, event: &Event, poll: &Poll) {
         let index = Connection::token2index(event.token());
         if let Some(conn) = self.conns.get_mut(&index) {
             conn.ready(event, poll);
-            if !conn.closed() {
-                return;
+            if conn.closed() {
+                self.conns.remove(&index);
             }
         }
-        self.conns.remove(&index);
+        if let Some(conn) = self.pool.get_mut(&index) {
+            conn.ready(event, poll);
+            if conn.closed() {
+                self.pool.remove(&index);
+            }
+        }
     }
 
     pub fn next_index(&mut self) -> usize {
@@ -131,11 +176,11 @@ impl TcpServer {
 }
 
 impl Connection {
-    fn new(index: usize, dst_addr: SocketAddr, session: ClientSession, client: TcpStream, server: TcpStream) -> Connection {
+    fn new(index: usize, session: ClientSession, server: TcpStream) -> Connection {
         Connection {
             index,
-            dst_addr,
-            client,
+            dst_addr: None,
+            client: None,
             server,
             server_session: session,
             client_readiness: Ready::readable(),
@@ -153,18 +198,25 @@ impl Connection {
         self.closed
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+    fn setup(&mut self, opts: &mut Opts, poll: &Poll, dst_addr: Option<SocketAddr>) -> bool {
         let mut request = BytesMut::new();
-        TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, opts);
+        if dst_addr.is_some() {
+            self.dst_addr = dst_addr;
+            TrojanRequest::generate(&mut request, CONNECT, self.dst_addr.as_ref().unwrap(), opts);
+        }
         if let Err(err) = self.server_session.write_all(request.as_ref()) {
             log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
-            false
-        } else if let Err(err) = poll.register(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
-            log::warn!("connection:{} register client failed:{}", self.index(), err);
             false
         } else if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
             log::warn!("connection:{} register server failed:{}", self.index(), err);
             false
+        } else if let Some(ref client) = self.client {
+            if let Err(err) = poll.register(client, self.client_token(), self.client_readiness, PollOpt::edge()) {
+                log::warn!("connection:{} register client failed:{}", self.index(), err);
+                false
+            } else {
+                true
+            }
         } else {
             true
         }
@@ -213,13 +265,15 @@ impl Connection {
     }
 
     fn close_now(&mut self, poll: &Poll) {
-        let _ = poll.deregister(&self.client);
+        if self.client.is_some() {
+            let _ = poll.deregister(self.client.as_ref().unwrap());
+            let _ = self.client.as_ref().unwrap().shutdown(Shutdown::Both);
+        }
         let _ = poll.deregister(&self.server);
         let _ = self.server.shutdown(Shutdown::Both);
-        let _ = self.client.shutdown(Shutdown::Both);
         self.closed = true;
         let secs = self.client_time.elapsed().as_secs();
-        log::warn!("connection:{} closed, target address {}, {} seconds,  {} bytes read, {} bytes sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
+        log::warn!("connection:{} closed, target address {:?}, {} seconds,  {} bytes read, {} bytes sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
@@ -237,7 +291,7 @@ impl Connection {
         }
 
         if changed {
-            if let Err(err) = poll.reregister(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
+            if let Err(err) = poll.reregister(self.client.as_ref().unwrap(), self.client_token(), self.client_readiness, PollOpt::edge()) {
                 log::error!("connection:{} reregister client failed:{}", self.index(), err);
                 self.closing = true;
                 return;
@@ -271,7 +325,7 @@ impl Connection {
     }
 
     fn try_read_client(&mut self) {
-        if let Err(err) = self.client_session.read_backend(&mut self.client) {
+        if let Err(err) = self.client_session.read_backend(self.client.as_mut().unwrap()) {
             log::warn!("connection:{} read from client failed:{}", self.index(), err);
             self.closing = true;
             return;
@@ -296,7 +350,7 @@ impl Connection {
                 self.closing = true;
                 return;
             } else {
-                match self.client_session.write_backend(&mut self.client) {
+                match self.client_session.write_backend(self.client.as_mut().unwrap()) {
                     Err(err) => {
                         log::warn!("connection:{} write to client failed:{}", self.index(), err);
                         self.closing = true;
@@ -318,7 +372,7 @@ impl Connection {
             if buffer.len() == 0 {
                 break;
             }
-            match self.client.write(buffer) {
+            match self.client.as_ref().unwrap().write(buffer) {
                 Ok(size) => {
                     buffer = &buffer[size..];
                     self.client_recv += size;

@@ -22,6 +22,7 @@ use crate::sys;
 pub struct UdpServer {
     udp_listener: Rc<UdpSocket>,
     conns: HashMap<usize, Connection>,
+    pool: HashMap<usize, Connection>,
     src_map: HashMap<SocketAddr, usize>,
     next_id: usize,
     recv_buffer: Vec<u8>,
@@ -31,7 +32,7 @@ pub struct UdpServer {
 
 struct Connection {
     index: usize,
-    src_addr: SocketAddr,
+    src_addr: Option<SocketAddr>,
     dst_addr: Option<SocketAddr>,
     server_session: ClientSession,
     server: TcpStream,
@@ -52,6 +53,7 @@ impl UdpServer {
             config,
             hostname,
             conns: HashMap::new(),
+            pool: HashMap::new(),
             src_map: HashMap::new(),
             next_id: MIN_INDEX,
             recv_buffer: vec![0u8; MAX_UDP_SIZE],
@@ -69,33 +71,19 @@ impl UdpServer {
                             *index
                         } else {
                             log::debug!("address:{} not found, connecting to {}", src_addr, opts.back_addr.as_ref().unwrap());
-                            match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
-                                Ok(stream) => {
-                                    if let Err(err) = sys::set_mark(&stream, opts.marker) {
-                                        log::error!("set mark failed:{}", err);
-                                        continue;
-                                    } else if let Err(err) = stream.set_nodelay(true) {
-                                        log::error!("set nodelay failed:{}", err);
-                                        continue;
-                                    } else {
-                                        let session = ClientSession::new(&self.config, self.hostname.as_ref());
-                                        let mut conn = Connection::new(self.next_index(), src_addr, session, stream);
-                                        if conn.setup(opts, poll) {
-                                            let index = conn.index();
-                                            let _ = self.conns.insert(index, conn);
-                                            self.src_map.insert(src_addr, index);
-                                            log::info!("connection:{} is ready", index);
-                                            index
-                                        } else {
-                                            continue;
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    log::error!("connection to back server failed:{}", err);
-                                    //FIXME should update dns now?
+                            if let Some(mut conn) = self.get_conn(opts, poll) {
+                                if conn.setup(opts, poll, Some(src_addr)) {
+                                    let index = conn.index();
+                                    let _ = self.conns.insert(index, conn);
+                                    self.src_map.insert(src_addr, index);
+                                    log::info!("connection:{} is ready", index);
+                                    index
+                                } else {
+                                    log::error!("allocate connection failed");
                                     continue;
                                 }
+                            } else {
+                                continue;
                             }
                         };
                         if let Some(conn) = self.conns.get_mut(&index) {
@@ -120,17 +108,73 @@ impl UdpServer {
 
     pub fn ready(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, udp_cache: &mut UdpSvrCache) {
         let index = Connection::token2index(event.token());
-        let src_addr = if let Some(conn) = self.conns.get_mut(&index) {
+        if let Some(conn) = self.conns.get_mut(&index) {
             conn.ready(event, opts, poll, udp_cache);
-            if !conn.is_closed() {
-                return;
+            if conn.is_closed() {
+                let src_addr = conn.src_addr;
+                self.conns.remove(&index);
+                self.src_map.remove(src_addr.as_ref().unwrap());
             }
-            conn.src_addr
-        } else {
-            return;
+        }
+        if let Some(conn) = self.pool.get_mut(&index) {
+            conn.ready(event, opts, poll, udp_cache);
+            if conn.is_closed() {
+                self.pool.remove(&index);
+            }
+        }
+    }
+
+    fn alloc_conn(&mut self, opts:&mut Opts, poll:&Poll) {
+        for _i in 0..opts.proxy_args().pool_size {
+            if let Some(mut conn) = self.new_conn(opts) {
+                conn.setup(opts, poll, None);
+                self.pool.insert(conn.index(), conn);
+            }
+        }
+    }
+
+    fn new_conn(&mut self, opts:&mut Opts) ->Option<Connection> {
+        let server = match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
+            Ok(server) => {
+                if let Err(err) = sys::set_mark(&server, opts.marker) {
+                    log::error!("set mark failed:{}", err);
+                    None
+                } else if let Err(err) = server.set_nodelay(true) {
+                    log::error!("set nodelay:{}", err);
+                    None
+                } else {
+                    Some(server)
+                }
+            }
+            Err(err) => {
+                //FIXME should refresh dns now?
+                log::error!("connection to server failed:{}", err);
+                None
+            }
         };
-        self.conns.remove(&index);
-        self.src_map.remove(&src_addr);
+        if let Some(server) = server {
+            let session = ClientSession::new(&self.config, self.hostname.as_ref());
+            let conn = Connection::new(self.next_index(), session, server);
+            Some(conn)
+        } else {
+            None
+        }
+    }
+
+    fn get_conn(&mut self, opts: &mut Opts, poll:&Poll) -> Option<Connection> {
+        if opts.proxy_args().pool_size == 0 {
+            self.new_conn(opts)
+        } else {
+            if self.pool.is_empty() {
+                self.alloc_conn(opts, poll);
+            }
+            if self.pool.is_empty(){
+                None
+            } else {
+                let key = *self.pool.keys().nth(0).unwrap();
+                self.pool.remove(&key)
+            }
+        }
     }
 
     pub fn next_index(&mut self) -> usize {
@@ -144,10 +188,10 @@ impl UdpServer {
 }
 
 impl Connection {
-    fn new(index: usize, src_addr: SocketAddr, session: ClientSession, stream: TcpStream) -> Connection {
+    fn new(index: usize, session: ClientSession, stream: TcpStream) -> Connection {
         Connection {
             index,
-            src_addr,
+            src_addr: None,
             dst_addr: None,
             server_session: session,
             server: stream,
@@ -170,9 +214,12 @@ impl Connection {
         token.0 / 3
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+    fn setup(&mut self, opts: &mut Opts, poll: &Poll, src_addr:Option<SocketAddr>) -> bool {
         self.recv_buffer.clear();
-        TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
+        if src_addr.is_some() {
+            TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
+            self.src_addr = src_addr;
+        }
         if let Err(err) = self.server_session.write_all(self.recv_buffer.as_ref()) {
             log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
             false
@@ -349,7 +396,7 @@ impl Connection {
                 UdpParseResult::Packet(packet) => {
                     self.client_recv += packet.length;
                     let payload = &packet.payload[..packet.length];
-                    udp_cache.send_to(self.src_addr, packet.address, payload);
+                    udp_cache.send_to(*self.src_addr.as_ref().unwrap(), packet.address, payload);
                     buffer = &packet.payload[packet.length..];
                 }
                 UdpParseResult::InvalidProtocol => {

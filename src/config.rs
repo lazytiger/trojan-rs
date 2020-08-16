@@ -13,7 +13,7 @@ pub struct DnsEntry {
 }
 
 #[derive(Clap)]
-#[clap(version = "0.3.2", author = "Hoping White", about = "a trojan implementation using rust")]
+#[clap(version = "0.4", author = "Hoping White", about = "a trojan implementation using rust")]
 pub struct Opts {
     #[clap(subcommand)]
     pub mode: Mode,
@@ -59,6 +59,8 @@ pub enum Mode {
 pub struct ProxyArgs {
     #[clap(short = "H", long, help = "trojan server hostname")]
     pub hostname: String,
+    #[clap(short = "P", long, default_value = "0", help = "pool size, 0 for disable")]
+    pub pool_size:usize,
 }
 
 #[derive(Clap)]
