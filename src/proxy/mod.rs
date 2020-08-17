@@ -10,6 +10,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use webpki::DNSNameRef;
 
 use crate::config::Opts;
+use crate::proxy::idle_pool::IdlePool;
 use crate::proxy::tcp_server::TcpServer;
 use crate::proxy::udp_cache::UdpSvrCache;
 use crate::proxy::udp_server::UdpServer;
@@ -18,11 +19,26 @@ use crate::sys;
 mod tcp_server;
 mod udp_server;
 mod udp_cache;
+mod idle_pool;
 
-pub const MIN_INDEX: usize = 2;
-pub const MAX_INDEX: usize = std::usize::MAX / 3;
-pub const TCP_LISTENER: usize = 1;
-pub const UDP_LISTENER: usize = 2;
+const MIN_INDEX: usize = 2;
+const MAX_INDEX: usize = std::usize::MAX / CHANNEL_CNT;
+const TCP_LISTENER: usize = 1;
+const UDP_LISTENER: usize = 2;
+const CHANNEL_CNT: usize = 4;
+const CHANNEL_IDLE: usize = 0;
+const CHANNEL_UDP: usize = 1;
+const CHANNEL_CLIENT: usize = 2;
+const CHANNEL_TCP: usize = 3;
+
+fn next_index(index: &mut usize) -> usize {
+    let current = *index;
+    *index += 1;
+    if *index >= MAX_INDEX {
+        *index = MIN_INDEX;
+    }
+    current
+}
 
 pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Socket {
     let domain = if addr.is_ipv4() {
@@ -65,24 +81,30 @@ pub fn run(opts: &mut Opts) {
     config.root_store.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     let config = Arc::new(config);
 
-    let mut tcp_server = TcpServer::new(tcp_listener, config.clone(), hostname.clone());
-    let mut udp_server = UdpServer::new(udp_listener, config, hostname);
+    let mut tcp_server = TcpServer::new(tcp_listener);
+    let mut udp_server = UdpServer::new(udp_listener);
 
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
+
+    let mut pool = IdlePool::new(opts, config, hostname);
+
     loop {
         let nevent = poll.poll(&mut events, Some(check_duration)).unwrap();
         log::trace!("poll got {} events", nevent);
         for event in &events {
             match event.token() {
                 Token(TCP_LISTENER) => {
-                    tcp_server.accept(&event, opts, &poll);
+                    tcp_server.accept(&event, opts, &poll, &mut pool);
                 }
                 Token(UDP_LISTENER) => {
-                    udp_server.accept(&event, opts, &poll);
+                    udp_server.accept(&event, opts, &poll, &mut pool);
                 }
-                Token(i) if i % 3 == 0 => {
+                Token(i) if i % CHANNEL_CNT == CHANNEL_IDLE => {
+                    pool.ready(&event, &poll);
+                }
+                Token(i) if i % CHANNEL_CNT == CHANNEL_UDP => {
                     udp_server.ready(&event, opts, &poll, &mut udp_cache);
                 }
                 _ => {

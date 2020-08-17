@@ -1,44 +1,49 @@
 use std::collections::HashMap;
-use std::io::{ErrorKind, Read, Write};
-use std::net::Shutdown;
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::BytesMut;
-use mio::{Event, Poll, PollOpt, Ready, Token};
-use mio::net::TcpStream;
+use mio::{Event, Poll, Token};
 use mio::net::UdpSocket;
-use rustls::{ClientConfig, ClientSession, Session};
-use webpki::DNSName;
+use rustls::ClientSession;
 
+use crate::sys;
 use crate::config::Opts;
 use crate::proto::{MAX_UDP_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult};
-use crate::proxy::{MAX_INDEX, MIN_INDEX};
+use crate::proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index};
+use crate::proxy::idle_pool::IdlePool;
 use crate::proxy::udp_cache::UdpSvrCache;
-use crate::sys;
+use crate::tls_conn::{Index, TlsConn};
+
+struct UdpServerIndex(usize);
+
+impl Index for UdpServerIndex {
+    fn token(&self) -> Token {
+        Token(self.0 * CHANNEL_CNT + CHANNEL_UDP)
+    }
+
+    fn index(&self) -> usize {
+        self.0
+    }
+}
 
 pub struct UdpServer {
     udp_listener: Rc<UdpSocket>,
     conns: HashMap<usize, Connection>,
-    pool: HashMap<usize, Connection>,
     src_map: HashMap<SocketAddr, usize>,
     next_id: usize,
     recv_buffer: Vec<u8>,
-    config: Arc<ClientConfig>,
-    hostname: DNSName,
 }
 
 struct Connection {
     index: usize,
-    src_addr: Option<SocketAddr>,
+    src_addr: SocketAddr,
     dst_addr: Option<SocketAddr>,
-    server_session: ClientSession,
-    server: TcpStream,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
-    server_readiness: Ready,
+    server_conn: TlsConn<ClientSession>,
     closing: bool,
     closed: bool,
     client_recv: usize,
@@ -47,20 +52,17 @@ struct Connection {
 }
 
 impl UdpServer {
-    pub fn new(udp_listener: UdpSocket, config: Arc<ClientConfig>, hostname: DNSName) -> UdpServer {
+    pub fn new(udp_listener: UdpSocket) -> UdpServer {
         UdpServer {
             udp_listener: Rc::new(udp_listener),
-            config,
-            hostname,
             conns: HashMap::new(),
-            pool: HashMap::new(),
             src_map: HashMap::new(),
             next_id: MIN_INDEX,
             recv_buffer: vec![0u8; MAX_UDP_SIZE],
         }
     }
 
-    pub fn accept(&mut self, event: &Event, opts: &mut Opts, poll: &Poll) {
+    pub fn accept(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, pool: &mut IdlePool) {
         if event.readiness().is_readable() {
             loop {
                 match sys::recv_from_with_destination(self.udp_listener.as_ref(), self.recv_buffer.as_mut_slice()) {
@@ -71,9 +73,11 @@ impl UdpServer {
                             *index
                         } else {
                             log::debug!("address:{} not found, connecting to {}", src_addr, opts.back_addr.as_ref().unwrap());
-                            if let Some(mut conn) = self.get_conn(opts, poll) {
-                                if conn.setup(opts, poll, Some(src_addr)) {
-                                    let index = conn.index();
+                            if let Some(mut conn) = pool.get(poll) {
+                                let index = next_index(&mut self.next_id);
+                                conn.reset_index(Box::new(UdpServerIndex(index)));
+                                let mut conn = Connection::new(index, conn, src_addr);
+                                if conn.setup(opts, poll) {
                                     let _ = self.conns.insert(index, conn);
                                     self.src_map.insert(src_addr, index);
                                     log::info!("connection:{} is ready", index);
@@ -113,90 +117,21 @@ impl UdpServer {
             if conn.is_closed() {
                 let src_addr = conn.src_addr;
                 self.conns.remove(&index);
-                self.src_map.remove(src_addr.as_ref().unwrap());
+                self.src_map.remove(&src_addr);
             }
         }
-        if let Some(conn) = self.pool.get_mut(&index) {
-            conn.ready(event, opts, poll, udp_cache);
-            if conn.is_closed() {
-                self.pool.remove(&index);
-            }
-        }
-    }
-
-    fn alloc_conn(&mut self, opts: &mut Opts, poll: &Poll) {
-        let size = self.pool.len();
-        for _i in size..opts.proxy_args().pool_size {
-            if let Some( conn) = self.new_conn(opts, poll) {
-                self.pool.insert(conn.index(), conn);
-            }
-        }
-    }
-
-    fn new_conn(&mut self, opts: &mut Opts, poll: &Poll) -> Option<Connection> {
-        let server = match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
-            Ok(server) => {
-                if let Err(err) = sys::set_mark(&server, opts.marker) {
-                    log::error!("set mark failed:{}", err);
-                    None
-                } else if let Err(err) = server.set_nodelay(true) {
-                    log::error!("set nodelay:{}", err);
-                    None
-                } else {
-                    Some(server)
-                }
-            }
-            Err(err) => {
-                //FIXME should refresh dns now?
-                log::error!("connection to server failed:{}", err);
-                None
-            }
-        };
-        if let Some(server) = server {
-            let session = ClientSession::new(&self.config, self.hostname.as_ref());
-            let mut conn = Connection::new(self.next_index(), session, server);
-            conn.setup(opts, poll, None);
-            Some(conn)
-        } else {
-            None
-        }
-    }
-
-    fn get_conn(&mut self, opts: &mut Opts, poll: &Poll) -> Option<Connection> {
-        if opts.proxy_args().pool_size == 0 {
-            self.new_conn(opts, poll)
-        } else {
-            self.alloc_conn(opts, poll);
-            if self.pool.is_empty() {
-                None
-            } else {
-                let key = *self.pool.keys().nth(0).unwrap();
-                self.pool.remove(&key)
-            }
-        }
-    }
-
-    pub fn next_index(&mut self) -> usize {
-        let index = self.next_id;
-        self.next_id += 1;
-        if self.next_id >= MAX_INDEX {
-            self.next_id = MIN_INDEX;
-        }
-        index
     }
 }
 
 impl Connection {
-    fn new(index: usize, session: ClientSession, stream: TcpStream) -> Connection {
+    fn new(index: usize, server_conn: TlsConn<ClientSession>, src_addr: SocketAddr) -> Connection {
         Connection {
             index,
-            src_addr: None,
+            src_addr,
             dst_addr: None,
-            server_session: session,
-            server: stream,
+            server_conn,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
-            server_readiness: Ready::readable() | Ready::writable(),
             closing: false,
             closed: false,
             client_recv: 0,
@@ -205,33 +140,15 @@ impl Connection {
         }
     }
 
-    fn server_token(&self) -> Token {
-        Token(self.index * 3)
-    }
-
     fn token2index(token: Token) -> usize {
-        token.0 / 3
+        token.0 / CHANNEL_CNT
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll, src_addr: Option<SocketAddr>) -> bool {
-        if src_addr.is_some() {
-            self.recv_buffer.clear();
-            TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
-            self.src_addr = src_addr;
-            if let Err(err) = self.server_session.write_all(self.recv_buffer.as_ref()) {
-                log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
-                false
-            } else {
-                true
-            }
-        } else {
-            if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-                log::warn!("connection:{} register failed:{}", self.index(), err);
-                false
-            } else {
-                true
-            }
-        }
+    fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+        self.server_conn.reregister(poll);
+        self.recv_buffer.clear();
+        TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
+        self.server_conn.write_session(self.recv_buffer.as_ref())
     }
 
     fn is_closed(&self) -> bool {
@@ -257,11 +174,9 @@ impl Connection {
         self.client_sent += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
-        if let Err(err) = self.server_session.write_all(self.recv_buffer.as_ref()) {
-            log::error!("connection:{} write header to server failed:{}", self.index(), err);
+        if !self.server_conn.write_session(self.recv_buffer.as_ref()) {
             self.closing = true;
-        } else if let Err(err) = self.server_session.write_all(payload) {
-            log::error!("connection:{} write body to server failed:{}", self.index(), err);
+        } else if !self.server_conn.write_session(payload) {
             self.closing = true;
         } else {
             self.try_send_server();
@@ -284,8 +199,7 @@ impl Connection {
     }
 
     fn close_now(&mut self, poll: &Poll) {
-        let _ = poll.deregister(&self.server);
-        let _ = self.server.shutdown(Shutdown::Both);
+        self.server_conn.check_close(poll);
         self.closed = true;
         let secs = self.client_time.elapsed().as_secs();
         log::warn!("connection:{} closed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
@@ -296,85 +210,15 @@ impl Connection {
         if self.closing {
             return;
         }
-        let mut changed = false;
-        if self.server_session.wants_write() {
-            self.server_readiness.insert(Ready::writable());
-            changed = true;
-        }
-        if !self.server_session.wants_write() && self.server_readiness.is_writable() {
-            self.server_readiness.remove(Ready::writable());
-            changed = true;
-        }
-
-        if changed {
-            if let Err(err) = poll.reregister(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-                self.closing = true;
-                log::error!("connection:{} reregister failed:{}", self.index(), err);
-            }
-        }
+        self.server_conn.reregister(poll);
     }
 
     fn try_send_server(&mut self) {
-        log::info!("connection:{} trying to send udp bytes to server", self.index());
-        loop {
-            if !self.server_session.wants_write() {
-                break;
-            }
-            match self.server_session.write_tls(&mut self.server) {
-                Ok(size) => {
-                    log::info!("connection:{} write {} bytes to server", self.index(), size);
-                }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    log::warn!("connection:{} write to server blocked", self.index());
-                    break;
-                }
-                Err(err) => {
-                    log::warn!("connection:{} write to server failed:{}", self.index(), err);
-                    self.closing = true;
-                    break;
-                }
-            }
-        }
-        log::info!("connection:{} send udp bytes to server finished", self.index());
+        self.server_conn.do_send();
     }
 
     fn try_read_server(&mut self, opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
-        loop {
-            match self.server_session.read_tls(&mut self.server) {
-                Ok(size) => {
-                    if size == 0 {
-                        log::warn!("connection:{} read from server failed with eof", self.index());
-                        self.closing = true;
-                        return;
-                    }
-                    log::info!("connection:{} read {} bytes from server", self.index(), size);
-                }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    log::debug!("connection:{} read from server blocked", self.index());
-                    break;
-                }
-                Err(err) => {
-                    log::warn!("connection:{} read from server failed:{}", self.index(), err);
-                    self.closing = true;
-                    return;
-                }
-            }
-        }
-
-        if let Err(err) = self.server_session.process_new_packets() {
-            log::warn!("connection:{} process new packets failed:{}", self.index(), err);
-            self.closing = true;
-            return;
-        }
-
-        let mut buffer = Vec::new();
-        if let Err(err) = self.server_session.read_to_end(&mut buffer) {
-            log::warn!("connection:{} read from session failed:{}", self.index(), err);
-            self.closing = true;
-            return;
-        }
-
-        if !buffer.is_empty() {
+        if let Some(buffer) = self.server_conn.do_read() {
             self.try_send_client(buffer.as_slice(), opts, udp_cache);
         }
     }
@@ -399,7 +243,7 @@ impl Connection {
                 UdpParseResult::Packet(packet) => {
                     self.client_recv += packet.length;
                     let payload = &packet.payload[..packet.length];
-                    udp_cache.send_to(*self.src_addr.as_ref().unwrap(), packet.address, payload);
+                    udp_cache.send_to(self.src_addr, packet.address, payload);
                     buffer = &packet.payload[packet.length..];
                 }
                 UdpParseResult::InvalidProtocol => {

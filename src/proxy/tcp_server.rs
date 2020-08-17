@@ -1,61 +1,65 @@
 use std::collections::HashMap;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Write};
 use std::net::Shutdown;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpListener, TcpStream};
-use rustls::{ClientConfig, ClientSession, Session};
-use webpki::DNSName;
+use rustls::ClientSession;
 
 use crate::config::Opts;
 use crate::proto::{CONNECT, TrojanRequest};
-use crate::proxy::{MAX_INDEX, MIN_INDEX};
+use crate::proxy::{CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX, next_index};
+use crate::proxy::idle_pool::IdlePool;
 use crate::session::TcpSession;
 use crate::sys;
+use crate::tls_conn::{Index, TlsConn};
 
 pub struct TcpServer {
     tcp_listener: TcpListener,
     conns: HashMap<usize, Connection>,
-    pool: HashMap<usize, Connection>,
-    config: Arc<ClientConfig>,
-    hostname: DNSName,
     next_id: usize,
+}
+
+pub struct TcpServerIndex(usize);
+
+impl Index for TcpServerIndex {
+    fn token(&self) -> Token {
+        Token(self.0 * 4 + 3)
+    }
+
+    fn index(&self) -> usize {
+        self.0
+    }
 }
 
 struct Connection {
     index: usize,
-    dst_addr: Option<SocketAddr>,
-    client: Option<TcpStream>,
+    dst_addr: SocketAddr,
+    client: TcpStream,
     client_session: TcpSession,
-    server: TcpStream,
-    server_session: ClientSession,
     client_readiness: Ready,
-    server_readiness: Ready,
     closed: bool,
     closing: bool,
     client_recv: usize,
     client_sent: usize,
     client_time: Instant,
+    server_conn: TlsConn<ClientSession>,
 }
 
 impl TcpServer {
-    pub fn new(tcp_listener: TcpListener, config: Arc<ClientConfig>, hostname: DNSName) -> TcpServer {
+    pub fn new(tcp_listener: TcpListener) -> TcpServer {
         TcpServer {
             tcp_listener,
-            config,
-            hostname,
             conns: HashMap::new(),
-            pool: HashMap::new(),
             next_id: MIN_INDEX,
         }
     }
 
 
-    pub fn accept(&mut self, _event: &Event, opts: &mut Opts, poll: &Poll) {
+    pub fn accept(&mut self, _event: &Event, opts: &mut Opts, poll: &Poll, pool: &mut IdlePool) {
         loop {
             match self.tcp_listener.accept() {
                 Ok((client, src_addr)) => {
@@ -69,8 +73,11 @@ impl TcpServer {
                     match sys::get_oridst_addr(&client) {
                         Ok(dst_addr) => {
                             log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
-                            if let Some(mut conn) = self.get_conn(opts, poll) {
-                                if conn.setup(opts, poll, Some(dst_addr), Some(client)) {
+                            if let Some(mut conn) = pool.get(poll) {
+                                let index = next_index(&mut self.next_id);
+                                conn.reset_index(Box::new(TcpServerIndex(index)));
+                                let mut conn = Connection::new(index, conn, dst_addr, client);
+                                if conn.setup(opts, poll) {
                                     self.conns.insert(conn.index(), conn);
                                 } else {
                                     continue;
@@ -96,57 +103,6 @@ impl TcpServer {
         }
     }
 
-    fn alloc_conn(&mut self, opts: &mut Opts, poll: &Poll) {
-        let size = self.pool.len();
-        for _i in size..opts.proxy_args().pool_size {
-            if let Some(conn) = self.new_conn(opts, poll) {
-                self.pool.insert(conn.index(), conn);
-            }
-        }
-    }
-
-    fn new_conn(&mut self, opts: &mut Opts, poll:&Poll) -> Option<Connection> {
-        let server = match TcpStream::connect(opts.back_addr.as_ref().unwrap()) {
-            Ok(server) => {
-                if let Err(err) = sys::set_mark(&server, opts.marker) {
-                    log::error!("set mark failed:{}", err);
-                    None
-                } else if let Err(err) = server.set_nodelay(true) {
-                    log::error!("set nodelay:{}", err);
-                    None
-                } else {
-                    Some(server)
-                }
-            }
-            Err(err) => {
-                //FIXME should refresh dns now?
-                log::error!("connection to server failed:{}", err);
-                None
-            }
-        };
-        if let Some(server) = server {
-            let session = ClientSession::new(&self.config, self.hostname.as_ref());
-            let mut conn = Connection::new(self.next_index(), session, server);
-            conn.setup(opts, poll, None, None);
-            Some(conn)
-        } else {
-            None
-        }
-    }
-
-    fn get_conn(&mut self, opts: &mut Opts, poll: &Poll) -> Option<Connection> {
-        if opts.proxy_args().pool_size == 0 {
-            self.new_conn(opts, poll)
-        } else {
-            self.alloc_conn(opts, poll);
-            if self.pool.is_empty() {
-                None
-            } else {
-                let key = *self.pool.keys().nth(0).unwrap();
-                self.pool.remove(&key)
-            }
-        }
-    }
 
     pub fn ready(&mut self, event: &Event, poll: &Poll) {
         let index = Connection::token2index(event.token());
@@ -156,34 +112,17 @@ impl TcpServer {
                 self.conns.remove(&index);
             }
         }
-        if let Some(conn) = self.pool.get_mut(&index) {
-            conn.ready(event, poll);
-            if conn.closed() {
-                self.pool.remove(&index);
-            }
-        }
-    }
-
-    pub fn next_index(&mut self) -> usize {
-        let index = self.next_id;
-        self.next_id += 1;
-        if self.next_id >= MAX_INDEX {
-            self.next_id = MIN_INDEX;
-        }
-        index
     }
 }
 
 impl Connection {
-    fn new(index: usize, session: ClientSession, server: TcpStream) -> Connection {
+    fn new(index: usize, server_conn: TlsConn<ClientSession>, dst_addr: SocketAddr, client: TcpStream) -> Connection {
         Connection {
             index,
-            dst_addr: None,
-            client: None,
-            server,
-            server_session: session,
+            dst_addr,
+            client,
+            server_conn,
             client_readiness: Ready::empty(),
-            server_readiness: Ready::readable() | Ready::writable(),
             closed: false,
             closing: false,
             client_session: TcpSession::new(index),
@@ -197,29 +136,18 @@ impl Connection {
         self.closed
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll, dst_addr: Option<SocketAddr>, client: Option<TcpStream>) -> bool {
-        if dst_addr.is_some() {
-            let mut request = BytesMut::new();
-            self.dst_addr = dst_addr;
-            self.client = client;
-            self.client_readiness = Ready::readable();
-            TrojanRequest::generate(&mut request, CONNECT, self.dst_addr.as_ref().unwrap(), opts);
-            if let Err(err) = self.server_session.write_all(request.as_ref()) {
-                log::warn!("connection:{} write handshake to server session failed:{}", self.index(), err);
-                false
-            } else if let Err(err) = poll.register(self.client.as_ref().unwrap(), self.client_token(), self.client_readiness, PollOpt::edge()) {
-                log::warn!("connection:{} register client failed:{}", self.index(), err);
-                false
-            } else {
-                true
-            }
+    fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+        self.server_conn.reregister(poll);
+        let mut request = BytesMut::new();
+        self.client_readiness = Ready::readable();
+        TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, opts);
+        if !self.server_conn.write_session(request.as_ref()) {
+            false
+        } else if let Err(err) = poll.register(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
+            log::warn!("connection:{} register client failed:{}", self.index(), err);
+            false
         } else {
-            if let Err(err) = poll.register(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-                log::warn!("connection:{} register server failed:{}", self.index(), err);
-                false
-            } else {
-                true
-            }
+            true
         }
     }
 
@@ -228,12 +156,12 @@ impl Connection {
     }
 
     fn token2index(token: Token) -> usize {
-        token.0 / 3
+        token.0 / CHANNEL_CNT
     }
 
     fn ready(&mut self, event: &Event, poll: &Poll) {
-        match event.token().0 % 3 {
-            1 => {
+        match event.token().0 % CHANNEL_CNT {
+            CHANNEL_CLIENT => {
                 if event.readiness().is_readable() {
                     self.try_read_client();
                 }
@@ -242,7 +170,7 @@ impl Connection {
                     self.try_send_client(&[]);
                 }
             }
-            2 => {
+            CHANNEL_TCP => {
                 if event.readiness().is_readable() {
                     self.try_read_server();
                 }
@@ -263,15 +191,12 @@ impl Connection {
         if self.closing {
             self.close_now(poll);
         }
+        self.server_conn.check_close(poll);
     }
 
     fn close_now(&mut self, poll: &Poll) {
-        if self.client.is_some() {
-            let _ = poll.deregister(self.client.as_ref().unwrap());
-            let _ = self.client.as_ref().unwrap().shutdown(Shutdown::Both);
-        }
-        let _ = poll.deregister(&self.server);
-        let _ = self.server.shutdown(Shutdown::Both);
+        let _ = poll.deregister(&self.client);
+        let _ = self.client.shutdown(Shutdown::Both);
         self.closed = true;
         let secs = self.client_time.elapsed().as_secs();
         log::warn!("connection:{} closed, target address {:?}, {} seconds,  {} bytes read, {} bytes sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
@@ -292,41 +217,22 @@ impl Connection {
         }
 
         if changed {
-            if let Err(err) = poll.reregister(self.client.as_ref().unwrap(), self.client_token(), self.client_readiness, PollOpt::edge()) {
+            if let Err(err) = poll.reregister(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
                 log::error!("connection:{} reregister client failed:{}", self.index(), err);
                 self.closing = true;
                 return;
             }
         }
 
-        changed = false;
-        if self.server_session.wants_write() && self.client_sent > 0 && !self.server_readiness.is_writable() {
-            self.server_readiness.insert(Ready::writable());
-            changed = true;
-        }
-        if !self.server_session.wants_write() && self.server_readiness.is_writable() {
-            self.server_readiness.remove(Ready::writable());
-            changed = true;
-        }
-        if changed {
-            if let Err(err) = poll.reregister(&self.server, self.server_token(), self.server_readiness, PollOpt::level()) {
-                log::error!("connection:{} reregister server failed:{}", self.index(), err);
-                self.closing = true;
-                return;
-            }
-        }
+        self.server_conn.reregister(poll)
     }
 
     fn client_token(&self) -> Token {
-        Token(self.index * 3 + 1)
-    }
-
-    fn server_token(&self) -> Token {
-        Token(self.index * 3 + 2)
+        Token(self.index * CHANNEL_CNT + CHANNEL_CLIENT)
     }
 
     fn try_read_client(&mut self) {
-        if let Err(err) = self.client_session.read_backend(self.client.as_mut().unwrap()) {
+        if let Err(err) = self.client_session.read_backend(&mut self.client) {
             log::warn!("connection:{} read from client failed:{}", self.index(), err);
             self.closing = true;
             return;
@@ -336,8 +242,7 @@ impl Connection {
             return;
         }
         self.client_sent += data.len();
-        if let Err(err) = self.server_session.write_all(data.as_ref()) {
-            log::warn!("connection:{} write to server failed:{}", self.index(), err);
+        if !self.server_conn.write_session(data.as_ref()) {
             self.closing = true;
             return;
         }
@@ -351,7 +256,7 @@ impl Connection {
                 self.closing = true;
                 return;
             } else {
-                match self.client_session.write_backend(self.client.as_mut().unwrap()) {
+                match self.client_session.write_backend(&mut self.client) {
                     Err(err) => {
                         log::warn!("connection:{} write to client failed:{}", self.index(), err);
                         self.closing = true;
@@ -373,7 +278,7 @@ impl Connection {
             if buffer.len() == 0 {
                 break;
             }
-            match self.client.as_ref().unwrap().write(buffer) {
+            match self.client.write(buffer) {
                 Ok(size) => {
                     buffer = &buffer[size..];
                     self.client_recv += size;
@@ -396,64 +301,12 @@ impl Connection {
     }
 
     fn try_read_server(&mut self) {
-        loop {
-            match self.server_session.read_tls(&mut self.server) {
-                Ok(size) => {
-                    if size == 0 {
-                        log::warn!("connection:{} read from server failed with eof", self.index());
-                        self.closing = true;
-                        return;
-                    }
-                    log::info!("connection:{} read {} bytes from server", self.index(), size);
-                }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    log::debug!("connection:{} read from server blocked", self.index());
-                    break;
-                }
-                Err(err) => {
-                    log::warn!("connection:{} read from server failed:{}", self.index(), err);
-                    self.closing = true;
-                    return;
-                }
-            }
-        }
-
-        if let Err(err) = self.server_session.process_new_packets() {
-            log::error!("connection:{} process new packets failed:{}", self.index(), err);
-            self.closing = true;
-            return;
-        }
-
-        let mut buffer = Vec::new();
-        if let Err(err) = self.server_session.read_to_end(&mut buffer) {
-            log::error!("connection:{} read from session failed:{}", self.index(), err);
-            self.closing = true;
-            return;
-        }
-
-        if !buffer.is_empty() {
+        if let Some(buffer) = self.server_conn.do_read() {
             self.try_send_client(buffer.as_slice());
         }
     }
 
     fn try_send_server(&mut self) {
-        loop {
-            if !self.server_session.wants_write() {
-                return;
-            }
-            match self.server_session.write_tls(&mut self.server) {
-                Ok(size) => {
-                    log::debug!("connection:{} write {} bytes to server", self.index(), size);
-                }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    break;
-                }
-                Err(err) => {
-                    log::warn!("connection:{} write to server failed:{}", self.index(), err);
-                    self.closing = true;
-                    return;
-                }
-            }
-        }
+        self.server_conn.do_send();
     }
 }

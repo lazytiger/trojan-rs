@@ -9,6 +9,8 @@ mod proto;
 mod sys;
 mod proxy;
 mod session;
+mod tls_conn;
+
 
 fn main() {
     let mut app: App = <Opts as IntoApp>::into_app();
