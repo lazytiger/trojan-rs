@@ -9,25 +9,13 @@ use mio::{Event, Poll, Token};
 use mio::net::UdpSocket;
 use rustls::ClientSession;
 
-use crate::sys;
 use crate::config::Opts;
 use crate::proto::{MAX_UDP_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult};
 use crate::proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index};
 use crate::proxy::idle_pool::IdlePool;
 use crate::proxy::udp_cache::UdpSvrCache;
-use crate::tls_conn::{Index, TlsConn};
-
-struct UdpServerIndex(usize);
-
-impl Index for UdpServerIndex {
-    fn token(&self) -> Token {
-        Token(self.0 * CHANNEL_CNT + CHANNEL_UDP)
-    }
-
-    fn index(&self) -> usize {
-        self.0
-    }
-}
+use crate::sys;
+use crate::tls_conn::TlsConn;
 
 pub struct UdpServer {
     udp_listener: Rc<UdpSocket>,
@@ -75,7 +63,7 @@ impl UdpServer {
                             log::debug!("address:{} not found, connecting to {}", src_addr, opts.back_addr.as_ref().unwrap());
                             if let Some(mut conn) = pool.get(poll) {
                                 let index = next_index(&mut self.next_id);
-                                conn.reset_index(Box::new(UdpServerIndex(index)));
+                                conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
                                 let mut conn = Connection::new(index, conn, src_addr);
                                 if conn.setup(opts, poll) {
                                     let _ = self.conns.insert(index, conn);

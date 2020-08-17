@@ -6,22 +6,10 @@ use mio::net::TcpStream;
 use rustls::{ClientConfig, ClientSession};
 use webpki::DNSName;
 
-use crate::sys;
 use crate::config::Opts;
-use crate::proxy::{MIN_INDEX, next_index};
-use crate::tls_conn::{Index, TlsConn};
-
-struct IdleIndex(usize);
-
-impl Index for IdleIndex {
-    fn token(&self) -> Token {
-        Token(self.0 * 4)
-    }
-
-    fn index(&self) -> usize {
-        self.0
-    }
-}
+use crate::proxy::{CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, next_index};
+use crate::sys;
+use crate::tls_conn::TlsConn;
 
 pub struct IdlePool {
     pool: Vec<TlsConn<ClientSession>>,
@@ -84,7 +72,8 @@ impl IdlePool {
         };
         if let Some(server) = server {
             let session = ClientSession::new(&self.config, self.hostname.as_ref());
-            let conn = TlsConn::new(Box::new(IdleIndex(next_index(&mut self.next_index))), session, server);
+            let index = next_index(&mut self.next_index);
+            let conn = TlsConn::new(index, Token(index * CHANNEL_CNT + CHANNEL_IDLE), session, server);
             Some(conn)
         } else {
             None

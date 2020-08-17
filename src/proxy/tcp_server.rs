@@ -15,24 +15,12 @@ use crate::proxy::{CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX, next_ind
 use crate::proxy::idle_pool::IdlePool;
 use crate::session::TcpSession;
 use crate::sys;
-use crate::tls_conn::{Index, TlsConn};
+use crate::tls_conn::TlsConn;
 
 pub struct TcpServer {
     tcp_listener: TcpListener,
     conns: HashMap<usize, Connection>,
     next_id: usize,
-}
-
-pub struct TcpServerIndex(usize);
-
-impl Index for TcpServerIndex {
-    fn token(&self) -> Token {
-        Token(self.0 * 4 + 3)
-    }
-
-    fn index(&self) -> usize {
-        self.0
-    }
 }
 
 struct Connection {
@@ -75,7 +63,7 @@ impl TcpServer {
                             log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
                             if let Some(mut conn) = pool.get(poll) {
                                 let index = next_index(&mut self.next_id);
-                                conn.reset_index(Box::new(TcpServerIndex(index)));
+                                conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP));
                                 let mut conn = Connection::new(index, conn, dst_addr, client);
                                 if conn.setup(opts, poll) {
                                     self.conns.insert(conn.index(), conn);

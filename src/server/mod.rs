@@ -15,6 +15,8 @@ use crate::config::Opts;
 mod connection;
 mod server;
 mod resolver;
+mod tcp_backend;
+mod udp_backend;
 
 fn init_config(opts: &Opts) -> Arc<ServerConfig> {
     let mut config = ServerConfig::new(NoClientAuth::new());

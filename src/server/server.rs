@@ -2,18 +2,42 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use mio::{Event, Poll};
+use mio::{Event, Poll, Token};
 use mio::net::TcpListener;
 use rustls::{ServerConfig, ServerSession};
 
 use crate::config::Opts;
 use crate::server::connection::Connection;
+use crate::sys;
+use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct TlsServer {
     listener: TcpListener,
     config: Arc<ServerConfig>,
     next_id: usize,
-    conns: HashMap<usize, Connection>,
+    conns: HashMap<usize, Connection<>>,
+}
+
+pub trait Backend {
+    fn ready(&mut self, event: &Event, poll: &Poll, opts: &mut Opts, conn: &mut TlsConn<ServerSession>);
+    fn dispatch(&mut self, data: &[u8], opts: &mut Opts);
+    fn close_now(&mut self, poll: &Poll);
+    fn closing(&self) -> bool {
+        if let ConnStatus::Closing = self.status() {
+            true
+        } else {
+            false
+        }
+    }
+    fn closed(&self) -> bool {
+        if let ConnStatus::Closed = self.status() {
+            true
+        } else {
+            false
+        }
+    }
+    fn timeout(&self, t1: Instant, t2: Instant) -> bool;
+    fn status(&self) -> ConnStatus;
 }
 
 impl TlsServer {
@@ -31,9 +55,16 @@ impl TlsServer {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
                     log::debug!("get new connection, token:{}, address:{}", self.next_id, addr);
+                    if let Err(err) = sys::set_mark(&stream, opts.marker) {
+                        log::error!("set mark failed:{}", err);
+                        continue;
+                    } else if let Err(err) = stream.set_nodelay(true) {
+                        log::error!("set nodelay failed:{}", err);
+                        continue
+                    }
                     let session = ServerSession::new(&self.config);
                     let index = self.next_index();
-                    let mut conn = Connection::new(index, stream, session);
+                    let mut conn = Connection::new(index, TlsConn::new(index, Token(index * 2), session, stream));
                     if conn.setup(poll, opts) {
                         self.conns.insert(index, conn);
                     } else {

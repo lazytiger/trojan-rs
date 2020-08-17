@@ -5,29 +5,27 @@ use mio::net::TcpStream;
 use mio::tcp::Shutdown;
 use rustls::Session;
 
-enum ConnStatus {
+#[derive(Copy, Clone)]
+pub enum ConnStatus {
     Established,
     Closing,
     Closed,
-}
-
-pub trait Index {
-    fn token(&self) -> Token;
-    fn index(&self) -> usize;
 }
 
 pub struct TlsConn<T: Session> {
     session: T,
     stream: TcpStream,
     readiness: Ready,
-    index: Box<dyn Index>,
+    index: usize,
+    token: Token,
     status: ConnStatus,
 }
 
 impl<T: Session> TlsConn<T> {
-    pub fn new(index: Box<dyn Index>, session: T, stream: TcpStream) -> TlsConn<T> {
+    pub fn new(index: usize, token: Token, session: T, stream: TcpStream) -> TlsConn<T> {
         TlsConn {
             index,
+            token,
             session,
             stream,
             readiness: Ready::readable() | Ready::writable(),
@@ -35,8 +33,9 @@ impl<T: Session> TlsConn<T> {
         }
     }
 
-    pub fn reset_index(&mut self, index: Box<dyn Index>) {
+    pub fn reset_index(&mut self, index: usize, token: Token) {
         self.index = index;
+        self.token = token;
     }
 
     pub fn check_close(&mut self, poll: &Poll) {
@@ -52,11 +51,11 @@ impl<T: Session> TlsConn<T> {
     }
 
     fn index(&self) -> usize {
-        self.index.index()
+        self.index
     }
 
     pub fn token(&self) -> Token {
-        self.index.token()
+        self.token
     }
 
     pub fn do_read(&mut self) -> Option<Vec<u8>> {
@@ -143,7 +142,7 @@ impl<T: Session> TlsConn<T> {
             changed = true;
         }
         if changed {
-            if let Err(err) = poll.reregister(&self.stream, self.index.token(), self.readiness, PollOpt::level()) {
+            if let Err(err) = poll.reregister(&self.stream, self.token(), self.readiness, PollOpt::level()) {
                 log::error!("connection:{} reregister server failed:{}", self.index(), err);
                 self.status = ConnStatus::Closing;
                 return;
@@ -152,12 +151,28 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn setup(&mut self, poll: &Poll) -> bool {
-        if let Err(err) = poll.register(&self.stream, self.index.token(), self.readiness, PollOpt::level()) {
+        if let Err(err) = poll.register(&self.stream, self.token(), self.readiness, PollOpt::level()) {
             log::warn!("connection:{} register server failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;
             false
         } else {
             true
+        }
+    }
+
+    pub fn closing(&self) -> bool {
+        if let ConnStatus::Closing = self.status {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn closed(&self) -> bool {
+        if let ConnStatus::Closed = self.status {
+            true
+        } else {
+            false
         }
     }
 }
