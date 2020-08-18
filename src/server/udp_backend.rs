@@ -6,7 +6,7 @@ use mio::net::UdpSocket;
 use rustls::ServerSession;
 
 use crate::config::Opts;
-use crate::proto::{UdpAssociate, UdpParseResult};
+use crate::proto::{MAX_UDP_SIZE, UdpAssociate, UdpParseResult};
 use crate::server::server::Backend;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
@@ -27,7 +27,7 @@ impl UdpBackend {
         UdpBackend {
             socket,
             send_buffer: Default::default(),
-            recv_body: vec![],
+            recv_body: vec![0u8; MAX_UDP_SIZE],
             recv_head: Default::default(),
             index,
             token,
