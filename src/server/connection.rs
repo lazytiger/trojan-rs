@@ -9,7 +9,7 @@ use rustls::ServerSession;
 use crate::config::Opts;
 use crate::proto::{CONNECT, Sock5Address, TrojanRequest};
 use crate::resolver::EventedResolver;
-use crate::server::{CHANNEL_BACKEND, CHANNEL_CNT};
+use crate::server::{CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY};
 use crate::server::server::Backend;
 use crate::server::tcp_backend::TcpBackend;
 use crate::server::udp_backend::UdpBackend;
@@ -69,11 +69,15 @@ impl Connection {
         }
     }
 
+    fn proxy_token(&self, token: Token) -> bool {
+        token.0 % CHANNEL_CNT == CHANNEL_PROXY
+    }
+
     pub fn ready(&mut self, poll: &Poll, event: &Event, opts: &mut Opts) {
         self.last_active_time = Instant::now();
 
         if event.readiness().is_readable() {
-            if event.token().0 % 2 == 0 {
+            if self.proxy_token(event.token()) {
                 self.try_read_proxy(opts, poll);
             } else {
                 match self.status {
@@ -95,7 +99,7 @@ impl Connection {
         }
 
         if event.readiness().is_writable() {
-            if event.token().0 % 2 == 0 {
+            if self.proxy_token(event.token()) {
                 self.try_send_proxy();
             } else {
                 match self.status {

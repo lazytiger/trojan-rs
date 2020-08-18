@@ -98,8 +98,12 @@ impl TlsServer {
         index
     }
 
+    fn token2index(&mut self, token: Token) -> usize {
+        token.0 / CHANNEL_CNT
+    }
+
     pub fn do_conn_event(&mut self, poll: &Poll, event: &Event, opts: &mut Opts) {
-        let index = event.token().0 >> 1;
+        let index = self.token2index(event.token());
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();
             conn.ready(poll, event, opts);

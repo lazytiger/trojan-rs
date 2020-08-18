@@ -81,6 +81,11 @@ impl UdpBackend {
         loop {
             match self.socket.recv_from(self.recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
+                    if size == MAX_UDP_SIZE {
+                        log::error!("udp packet exceeds limit");
+                        self.status = ConnStatus::Closing;
+                        return;
+                    }
                     log::debug!("connection:{} got {} bytes udp data from:{}", self.index, size, addr);
                     self.recv_head.clear();
                     UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
