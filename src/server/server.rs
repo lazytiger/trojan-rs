@@ -40,7 +40,7 @@ pub trait Backend {
         }
     }
     fn timeout(&self, t1: Instant, t2: Instant) -> bool {
-        t2 - t1 < self.get_timeout()
+        t2 - t1 > self.get_timeout()
     }
     fn get_timeout(&self) -> Duration;
     fn status(&self) -> ConnStatus;
