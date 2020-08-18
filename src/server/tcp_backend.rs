@@ -91,7 +91,6 @@ impl Backend for TcpBackend {
         }
 
         self.reregister(poll);
-        self.check_close(poll);
     }
 
     fn dispatch(&mut self, mut buffer: &[u8], _: &mut Opts) {

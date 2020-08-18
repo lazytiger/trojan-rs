@@ -119,7 +119,6 @@ impl Connection {
 
         self.proxy.reregister(poll, false);
         let closing = if let Some(backend) = &mut self.backend {
-            backend.reregister(poll);
             backend.closing()
         } else {
             false
