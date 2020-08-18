@@ -89,8 +89,8 @@ impl IdlePool {
     }
 
     fn update_dns(&mut self, poll: &Poll) {
-        let resovler = EventedResolver::new(self.domain.clone());
-        self.resolver.replace(resovler);
+        let resolver = EventedResolver::new(self.domain.clone());
+        self.resolver.replace(resolver);
         if let Err(err) = poll.register(self.resolver.as_ref().unwrap(), Token(RESOLVER), Ready::readable(), PollOpt::level()) {
             log::error!("idle_pool register resolver failed:{}", err);
             let _ = self.resolver.take();
