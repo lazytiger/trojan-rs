@@ -90,6 +90,7 @@ pub fn run(opts: &mut Opts) {
     let check_duration = Duration::new(1, 0);
 
     let mut pool = IdlePool::new(opts, config, hostname);
+    pool.init(&poll);
 
     loop {
         let nevent = poll.poll(&mut events, Some(check_duration)).unwrap();

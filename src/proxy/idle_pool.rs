@@ -41,6 +41,12 @@ impl IdlePool {
         }
     }
 
+    pub fn init(&mut self, poll: &Poll) {
+        if self.size > 1 {
+            self.alloc(poll);
+        }
+    }
+
     pub fn get(&mut self, poll: &Poll) -> Option<TlsConn<ClientSession>> {
         self.alloc(poll);
         self.pool.pop()
