@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::net::SocketAddr;
 use std::time::Instant;
 
@@ -33,6 +34,7 @@ pub struct Connection {
     backend: Option<Box<dyn Backend>>,
     closing: bool,
     target_addr: Option<SocketAddr>,
+    data: Vec<u8>,
 }
 
 impl Connection {
@@ -48,6 +50,7 @@ impl Connection {
             backend: None,
             closing: false,
             target_addr: None,
+            data: Vec::new(),
         }
     }
 
@@ -207,12 +210,22 @@ impl Connection {
                 }
                 Status::DnsWait => {
                     if self.command == CONNECT {
+                        //if dns query is not done, cache data now
+                        if let Err(err) = self.data.write(buffer) {
+                            log::warn!("connection:{} cache data failed", self.index);
+                            self.closing = true;
+                            return;
+                        } else {
+                            buffer = &[];
+                        }
+
                         if self.target_addr.is_none() {
                             log::warn!("connection:{} dns query not done yet", self.index);
                             return;
                         }
 
                         if self.try_setup_tcp_target(opts, poll) {
+                            buffer = self.data.as_slice();
                             self.status = Status::TCPForward;
                         } else {
                             return;
