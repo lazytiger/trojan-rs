@@ -207,16 +207,6 @@ impl Connection {
                 }
                 Status::DnsWait => {
                     if self.command == CONNECT {
-                        if !buffer.is_empty() {
-                            log::debug!("connection:{} writing {} bytes payload data to target session", self.index, buffer.len());
-                            if !self.proxy.write_session(buffer) {
-                                self.closing = true;
-                                return;
-                            } else {
-                                buffer = &[];
-                            }
-                        }
-
                         if self.target_addr.is_none() {
                             log::warn!("connection:{} dns query not done yet", self.index);
                             return;
