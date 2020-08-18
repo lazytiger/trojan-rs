@@ -116,30 +116,11 @@ impl UdpBackend {
         }
     }
 
-    fn reregister(&mut self, poll: &Poll) {
-        let mut changed = false;
-        if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
-            self.readiness.insert(Ready::writable());
-            changed = true;
-            log::info!("connection:{} add writable to udp target", self.index);
-        }
-        if self.send_buffer.is_empty() && self.readiness.is_writable() {
-            self.readiness.remove(Ready::writable());
-            changed = true;
-            log::info!("connection:{} remove writable from udp target", self.index);
-        }
 
-        if changed {
-            if let Err(err) = poll.reregister(&self.socket,
-                                              self.token, self.readiness, PollOpt::edge()) {
-                log::error!("connection:{} reregister udp target failed:{}", self.index, err);
-                self.status = ConnStatus::Closing;
-            }
-        }
-    }
 
     fn check_close(&mut self, poll: &Poll) {
         let _ = poll.deregister(&self.socket);
+        self.status = ConnStatus::Closed;
     }
 }
 
@@ -163,6 +144,28 @@ impl Backend for UdpBackend {
             self.send_buffer.extend_from_slice(buffer);
             let buffer = self.send_buffer.split();
             self.do_send(buffer.as_ref(), opts);
+        }
+    }
+
+    fn reregister(&mut self, poll: &Poll) {
+        let mut changed = false;
+        if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
+            self.readiness.insert(Ready::writable());
+            changed = true;
+            log::info!("connection:{} add writable to udp target", self.index);
+        }
+        if self.send_buffer.is_empty() && self.readiness.is_writable() {
+            self.readiness.remove(Ready::writable());
+            changed = true;
+            log::info!("connection:{} remove writable from udp target", self.index);
+        }
+
+        if changed {
+            if let Err(err) = poll.reregister(&self.socket,
+                                              self.token, self.readiness, PollOpt::edge()) {
+                log::error!("connection:{} reregister udp target failed:{}", self.index, err);
+                self.status = ConnStatus::Closing;
+            }
         }
     }
 

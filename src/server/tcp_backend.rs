@@ -70,32 +70,12 @@ impl TcpBackend {
         }
     }
 
-    fn reregister(&mut self, poll: &Poll) {
-        let mut changed = false;
-        if self.session.wants_write() && !self.readiness.is_writable() {
-            self.readiness.insert(Ready::writable());
-            changed = true;
-            log::info!("connection:{} add writable to tcp target", self.index);
-        }
-        if !self.session.wants_write() && self.readiness.is_writable() {
-            self.readiness.remove(Ready::writable());
-            changed = true;
-            log::info!("connection:{} remove writable from tcp target", self.index);
-        }
-
-        if changed {
-            if let Err(err) = poll.reregister(&self.conn,
-                                              self.token, self.readiness, PollOpt::edge()) {
-                log::error!("connection:{} reregister tcp target failed:{}", self.index, err);
-                self.status = ConnStatus::Closing;
-            }
-        }
-    }
 
     fn check_close(&mut self, poll: &Poll) {
         if let ConnStatus::Closing = self.status {
             let _ = poll.deregister(&self.conn);
             let _ = self.conn.shutdown(Shutdown::Both);
+            self.status = ConnStatus::Closed;
         }
     }
 }
@@ -148,6 +128,28 @@ impl Backend for TcpBackend {
                     self.status = ConnStatus::Closing;
                     break;
                 }
+            }
+        }
+    }
+
+    fn reregister(&mut self, poll: &Poll) {
+        let mut changed = false;
+        if self.session.wants_write() && !self.readiness.is_writable() {
+            self.readiness.insert(Ready::writable());
+            changed = true;
+            log::info!("connection:{} add writable to tcp target", self.index);
+        }
+        if !self.session.wants_write() && self.readiness.is_writable() {
+            self.readiness.remove(Ready::writable());
+            changed = true;
+            log::info!("connection:{} remove writable from tcp target", self.index);
+        }
+
+        if changed {
+            if let Err(err) = poll.reregister(&self.conn,
+                                              self.token, self.readiness, PollOpt::edge()) {
+                log::error!("connection:{} reregister tcp target failed:{}", self.index, err);
+                self.status = ConnStatus::Closing;
             }
         }
     }
