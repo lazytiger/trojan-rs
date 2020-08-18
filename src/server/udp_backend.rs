@@ -122,7 +122,6 @@ impl UdpBackend {
     }
 
 
-
     fn check_close(&mut self, poll: &Poll) {
         let _ = poll.deregister(&self.socket);
         self.status = ConnStatus::Closed;
@@ -130,7 +129,7 @@ impl UdpBackend {
 }
 
 impl Backend for UdpBackend {
-    fn ready(&mut self, event: &Event, poll: &Poll, opts: &mut Opts, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>) {
         if event.readiness().is_readable() {
             self.do_read(conn);
         }
@@ -138,8 +137,6 @@ impl Backend for UdpBackend {
         if event.readiness().is_writable() {
             self.try_send(opts);
         }
-
-        self.reregister(poll);
     }
 
     fn dispatch(&mut self, buffer: &[u8], opts: &mut Opts) {

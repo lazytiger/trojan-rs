@@ -21,7 +21,7 @@ pub struct TlsServer {
 }
 
 pub trait Backend {
-    fn ready(&mut self, event: &Event, poll: &Poll, opts: &mut Opts, conn: &mut TlsConn<ServerSession>);
+    fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>);
     fn dispatch(&mut self, data: &[u8], opts: &mut Opts);
     fn reregister(&mut self, poll: &Poll);
     fn close_now(&mut self, poll: &Poll);

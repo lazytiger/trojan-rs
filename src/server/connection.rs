@@ -83,7 +83,7 @@ impl Connection {
                 match self.status {
                     Status::UDPForward | Status::TCPForward => {
                         if let Some(backend) = self.backend.as_mut() {
-                            backend.ready(event, poll, opts, &mut self.proxy);
+                            backend.ready(event, opts, &mut self.proxy);
                         } else {
                             log::error!("connection:{} has invalid status", self.index);
                         }
@@ -105,7 +105,7 @@ impl Connection {
                 match self.status {
                     Status::UDPForward | Status::TCPForward => {
                         if let Some(backend) = self.backend.as_mut() {
-                            backend.ready(event, poll, opts, &mut self.proxy);
+                            backend.ready(event, opts, &mut self.proxy);
                         } else {
                             log::error!("connection:{} got invalid read status", self.index);
                         }
@@ -119,6 +119,7 @@ impl Connection {
 
         self.proxy.reregister(poll, false);
         let closing = if let Some(backend) = &mut self.backend {
+            backend.reregister(poll);
             backend.closing()
         } else {
             false

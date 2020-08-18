@@ -81,7 +81,7 @@ impl TcpBackend {
 }
 
 impl Backend for TcpBackend {
-    fn ready(&mut self, event: &Event, poll: &Poll, _: &mut Opts, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, _: &mut Opts, conn: &mut TlsConn<ServerSession>) {
         if event.readiness().is_readable() {
             self.do_read(conn);
         }
@@ -89,8 +89,6 @@ impl Backend for TcpBackend {
         if event.readiness().is_writable() {
             self.do_send();
         }
-
-        self.reregister(poll);
     }
 
     fn dispatch(&mut self, mut buffer: &[u8], _: &mut Opts) {
