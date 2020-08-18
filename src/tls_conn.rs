@@ -131,8 +131,8 @@ impl<T: Session> TlsConn<T> {
         }
     }
 
-    pub fn reregister(&mut self, poll: &Poll) {
-        let mut changed = false;
+    pub fn reregister(&mut self, poll: &Poll, force: bool) {
+        let mut changed = force;
         if self.session.wants_write() && !self.readiness.is_writable() {
             self.readiness.insert(Ready::writable());
             changed = true;

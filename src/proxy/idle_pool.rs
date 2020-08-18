@@ -114,12 +114,14 @@ impl IdlePool {
             let conn = self.pool.get_mut(i).unwrap();
             if conn.token() == event.token() {
                 if event.readiness().is_readable() {
+                    log::trace!("connection:{} readable", event.token().0);
                     conn.do_read();
                 }
                 if event.readiness().is_writable() {
+                    log::trace!("connection:{} writable", event.token().0);
                     conn.do_send();
                 }
-                conn.reregister(poll);
+                conn.reregister(poll, false);
                 conn.check_close(poll);
                 if conn.closed() {
                     self.pool.remove(i);

@@ -95,6 +95,7 @@ pub fn run(opts: &mut Opts) {
         let nevent = poll.poll(&mut events, Some(check_duration)).unwrap();
         log::trace!("poll got {} events", nevent);
         for event in &events {
+            log::trace!("dispatch token:{}", event.token().0);
             match event.token() {
                 Token(TCP_LISTENER) => {
                     tcp_server.accept(&event, opts, &poll, &mut pool);

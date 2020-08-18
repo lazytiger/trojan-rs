@@ -133,7 +133,7 @@ impl Connection {
     }
 
     fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
-        self.server_conn.reregister(poll);
+        self.server_conn.reregister(poll, true);
         self.recv_buffer.clear();
         TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
         self.server_conn.write_session(self.recv_buffer.as_ref())
@@ -181,13 +181,13 @@ impl Connection {
         }
 
         self.reregister(poll);
-        if self.closing {
+        if self.closing || self.server_conn.closing() {
             self.close_now(poll);
         }
     }
 
     fn close_now(&mut self, poll: &Poll) {
-        self.server_conn.check_close(poll);
+        self.server_conn.close_now(poll);
         self.closed = true;
         let secs = self.client_time.elapsed().as_secs();
         log::warn!("connection:{} closed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
@@ -198,7 +198,7 @@ impl Connection {
         if self.closing {
             return;
         }
-        self.server_conn.reregister(poll);
+        self.server_conn.reregister(poll, false);
     }
 
     fn try_send_server(&mut self) {

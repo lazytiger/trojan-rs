@@ -97,6 +97,7 @@ impl TcpServer {
         if let Some(conn) = self.conns.get_mut(&index) {
             conn.ready(event, poll);
             if conn.closed() {
+                log::info!("connection:{} removed from list", index);
                 self.conns.remove(&index);
             }
         }
@@ -125,7 +126,7 @@ impl Connection {
     }
 
     fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
-        self.server_conn.reregister(poll);
+        self.server_conn.reregister(poll, true);
         let mut request = BytesMut::new();
         self.client_readiness = Ready::readable();
         TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, opts);
@@ -176,13 +177,13 @@ impl Connection {
 
 
         self.reregister(poll);
-        if self.closing {
+        if self.closing || self.server_conn.closing() {
             self.close_now(poll);
         }
-        self.server_conn.check_close(poll);
     }
 
     fn close_now(&mut self, poll: &Poll) {
+        self.server_conn.close_now(poll);
         let _ = poll.deregister(&self.client);
         let _ = self.client.shutdown(Shutdown::Both);
         self.closed = true;
@@ -212,7 +213,7 @@ impl Connection {
             }
         }
 
-        self.server_conn.reregister(poll)
+        self.server_conn.reregister(poll, false)
     }
 
     fn client_token(&self) -> Token {
