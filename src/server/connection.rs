@@ -212,11 +212,9 @@ impl Connection {
                     if self.command == CONNECT {
                         //if dns query is not done, cache data now
                         if let Err(err) = self.data.write(buffer) {
-                            log::warn!("connection:{} cache data failed", self.index);
+                            log::warn!("connection:{} cache data failed {}", self.index, err);
                             self.closing = true;
                             return;
-                        } else {
-                            buffer = &[];
                         }
 
                         if self.target_addr.is_none() {
@@ -225,11 +223,9 @@ impl Connection {
                         }
 
                         if self.try_setup_tcp_target(opts, poll) {
-                            buffer = self.data.as_slice();
                             self.status = Status::TCPForward;
-                        } else {
-                            return;
                         }
+                        return;
                     } else {
                         if self.try_setup_udp_target(opts, poll) {
                             self.status = Status::UDPForward;
@@ -267,7 +263,11 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let backend = TcpBackend::new(tcp_target, self.index, self.target_token(), opts.tcp_idle_duration);
+                let mut backend = TcpBackend::new(tcp_target, self.index, self.target_token(), opts.tcp_idle_duration);
+                if !self.data.is_empty() {
+                    backend.dispatch(self.data.as_slice(), opts);
+                    self.data.clear();
+                }
                 self.backend.replace(Box::new(backend));
             }
             Err(err) => {
