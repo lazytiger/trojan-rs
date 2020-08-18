@@ -1,13 +1,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use mio::{Event, Poll, Token};
+use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::TcpStream;
 use rustls::{ClientConfig, ClientSession};
 use webpki::DNSName;
 
 use crate::config::Opts;
-use crate::proxy::{CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, next_index};
+use crate::proxy::{CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, next_index, RESOLVER};
+use crate::resolver::EventedResolver;
 use crate::sys;
 use crate::tls_conn::TlsConn;
 
@@ -16,8 +17,11 @@ pub struct IdlePool {
     next_index: usize,
     size: usize,
     addr: SocketAddr,
+    domain: String,
+    port: u16,
     marker: u8,
     config: Arc<ClientConfig>,
+    resolver: Option<EventedResolver>,
     hostname: DNSName,
 }
 
@@ -27,8 +31,11 @@ impl IdlePool {
             size: opts.proxy_args().pool_size + 1,
             addr: opts.back_addr.unwrap(),
             marker: opts.marker,
+            port: opts.proxy_args().port,
+            domain: opts.proxy_args().hostname.clone(),
             pool: Vec::new(),
             next_index: MIN_INDEX,
+            resolver: None,
             config,
             hostname,
         }
@@ -47,6 +54,8 @@ impl IdlePool {
                 if conn.setup(poll) {
                     self.pool.push(conn);
                 }
+            } else {
+                self.update_dns(poll);
             }
         }
     }
@@ -65,7 +74,6 @@ impl IdlePool {
                 }
             }
             Err(err) => {
-                //FIXME should refresh dns now?
                 log::error!("connection to server failed:{}", err);
                 None
             }
@@ -80,8 +88,30 @@ impl IdlePool {
         }
     }
 
+    fn update_dns(&mut self, poll: &Poll) {
+        let resovler = EventedResolver::new(self.domain.clone());
+        self.resolver.replace(resovler);
+        if let Err(err) = poll.register(self.resolver.as_ref().unwrap(), Token(RESOLVER), Ready::readable(), PollOpt::level()) {
+            log::error!("idle_pool register resolver failed:{}", err);
+            let _ = self.resolver.take();
+        }
+    }
+
+    pub fn resolve(&mut self, poll: &Poll) {
+        if let Some(address) = self.resolver.as_ref().unwrap().address() {
+            log::info!("idle_pool got resolve result {} = {}", self.domain, address);
+            let addr = SocketAddr::new(address, self.port);
+            self.addr = addr;
+        } else {
+            log::error!("idle_pool resolve host:{} failed", self.domain);
+        }
+        let _ = poll.deregister(self.resolver.as_ref().unwrap());
+        let _ = self.resolver.take();
+    }
+
     pub fn ready(&mut self, event: &Event, poll: &Poll) {
-        for conn in &mut self.pool {
+        for i in 0..self.pool.len() {
+            let conn = self.pool.get_mut(i).unwrap();
             if conn.token() == event.token() {
                 if event.readiness().is_readable() {
                     conn.do_read();
@@ -90,6 +120,9 @@ impl IdlePool {
                     conn.do_send();
                 }
                 conn.check_close(poll);
+                if conn.closed() {
+                    self.pool.remove(i);
+                }
                 break;
             }
         }

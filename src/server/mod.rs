@@ -14,9 +14,15 @@ use crate::config::Opts;
 
 mod connection;
 mod server;
-mod resolver;
 mod tcp_backend;
 mod udp_backend;
+
+const MIN_INDEX: usize = 2;
+const MAX_INDEX: usize = std::usize::MAX / CHANNEL_CNT;
+const CHANNEL_CNT: usize = 2;
+const CHANNEL_PROXY: usize = 0;
+const CHANNEL_BACKEND: usize = 1;
+const LISTENER: usize = 1;
 
 fn init_config(opts: &Opts) -> Arc<ServerConfig> {
     let mut config = ServerConfig::new(NoClientAuth::new());
@@ -59,7 +65,7 @@ pub fn run(opts: &mut Opts) {
     let poll = Poll::new().unwrap();
     let addr = opts.local_addr.parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
-    poll.register(&listener, Token(1), Ready::readable(), PollOpt::edge()).unwrap();
+    poll.register(&listener, Token(LISTENER), Ready::readable(), PollOpt::edge()).unwrap();
     let mut server = TlsServer::new(listener, config);
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
@@ -69,7 +75,7 @@ pub fn run(opts: &mut Opts) {
         log::trace!("poll got {} events", nevent);
         for event in &events {
             match event.token() {
-                Token(1) => {
+                Token(LISTENER) => {
                     server.accept(&poll, opts);
                 }
                 _ => {
@@ -79,7 +85,7 @@ pub fn run(opts: &mut Opts) {
         }
         let now = Instant::now();
         if now - last_check_time > check_duration {
-            server.check_timeout(now - opts.idle_duration, &poll);
+            server.check_timeout(now, &poll);
             last_check_time = now;
         }
     }

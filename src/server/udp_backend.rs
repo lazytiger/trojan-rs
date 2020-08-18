@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::Duration;
 
 use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
@@ -19,10 +19,11 @@ pub struct UdpBackend {
     token: Token,
     status: ConnStatus,
     readiness: Ready,
+    timeout: Duration,
 }
 
 impl UdpBackend {
-    pub fn new(socket: UdpSocket, index: usize, token: Token) -> UdpBackend {
+    pub fn new(socket: UdpSocket, index: usize, token: Token, timeout: Duration) -> UdpBackend {
         UdpBackend {
             socket,
             send_buffer: Default::default(),
@@ -32,6 +33,7 @@ impl UdpBackend {
             token,
             status: ConnStatus::Established,
             readiness: Ready::empty(),
+            timeout,
         }
     }
 
@@ -169,8 +171,8 @@ impl Backend for UdpBackend {
         self.check_close(poll)
     }
 
-    fn timeout(&self, t1: Instant, t2: Instant) -> bool {
-        t1 < t2
+    fn get_timeout(&self) -> Duration {
+        self.timeout
     }
 
     fn status(&self) -> ConnStatus {

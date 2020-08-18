@@ -13,7 +13,7 @@ pub struct DnsEntry {
 }
 
 #[derive(Clap)]
-#[clap(version = "0.4", author = "Hoping White", about = "a trojan implementation using rust")]
+#[clap(version = "0.4", author = "Hoping White", about = "A trojan implementation using rust")]
 pub struct Opts {
     #[clap(subcommand)]
     pub mode: Mode,
@@ -27,8 +27,10 @@ pub struct Opts {
     pub log_level: u8,
     #[clap(short, long, default_value = "1", help = "set marker used by tproxy")]
     pub marker: u8,
-    #[clap(short, long, default_value = "120", help = "time in seconds before closing an inactive connection")]
-    pub idle_timeout: u64,
+    #[clap(short, long, default_value = "60", help = "time in seconds before closing an inactive udp connection")]
+    pub udp_idle_timeout: u64,
+    #[clap(short, long, default_value = "600", help = "time in seconds before closing an inactive tcp connection")]
+    pub tcp_idle_timeout: u64,
     #[clap(skip)]
     dns_cache_duration: Duration,
     #[clap(skip)]
@@ -44,7 +46,9 @@ pub struct Opts {
     #[clap(skip)]
     pub empty_addr: Option<SocketAddr>,
     #[clap(skip)]
-    pub idle_duration: Duration,
+    pub udp_idle_duration: Duration,
+    #[clap(skip)]
+    pub tcp_idle_duration: Duration,
 }
 
 #[derive(Clap)]
@@ -59,8 +63,10 @@ pub enum Mode {
 pub struct ProxyArgs {
     #[clap(short = "H", long, help = "trojan server hostname")]
     pub hostname: String,
+    #[clap(short = "t", long, default_value = "443", help = "trojan server port")]
+    pub port: u16,
     #[clap(short = "P", long, default_value = "0", help = "pool size, 0 for disable")]
-    pub pool_size:usize,
+    pub pool_size: usize,
 }
 
 #[derive(Clap)]
@@ -106,12 +112,12 @@ impl Opts {
                 }
                 let resolver = Resolver::from_system_conf().unwrap();
                 let response = resolver.lookup_ip(hostname.as_str()).unwrap();
-                while let Some(ip) = response.iter().next() {
+                for ip in response.iter() {
                     if ip.is_ipv4() {
-                        self.back_addr.replace(SocketAddr::new(ip, 443));
+                        self.back_addr.replace(SocketAddr::new(ip, args.port));
                         break;
                     } else if self.back_addr.is_none() {
-                        self.back_addr.replace(SocketAddr::new(ip, 443));
+                        self.back_addr.replace(SocketAddr::new(ip, args.port));
                     }
                 }
                 if self.back_addr.is_none() {
@@ -127,7 +133,8 @@ impl Opts {
             SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
         };
         self.empty_addr.replace(empty_addr);
-        self.idle_duration = Duration::new(self.idle_timeout, 0);
+        self.udp_idle_duration = Duration::new(self.udp_idle_timeout, 0);
+        self.tcp_idle_duration = Duration::new(self.tcp_idle_timeout, 0);
         self.digest_pass();
     }
 

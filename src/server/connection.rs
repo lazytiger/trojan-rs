@@ -7,7 +7,8 @@ use rustls::ServerSession;
 
 use crate::config::Opts;
 use crate::proto::{CONNECT, Sock5Address, TrojanRequest};
-use crate::server::resolver::EventedResolver;
+use crate::resolver::EventedResolver;
+use crate::server::{CHANNEL_BACKEND, CHANNEL_CNT};
 use crate::server::server::Backend;
 use crate::server::tcp_backend::TcpBackend;
 use crate::server::udp_backend::UdpBackend;
@@ -261,7 +262,7 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let backend = TcpBackend::new(tcp_target, self.index, self.target_token());
+                let backend = TcpBackend::new(tcp_target, self.index, self.target_token(), opts.tcp_idle_duration);
                 self.backend.replace(Box::new(backend));
             }
             Err(err) => {
@@ -292,7 +293,7 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let backend = UdpBackend::new(udp_target, self.index, self.target_token());
+                let backend = UdpBackend::new(udp_target, self.index, self.target_token(), opts.udp_idle_duration);
                 self.backend.replace(Box::new(backend));
             }
         }
@@ -310,6 +311,6 @@ impl Connection {
     }
 
     fn target_token(&self) -> Token {
-        Token((self.index << 1) + 1)
+        Token((self.index * CHANNEL_CNT) + CHANNEL_BACKEND)
     }
 }

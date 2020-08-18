@@ -25,6 +25,7 @@ const MIN_INDEX: usize = 2;
 const MAX_INDEX: usize = std::usize::MAX / CHANNEL_CNT;
 const TCP_LISTENER: usize = 1;
 const UDP_LISTENER: usize = 2;
+const RESOLVER: usize = 3;
 const CHANNEL_CNT: usize = 4;
 const CHANNEL_IDLE: usize = 0;
 const CHANNEL_UDP: usize = 1;
@@ -101,6 +102,9 @@ pub fn run(opts: &mut Opts) {
                 Token(UDP_LISTENER) => {
                     udp_server.accept(&event, opts, &poll, &mut pool);
                 }
+                Token(RESOLVER) => {
+                    pool.resolve(&poll);
+                }
                 Token(i) if i % CHANNEL_CNT == CHANNEL_IDLE => {
                     pool.ready(&event, &poll);
                 }
@@ -114,7 +118,7 @@ pub fn run(opts: &mut Opts) {
         }
         let now = Instant::now();
         if now - last_check_time > check_duration {
-            udp_cache.check_timeout(now - opts.idle_duration);
+            udp_cache.check_timeout(now - opts.udp_idle_duration);
             last_check_time = now;
         }
     }

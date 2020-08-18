@@ -10,6 +10,7 @@ mod sys;
 mod proxy;
 mod session;
 mod tls_conn;
+mod resolver;
 
 
 fn main() {

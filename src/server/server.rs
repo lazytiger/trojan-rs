@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use mio::{Event, Poll, Token};
@@ -7,6 +8,7 @@ use mio::net::TcpListener;
 use rustls::{ServerConfig, ServerSession};
 
 use crate::config::Opts;
+use crate::server::{CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX};
 use crate::server::connection::Connection;
 use crate::sys;
 use crate::tls_conn::{ConnStatus, TlsConn};
@@ -36,7 +38,10 @@ pub trait Backend {
             false
         }
     }
-    fn timeout(&self, t1: Instant, t2: Instant) -> bool;
+    fn timeout(&self, t1: Instant, t2: Instant) -> bool {
+        t1 - t2 < self.get_timeout()
+    }
+    fn get_timeout(&self) -> Duration;
     fn status(&self) -> ConnStatus;
 }
 
@@ -60,11 +65,11 @@ impl TlsServer {
                         continue;
                     } else if let Err(err) = stream.set_nodelay(true) {
                         log::error!("set nodelay failed:{}", err);
-                        continue
+                        continue;
                     }
                     let session = ServerSession::new(&self.config);
                     let index = self.next_index();
-                    let mut conn = Connection::new(index, TlsConn::new(index, Token(index * 2), session, stream));
+                    let mut conn = Connection::new(index, TlsConn::new(index, Token(index * CHANNEL_CNT + CHANNEL_PROXY), session, stream));
                     if conn.setup(poll, opts) {
                         self.conns.insert(index, conn);
                     } else {
@@ -86,8 +91,8 @@ impl TlsServer {
     fn next_index(&mut self) -> usize {
         let index = self.next_id;
         self.next_id += 1;
-        if self.next_id == 0 {
-            self.next_id = 2;
+        if self.next_id > MAX_INDEX {
+            self.next_id = MIN_INDEX;
         }
         index
     }

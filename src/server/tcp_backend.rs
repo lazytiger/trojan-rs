@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::net::Shutdown;
+use std::time::Duration;
 use std::time::Instant;
 
 use bytes::Buf;
@@ -19,12 +20,14 @@ pub struct TcpBackend {
     readiness: Ready,
     index: usize,
     token: Token,
+    timeout: Duration,
 }
 
 impl TcpBackend {
-    pub fn new(conn: TcpStream, index: usize, token: Token) -> TcpBackend {
+    pub fn new(conn: TcpStream, index: usize, token: Token, timeout: Duration) -> TcpBackend {
         TcpBackend {
             conn,
+            timeout,
             session: TcpSession::new(index),
             status: ConnStatus::Established,
             readiness: Ready::readable(),
@@ -156,6 +159,10 @@ impl Backend for TcpBackend {
 
     fn timeout(&self, _: Instant, _: Instant) -> bool {
         return false;
+    }
+
+    fn get_timeout(&self) -> Duration {
+        self.timeout
     }
 
     fn status(&self) -> ConnStatus {
