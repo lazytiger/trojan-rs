@@ -71,6 +71,7 @@ impl UdpServer {
                                     log::info!("connection:{} is ready", index);
                                     index
                                 } else {
+                                    conn.close_now(poll);
                                     continue;
                                 }
                             } else {

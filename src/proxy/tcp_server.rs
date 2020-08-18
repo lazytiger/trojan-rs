@@ -68,6 +68,7 @@ impl TcpServer {
                                 if conn.setup(opts, poll) {
                                     self.conns.insert(conn.index(), conn);
                                 } else {
+                                    conn.close_now(poll);
                                     continue;
                                 }
                             } else {
