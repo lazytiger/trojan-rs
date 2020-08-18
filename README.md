@@ -17,9 +17,9 @@ should work with the [original server](https://github.com/trojan-gfw/trojan) in 
 ## How to use it
 ```bash
 hoping@HopingPC:~/workspace/trojan-rs$ trojan --help
-trojan 0.3
+trojan 0.4
 Hoping White
-a trojan implementation using rust
+A trojan implementation using rust
 
 USAGE:
     trojan [OPTIONS] --local-addr <local-addr> --password <password> <SUBCOMMAND>
@@ -29,13 +29,17 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-    -i, --idle-timeout <idle-timeout>    time in seconds before closing an inactive connection [default: 120]
-    -a, --local-addr <local-addr>        listen address for server, format like 0.0.0.0:443
-    -l, --log-file <log-file>            log file path
-    -L, --log-level <log-level>          log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5
-                                         for off [default: 2]
-    -m, --marker <marker>                set marker used by tproxy [default: 1]
-    -p, --password <password>            passwords for negotiation
+    -a, --local-addr <local-addr>                listen address for server, format like 0.0.0.0:443
+    -l, --log-file <log-file>                    log file path
+    -L, --log-level <log-level>
+            log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off [default: 2]
+
+    -m, --marker <marker>                        set marker used by tproxy [default: 1]
+    -p, --password <password>                    passwords for negotiation
+    -t, --tcp-idle-timeout <tcp-idle-timeout>
+            time in seconds before closing an inactive tcp connection [default: 600]
+
+    -u, --udp-idle-timeout <udp-idle-timeout>    time in seconds before closing an inactive udp connection [default: 60]
 
 SUBCOMMANDS:
     help      Prints this message or the help of the given subcommand(s)
@@ -44,19 +48,23 @@ SUBCOMMANDS:
 
 hoping@HopingPC:~/workspace/trojan-rs$ trojan help proxy
 trojan-proxy
+run in proxy mode
 
 USAGE:
-    trojan proxy --hostname <hostname>
+    trojan proxy [OPTIONS] --hostname <hostname>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -H, --hostname <hostname>    trojan server hostname
+    -H, --hostname <hostname>      trojan server hostname
+    -P, --pool-size <pool-size>    pool size, 0 for disable [default: 0]
+    -o, --port <port>              trojan server port [default: 443]
 
 hoping@HopingPC:~/workspace/trojan-rs$ trojan help server
 trojan-server
+run in server mode
 
 USAGE:
     trojan server [OPTIONS] --cert <cert> --key <key>
