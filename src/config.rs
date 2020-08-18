@@ -63,7 +63,7 @@ pub enum Mode {
 pub struct ProxyArgs {
     #[clap(short = "H", long, help = "trojan server hostname")]
     pub hostname: String,
-    #[clap(short = "t", long, default_value = "443", help = "trojan server port")]
+    #[clap(short = "o", long, default_value = "443", help = "trojan server port")]
     pub port: u16,
     #[clap(short = "P", long, default_value = "0", help = "pool size, 0 for disable")]
     pub pool_size: usize,
