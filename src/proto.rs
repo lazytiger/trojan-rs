@@ -184,7 +184,7 @@ impl<'a> UdpAssociate<'a> {
             }
             let length = to_u16(buffer) as usize;
             if length > MAX_UDP_SIZE {
-                log::warn!("udp packet size:{} is too long", length);
+                log::error!("udp packet size:{} is too long", length);
                 return UdpParseResult::InvalidProtocol;
             }
             if buffer.len() < length + 4 {
