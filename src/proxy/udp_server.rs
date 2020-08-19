@@ -185,6 +185,7 @@ impl Connection {
         if self.send_buffer.is_empty() {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
+            return;
         }
         self.status = ConnStatus::Shutdown;
     }
