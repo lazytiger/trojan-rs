@@ -80,7 +80,7 @@ impl<T: Session> TlsConn<T> {
                     if size == 0 {
                         log::warn!("connection:{} read from server failed with eof", self.index());
                         self.status = ConnStatus::Closing;
-                        return None;
+                        break;
                     }
                     log::info!("connection:{} read {} bytes from server", self.index(), size);
                 }
@@ -91,7 +91,7 @@ impl<T: Session> TlsConn<T> {
                 Err(err) => {
                     log::warn!("connection:{} read from server failed:{}", self.index(), err);
                     self.status = ConnStatus::Closing;
-                    return None;
+                    break;
                 }
             }
         }
