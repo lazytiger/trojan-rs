@@ -34,10 +34,10 @@ pub fn tcp_read<T: Session>(index: usize, mut conn: &TcpStream, recv_buf: &mut V
 }
 
 pub fn tcp_send(index: usize, mut conn: &TcpStream, send_buffer: &mut BytesMut, mut data: &[u8]) -> bool {
-    if data.len() == 0 {
-        return true;
-    }
     loop {
+        if data.len() == 0 {
+            return true;
+        }
         match conn.write(data) {
             Ok(size) => {
                 data = &data[size..];
