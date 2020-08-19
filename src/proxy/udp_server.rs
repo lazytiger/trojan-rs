@@ -196,7 +196,6 @@ impl Connection {
         if event.readiness().is_readable() {
             self.try_read_server(opts, udp_cache);
         }
-
         if event.readiness().is_writable() {
             self.try_send_server();
         }

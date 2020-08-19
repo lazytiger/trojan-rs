@@ -163,7 +163,6 @@ impl Connection {
                 if event.readiness().is_readable() {
                     self.try_read_client();
                 }
-
                 if event.readiness().is_writable() {
                     self.try_send_client(&[]);
                 }
@@ -172,7 +171,6 @@ impl Connection {
                 if event.readiness().is_readable() {
                     self.try_read_server();
                 }
-
                 if event.readiness().is_writable() {
                     self.try_send_server();
                 }
@@ -263,7 +261,6 @@ impl Connection {
     fn try_read_client(&mut self) {
         if !tcp_util::tcp_read(self.index, &self.client, &mut self.recv_buffer, &mut self.server_conn) {
             self.status = ConnStatus::Closing;
-            return;
         }
 
         self.try_send_server();

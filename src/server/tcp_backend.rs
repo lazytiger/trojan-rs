@@ -40,7 +40,6 @@ impl TcpBackend {
     fn do_read(&mut self, conn: &mut TlsConn<ServerSession>) {
         if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
             self.status = ConnStatus::Closing;
-            return;
         }
 
         conn.do_send();
@@ -74,7 +73,6 @@ impl Backend for TcpBackend {
         if event.readiness().is_readable() {
             self.do_read(conn);
         }
-
         if event.readiness().is_writable() {
             self.do_send(&[]);
         }

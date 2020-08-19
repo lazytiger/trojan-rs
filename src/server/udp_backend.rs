@@ -95,11 +95,11 @@ impl UdpBackend {
                     UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
                     if !conn.write_session(self.recv_head.as_ref()) {
                         self.status = ConnStatus::Closing;
-                        return;
+                        break;
                     }
                     if !conn.write_session(&self.recv_body.as_slice()[..size]) {
                         self.status = ConnStatus::Closing;
-                        return;
+                        break;
                     }
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -109,7 +109,7 @@ impl UdpBackend {
                 Err(err) => {
                     log::warn!("connection:{} got udp read err:{}", self.index, err);
                     self.status = ConnStatus::Closing;
-                    return;
+                    break;
                 }
             }
         }
@@ -139,7 +139,6 @@ impl Backend for UdpBackend {
         if event.readiness().is_readable() {
             self.do_read(conn);
         }
-
         if event.readiness().is_writable() {
             self.try_send(opts);
         }
