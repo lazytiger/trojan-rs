@@ -1,6 +1,5 @@
 use std::net::Shutdown;
 use std::time::Duration;
-use std::time::Instant;
 
 use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
@@ -69,12 +68,12 @@ impl TcpBackend {
 }
 
 impl Backend for TcpBackend {
-    fn ready(&mut self, event: &Event, _: &mut Opts, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>) {
         if event.readiness().is_readable() {
             self.do_read(conn);
         }
         if event.readiness().is_writable() {
-            self.do_send(&[]);
+            self.dispatch(&[], opts);
         }
     }
 
@@ -123,10 +122,6 @@ impl Backend for TcpBackend {
             let _ = self.conn.shutdown(Shutdown::Both);
             self.status = ConnStatus::Closed;
         }
-    }
-
-    fn timeout(&self, _: Instant, _: Instant) -> bool {
-        return false;
     }
 
     fn get_timeout(&self) -> Duration {

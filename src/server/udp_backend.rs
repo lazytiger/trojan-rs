@@ -116,15 +116,6 @@ impl UdpBackend {
         conn.do_send();
     }
 
-    fn try_send(&mut self, opts: &mut Opts) {
-        if self.send_buffer.is_empty() {
-            self.do_send(&[], opts);
-        } else {
-            let buffer = self.send_buffer.split();
-            self.do_send(buffer.as_ref(), opts);
-        }
-    }
-
     fn setup(&mut self, poll: &Poll) {
         if let Err(err) = poll.reregister(&self.socket,
                                           self.token, self.readiness, PollOpt::edge()) {
@@ -140,7 +131,7 @@ impl Backend for UdpBackend {
             self.do_read(conn);
         }
         if event.readiness().is_writable() {
-            self.try_send(opts);
+            self.dispatch(&[], opts);
         }
     }
 
