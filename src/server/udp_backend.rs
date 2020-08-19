@@ -184,8 +184,10 @@ impl Backend for UdpBackend {
     }
 
     fn check_close(&mut self, poll: &Poll) {
-        let _ = poll.deregister(&self.socket);
-        self.status = ConnStatus::Closed;
+        if let ConnStatus::Closing = self.status {
+            let _ = poll.deregister(&self.socket);
+            self.status = ConnStatus::Closed;
+        }
     }
 
     fn get_timeout(&self) -> Duration {

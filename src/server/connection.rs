@@ -151,7 +151,7 @@ impl Connection {
     }
 
     pub fn setup(&mut self, poll: &Poll, _: &Opts) -> bool {
-        self.proxy.setup(poll)
+        self.proxy.register(poll)
     }
 
 

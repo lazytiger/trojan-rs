@@ -57,7 +57,7 @@ impl IdlePool {
         for _ in size..self.size {
             let conn = self.new_conn();
             if let Some(mut conn) = conn {
-                if conn.setup(poll) {
+                if conn.register(poll) {
                     self.pool.push(conn);
                 }
             } else {
@@ -116,15 +116,14 @@ impl IdlePool {
     }
 
     pub fn ready(&mut self, event: &Event, poll: &Poll) {
+        let mut found = false;
         for i in 0..self.pool.len() {
             let conn = self.pool.get_mut(i).unwrap();
             if conn.token() == event.token() {
                 if event.readiness().is_readable() {
-                    log::trace!("connection:{} readable", event.token().0);
                     conn.do_read();
                 }
                 if event.readiness().is_writable() {
-                    log::trace!("connection:{} writable", event.token().0);
                     conn.do_send();
                 }
                 conn.reregister(poll);
@@ -132,8 +131,12 @@ impl IdlePool {
                 if conn.closed() {
                     self.pool.remove(i);
                 }
+                found = true;
                 break;
             }
+        }
+        if !found {
+            log::error!("idle token:{} not found", event.token().0);
         }
     }
 }

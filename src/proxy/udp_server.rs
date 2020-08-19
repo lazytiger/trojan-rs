@@ -186,6 +186,7 @@ impl Connection {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
         }
+        self.status = ConnStatus::Shutdown;
     }
 
     fn ready(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, udp_cache: &mut UdpSvrCache) {

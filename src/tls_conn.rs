@@ -37,6 +37,7 @@ impl<T: Session> TlsConn<T> {
     pub fn reset_index(&mut self, index: usize, token: Token) {
         self.index = index;
         self.token = token;
+
     }
 
     pub fn check_close(&mut self, poll: &Poll) {
@@ -174,6 +175,16 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn setup(&mut self, poll: &Poll) -> bool {
+        if let Err(err) = poll.reregister(&self.stream, self.token(), self.readiness, PollOpt::level()) {
+            log::warn!("connection:{} reregister server failed:{}", self.index(), err);
+            self.status = ConnStatus::Closing;
+            false
+        } else {
+            true
+        }
+    }
+
+    pub fn register(&mut self, poll: &Poll) -> bool {
         if let Err(err) = poll.register(&self.stream, self.token(), self.readiness, PollOpt::level()) {
             log::warn!("connection:{} register server failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;

@@ -201,7 +201,7 @@ impl Connection {
         }
 
         self.client_readiness = Ready::writable();
-        if let Err(err) = poll.register(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
+        if let Err(err) = poll.reregister(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
             log::warn!("connection:{} register client failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;
             self.check_close(poll);
@@ -216,8 +216,9 @@ impl Connection {
         }
     }
 
-    fn close_now(&mut self, _: &Poll) {
+    fn close_now(&mut self, poll: &Poll) {
         let _ = self.client.shutdown(Shutdown::Both);
+        let _ = poll.deregister(&self.client);
         self.status = ConnStatus::Closed;
         let secs = self.client_time.elapsed().as_secs();
         log::warn!("connection:{} closed, target address {:?}, {} seconds,  {} bytes read, {} bytes sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
