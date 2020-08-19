@@ -47,6 +47,7 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn shutdown(&mut self, poll: &Poll) {
+        log::info!("connection:{} shutdown now", self.index);
         if !self.session.wants_write() {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
@@ -58,6 +59,7 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
+        log::info!("connection:{} closed now", self.index);
         let _ = poll.deregister(&self.stream);
         let _ = self.stream.shutdown(Shutdown::Both);
         self.status = ConnStatus::Closed

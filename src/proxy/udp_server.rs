@@ -183,6 +183,7 @@ impl Connection {
     }
 
     fn shutdown(&mut self, poll: &Poll) {
+        log::info!("connection:{} shutdown now", self.index());
         if self.send_buffer.is_empty() {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
