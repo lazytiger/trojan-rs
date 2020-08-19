@@ -6,7 +6,7 @@ use mio::net::UdpSocket;
 use rustls::ServerSession;
 
 use crate::config::Opts;
-use crate::proto::{MAX_UDP_SIZE, UdpAssociate, UdpParseResult};
+use crate::proto::{MAX_PACKET_SIZE, UdpAssociate, UdpParseResult};
 use crate::server::server::Backend;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
@@ -27,7 +27,7 @@ impl UdpBackend {
         UdpBackend {
             socket,
             send_buffer: Default::default(),
-            recv_body: vec![0u8; MAX_UDP_SIZE],
+            recv_body: vec![0u8; MAX_PACKET_SIZE],
             recv_head: Default::default(),
             index,
             token,
@@ -87,7 +87,7 @@ impl UdpBackend {
         loop {
             match self.socket.recv_from(self.recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
-                    if size == MAX_UDP_SIZE {
+                    if size == MAX_PACKET_SIZE {
                         log::error!("received {} bytes udp data, packet fragmented", size);
                     }
                     log::debug!("connection:{} got {} bytes udp data from:{}", self.index, size, addr);

@@ -1,26 +1,27 @@
-use std::io::Write;
 use std::net::Shutdown;
 use std::time::Duration;
 use std::time::Instant;
 
-use bytes::Buf;
+use bytes::BytesMut;
 use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::TcpStream;
 use rustls::ServerSession;
 
 use crate::config::Opts;
+use crate::proto::MAX_PACKET_SIZE;
 use crate::server::server::Backend;
-use crate::session::TcpSession;
+use crate::tcp_util;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct TcpBackend {
     conn: TcpStream,
-    session: TcpSession,
     status: ConnStatus,
     readiness: Ready,
     index: usize,
     token: Token,
     timeout: Duration,
+    send_buffer: BytesMut,
+    recv_buffer: Vec<u8>,
 }
 
 impl TcpBackend {
@@ -28,48 +29,31 @@ impl TcpBackend {
         TcpBackend {
             conn,
             timeout,
-            session: TcpSession::new(index),
             status: ConnStatus::Established,
             readiness: Ready::readable(),
+            send_buffer: BytesMut::new(),
+            recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             index,
             token,
         }
     }
     fn do_read(&mut self, conn: &mut TlsConn<ServerSession>) {
-        match self.session.read_backend(&mut self.conn) {
-            Err(err) => {
-                log::warn!("connection:{} read from target failed:{}", self.index, err);
-                self.status = ConnStatus::Closing;
-                return;
-            }
-            Ok(size) => {
-                log::debug!("connection:{} read {} bytes from target", self.index, size);
-            }
+        if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
+            self.status = ConnStatus::Closing;
+            return;
         }
 
-        let buffer = self.session.read_all();
-        if !buffer.is_empty() {
-            if !conn.write_session(buffer.bytes()) {
-                self.status = ConnStatus::Closing;
-                return;
-            } else {
-                conn.do_send();
-            }
-        }
+        conn.do_send();
     }
 
-    fn do_send(&mut self) {
-        match self.session.write_backend(&mut self.conn) {
-            Err(err) => {
-                log::warn!("connection:{} write to target failed:{}", self.index, err);
-                self.status = ConnStatus::Closing;
-            }
-            Ok(size) => {
-                log::debug!("connection:{} write {} bytes to target", self.index, size);
-            }
+    fn do_send(&mut self, data: &[u8]) {
+        if !tcp_util::tcp_send(self.index, &self.conn, &mut self.send_buffer, data) {
+            self.status = ConnStatus::Closing;
+            return;
         }
+
         if let ConnStatus::Shutdown = self.status {
-            if !self.session.wants_write() {
+            if self.send_buffer.is_empty() {
                 log::info!("connection:{} is closing for no data to send", self.index);
                 self.status = ConnStatus::Closing;
             }
@@ -92,45 +76,18 @@ impl Backend for TcpBackend {
         }
 
         if event.readiness().is_writable() {
-            self.do_send();
+            self.do_send(&[]);
         }
     }
 
-    fn dispatch(&mut self, mut buffer: &[u8], _: &mut Opts) {
+    fn dispatch(&mut self, buffer: &[u8], _: &mut Opts) {
         // send immediately first
-        if self.session.wants_write() {
-            if let Err(err) = self.session.write_all(buffer) {
-                self.status = ConnStatus::Closing;
-                log::error!("connection:{} write to back sesion failed:{}", self.index, err);
-                return;
-            }
-            self.do_send();
-            return;
-        }
-
-        loop {
-            if buffer.len() == 0 {
-                break;
-            }
-            match self.conn.write(buffer) {
-                Ok(size) => {
-                    buffer = &buffer[size..];
-                    log::debug!("connection:{} send {} bytes data to target", self.index, size);
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    // if data remains, copy to back session.
-                    if let Err(err) = self.session.write_all(buffer) {
-                        log::error!("connection:{} send to target session failed:{}", self.index, err);
-                        self.status = ConnStatus::Closing;
-                    }
-                    break;
-                }
-                Err(err) => {
-                    log::warn!("connection:{} send to target failed:{}", self.index, err);
-                    self.status = ConnStatus::Closing;
-                    break;
-                }
-            }
+        if self.send_buffer.is_empty() {
+            self.do_send(buffer);
+        } else {
+            self.send_buffer.extend_from_slice(buffer);
+            let buffer = self.send_buffer.split();
+            self.do_send(buffer.as_ref());
         }
     }
 
@@ -144,12 +101,12 @@ impl Backend for TcpBackend {
             }
             _ => {
                 let mut changed = false;
-                if self.session.wants_write() && !self.readiness.is_writable() {
+                if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
                     self.readiness.insert(Ready::writable());
                     changed = true;
                     log::info!("connection:{} add writable to tcp target", self.index);
                 }
-                if !self.session.wants_write() && self.readiness.is_writable() {
+                if self.send_buffer.is_empty() && self.readiness.is_writable() {
                     self.readiness.remove(Ready::writable());
                     changed = true;
                     log::info!("connection:{} remove writable from tcp target", self.index);
@@ -183,7 +140,7 @@ impl Backend for TcpBackend {
     }
 
     fn shutdown(&mut self, poll: &Poll) {
-        if !self.session.wants_write() {
+        if self.send_buffer.is_empty() {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
             return;

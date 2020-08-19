@@ -6,7 +6,7 @@ use crate::config::Opts;
 
 pub const CONNECT: u8 = 0x01;
 pub const UDP_ASSOCIATE: u8 = 0x03;
-pub const MAX_UDP_SIZE: usize = 8193;
+pub const MAX_PACKET_SIZE: usize = 8193;
 const IPV4: u8 = 0x01;
 const DOMAIN: u8 = 0x03;
 const IPV6: u8 = 0x04;
@@ -183,7 +183,7 @@ impl<'a> UdpAssociate<'a> {
                 return UdpParseResult::Continued;
             }
             let length = to_u16(buffer) as usize;
-            if length > MAX_UDP_SIZE {
+            if length > MAX_PACKET_SIZE {
                 log::error!("udp packet size:{} is too long", length);
                 return UdpParseResult::InvalidProtocol;
             }

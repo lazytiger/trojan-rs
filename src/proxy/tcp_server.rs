@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{ErrorKind, Write};
+use std::io::ErrorKind;
 use std::net::Shutdown;
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -10,11 +10,11 @@ use mio::net::{TcpListener, TcpStream};
 use rustls::ClientSession;
 
 use crate::config::Opts;
-use crate::proto::{CONNECT, TrojanRequest};
+use crate::proto::{CONNECT, MAX_PACKET_SIZE, TrojanRequest};
 use crate::proxy::{CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX, next_index};
 use crate::proxy::idle_pool::IdlePool;
-use crate::session::TcpSession;
 use crate::sys;
+use crate::tcp_util;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct TcpServer {
@@ -27,7 +27,8 @@ struct Connection {
     index: usize,
     dst_addr: SocketAddr,
     client: TcpStream,
-    client_session: TcpSession,
+    recv_buffer: Vec<u8>,
+    send_buffer: BytesMut,
     client_readiness: Ready,
     status: ConnStatus,
     client_recv: usize,
@@ -113,7 +114,8 @@ impl Connection {
             server_conn,
             client_readiness: Ready::empty(),
             status: ConnStatus::Established,
-            client_session: TcpSession::new(index),
+            send_buffer: BytesMut::new(),
+            recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             client_recv: 0,
             client_sent: 0,
             client_time: Instant::now(),
@@ -194,7 +196,7 @@ impl Connection {
     }
 
     fn shutdown(&mut self, poll: &Poll) {
-        if !self.client_session.wants_write() {
+        if self.send_buffer.is_empty() {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
             return;
@@ -234,11 +236,11 @@ impl Connection {
             }
             _ => {
                 let mut changed = false;
-                if self.client_session.wants_write() && !self.client_readiness.is_writable() {
+                if !self.send_buffer.is_empty() && !self.client_readiness.is_writable() {
                     self.client_readiness.insert(Ready::writable());
                     changed = true;
                 }
-                if !self.client_session.wants_write() && self.client_readiness.is_writable() {
+                if self.send_buffer.is_empty() && self.client_readiness.is_writable() {
                     self.client_readiness.remove(Ready::writable());
                     changed = true;
                 }
@@ -259,76 +261,33 @@ impl Connection {
     }
 
     fn try_read_client(&mut self) {
-        if let Err(err) = self.client_session.read_backend(&mut self.client) {
-            log::warn!("connection:{} read from client failed:{}", self.index(), err);
+        if !tcp_util::tcp_read(self.index, &self.client, &mut self.recv_buffer, &mut self.server_conn) {
             self.status = ConnStatus::Closing;
             return;
         }
-        let data = self.client_session.read_all();
-        if data.is_empty() {
-            return;
-        }
-        self.client_sent += data.len();
-        if !self.server_conn.write_session(data.as_ref()) {
-            self.status = ConnStatus::Closing;
-            return;
-        }
+
         self.try_send_server();
     }
 
     fn try_send_client(&mut self, buffer: &[u8]) {
-        if self.client_session.wants_write() {
-            if let Err(err) = self.client_session.write_all(buffer) {
-                log::error!("connection:{} write to client session failed:{}", self.index(), err);
-                self.status = ConnStatus::Closing;
-                return;
-            } else {
-                match self.client_session.write_backend(&mut self.client) {
-                    Err(err) => {
-                        log::warn!("connection:{} write to client failed:{}", self.index(), err);
-                        self.status = ConnStatus::Closing;
-                        return;
-                    }
-                    Ok(size) => {
-                        log::info!("connection:{} write {} bytes to client done", self.index(), size);
-                        self.client_recv += size;
-                    }
-                }
-            }
-        } else {
+        if self.send_buffer.is_empty() {
             self.do_send_client(buffer);
-        }
-        if let ConnStatus::Shutdown = self.status {
-            if !self.client_session.wants_write() {
-                self.status = ConnStatus::Closing;
-                log::info!("connection:{} is closing for no data to send", self.index());
-            }
+        } else {
+            self.send_buffer.extend_from_slice(buffer);
+            let buffer = self.send_buffer.split();
+            self.do_send_client(buffer.as_ref());
         }
     }
 
-    fn do_send_client(&mut self, mut buffer: &[u8]) {
-        loop {
-            if buffer.len() == 0 {
-                break;
-            }
-            match self.client.write(buffer) {
-                Ok(size) => {
-                    buffer = &buffer[size..];
-                    self.client_recv += size;
-                    log::info!("connection:{} send {} bytes to client", self.index(), size);
-                }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    if let Err(err) = self.client_session.write_all(buffer) {
-                        log::error!("connection:{} write data to client session failed:{}", self.index(), err);
-                        self.status = ConnStatus::Closing;
-                    }
-                    break;
-                }
-                Err(err) => {
-                    log::warn!("connection:{} send to client failed:{}", self.index(), err);
-                    self.status = ConnStatus::Closing;
-                    return;
-                }
+    fn do_send_client(&mut self, data: &[u8]) {
+        if !tcp_util::tcp_send(self.index, &self.client, &mut self.send_buffer, data) {
+            self.status = ConnStatus::Closing;
+            return;
+        }
+        if let ConnStatus::Shutdown = self.status {
+            if self.send_buffer.is_empty() {
+                self.status = ConnStatus::Closing;
+                log::info!("connection:{} is closing for no data to send", self.index());
             }
         }
     }

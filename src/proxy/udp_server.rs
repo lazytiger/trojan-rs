@@ -10,7 +10,7 @@ use mio::net::UdpSocket;
 use rustls::ClientSession;
 
 use crate::config::Opts;
-use crate::proto::{MAX_UDP_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult};
+use crate::proto::{MAX_PACKET_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult};
 use crate::proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index};
 use crate::proxy::idle_pool::IdlePool;
 use crate::proxy::udp_cache::UdpSvrCache;
@@ -45,7 +45,7 @@ impl UdpServer {
             conns: HashMap::new(),
             src_map: HashMap::new(),
             next_id: MIN_INDEX,
-            recv_buffer: vec![0u8; MAX_UDP_SIZE],
+            recv_buffer: vec![0u8; MAX_PACKET_SIZE],
         }
     }
 
@@ -54,7 +54,7 @@ impl UdpServer {
             loop {
                 match sys::recv_from_with_destination(self.udp_listener.as_ref(), self.recv_buffer.as_mut_slice()) {
                     Ok((size, src_addr, dst_addr)) => {
-                        if size == MAX_UDP_SIZE {
+                        if size == MAX_PACKET_SIZE {
                             log::error!("received {} bytes udp data, packet fragmented", size);
                         }
                         log::info!("udp received {} byte from {} to {}", size, src_addr, dst_addr);
