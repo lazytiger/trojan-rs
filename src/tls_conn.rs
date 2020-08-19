@@ -1,8 +1,8 @@
 use std::io::ErrorKind;
 
 use mio::{Poll, PollOpt, Ready, Token};
+use mio::net::Shutdown;
 use mio::net::TcpStream;
-use mio::tcp::Shutdown;
 use rustls::Session;
 
 #[derive(Copy, Clone)]
