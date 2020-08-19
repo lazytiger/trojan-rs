@@ -55,9 +55,8 @@ impl UdpServer {
             loop {
                 match sys::recv_from_with_destination(self.udp_listener.as_ref(), self.recv_buffer.as_mut_slice()) {
                     Ok((size, src_addr, dst_addr)) => {
-                        if size >= MAX_UDP_SIZE {
-                            log::error!("received {} bytes udp packet, ignore now", size);
-                            continue;
+                        if size == MAX_UDP_SIZE {
+                            log::error!("received {} bytes udp data, packet fragmented", size);
                         }
                         log::info!("udp received {} byte from {} to {}", size, src_addr, dst_addr);
                         let index = if let Some(index) = self.src_map.get(&src_addr) {

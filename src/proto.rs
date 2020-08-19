@@ -6,7 +6,7 @@ use crate::config::Opts;
 
 pub const CONNECT: u8 = 0x01;
 pub const UDP_ASSOCIATE: u8 = 0x03;
-pub const MAX_UDP_SIZE: usize = 1450;
+pub const MAX_UDP_SIZE: usize = 8193;
 const IPV4: u8 = 0x01;
 const DOMAIN: u8 = 0x03;
 const IPV6: u8 = 0x04;
