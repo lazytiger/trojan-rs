@@ -83,8 +83,7 @@ impl UdpBackend {
                 Ok((size, addr)) => {
                     if size == MAX_UDP_SIZE {
                         log::error!("udp packet exceeds limit");
-                        self.status = ConnStatus::Closing;
-                        return;
+                        continue;
                     }
                     log::debug!("connection:{} got {} bytes udp data from:{}", self.index, size, addr);
                     self.recv_head.clear();
