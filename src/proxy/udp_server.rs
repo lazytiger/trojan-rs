@@ -244,12 +244,6 @@ impl Connection {
             let buffer = self.send_buffer.split();
             self.do_send_client(buffer.as_ref(), opts, udp_cache);
         }
-        if let ConnStatus::Shutdown = self.status {
-            if self.send_buffer.is_empty() {
-                self.status = ConnStatus::Closing;
-                log::info!("connection:{} is closing for no data to send", self.index);
-            }
-        }
     }
 
     fn do_send_client(&mut self, mut buffer: &[u8], opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
@@ -270,6 +264,12 @@ impl Connection {
                     self.status = ConnStatus::Closing;
                     break;
                 }
+            }
+        }
+        if let ConnStatus::Shutdown = self.status {
+            if self.send_buffer.is_empty() {
+                self.status = ConnStatus::Closing;
+                log::info!("connection:{} is closing for no data to send", self.index);
             }
         }
     }
