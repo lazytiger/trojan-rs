@@ -109,6 +109,7 @@ impl UdpServer {
                 let src_addr = conn.src_addr;
                 self.conns.remove(&index);
                 self.src_map.remove(&src_addr);
+                log::info!("connection:{} removed from list", index);
             }
         }
     }
