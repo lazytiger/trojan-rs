@@ -1,7 +1,7 @@
 use std::io::ErrorKind;
+use std::net::Shutdown;
 
 use mio::{Poll, PollOpt, Ready, Token};
-use mio::net::Shutdown;
 use mio::net::TcpStream;
 use rustls::Session;
 
