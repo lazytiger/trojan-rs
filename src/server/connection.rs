@@ -63,9 +63,9 @@ impl Connection {
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
-        self.proxy.close_now(poll);
+        self.proxy.shutdown(poll);
         if let Some(backend) = self.backend.as_mut() {
-            backend.close_now(poll);
+            backend.shutdown(poll);
         }
     }
 
@@ -76,56 +76,47 @@ impl Connection {
     pub fn ready(&mut self, poll: &Poll, event: &Event, opts: &mut Opts) {
         self.last_active_time = Instant::now();
 
-        if event.readiness().is_readable() {
-            if self.proxy_token(event.token()) {
+        if self.proxy_token(event.token()) {
+            if event.readiness().is_readable() {
                 self.try_read_proxy(opts, poll);
-            } else {
-                match self.status {
-                    Status::UDPForward | Status::TCPForward => {
-                        if let Some(backend) = self.backend.as_mut() {
-                            backend.ready(event, opts, &mut self.proxy);
-                        } else {
-                            log::error!("connection:{} has invalid status", self.index);
-                        }
-                    }
-                    Status::DnsWait => {
-                        self.try_resolve(opts, poll);
-                    }
-                    _ => {
-                        log::error!("connection:{} has invalid status when target is readable", self.index);
-                    }
-                }
             }
-        }
-
-        if event.readiness().is_writable() {
-            if self.proxy_token(event.token()) {
+            if event.readiness().is_writable() {
                 self.try_send_proxy();
-            } else {
-                match self.status {
-                    Status::UDPForward | Status::TCPForward => {
-                        if let Some(backend) = self.backend.as_mut() {
-                            backend.ready(event, opts, &mut self.proxy);
-                        } else {
-                            log::error!("connection:{} got invalid read status", self.index);
-                        }
-                    }
-                    _ => {
-                        log::error!("connection:{} got invalid read status", self.index);
+            }
+        } else {
+            match self.status {
+                Status::UDPForward | Status::TCPForward => {
+                    if let Some(backend) = self.backend.as_mut() {
+                        backend.ready(event, opts, &mut self.proxy);
+                    } else {
+                        log::error!("connection:{} has invalid status", self.index);
                     }
                 }
+                Status::DnsWait => {
+                    self.try_resolve(opts, poll);
+                }
+                _ => {}
             }
         }
 
-        self.proxy.reregister(poll, false);
-        let closing = if let Some(backend) = &mut self.backend {
+        if self.closing {
+            // handshake failed, close anyway.
+            self.proxy.shutdown(poll);
+            return;
+        }
+
+        self.proxy.reregister(poll);
+        self.proxy.check_close(poll);
+        if let Some(backend) = &mut self.backend {
             backend.reregister(poll);
-            backend.closing()
-        } else {
-            false
-        };
-        if self.proxy.closing() || closing || self.closing {
-            self.close_now(poll);
+            backend.check_close(poll);
+            if self.proxy.closed() && !backend.closed() {
+                //proxy is closing, backend is ok, register backend with write only
+                backend.shutdown(poll);
+            } else if backend.closed() && !self.proxy.closed() {
+                //backend is closing, proxy is ok, register proxy with write only
+                self.proxy.shutdown(poll);
+            }
         }
     }
 
@@ -310,13 +301,12 @@ impl Connection {
     }
 
 
-    pub fn is_closed(&self) -> bool {
-        let closed = if let Some(backend) = &self.backend {
-            backend.closed()
+    pub fn destroyed(&self) -> bool {
+        if let Some(backend) = &self.backend {
+            self.proxy.closed() && backend.closed()
         } else {
-            true
-        };
-        closed && self.proxy.closed()
+            self.proxy.closed()
+        }
     }
 
     fn target_token(&self) -> Token {

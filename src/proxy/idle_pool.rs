@@ -127,7 +127,7 @@ impl IdlePool {
                     log::trace!("connection:{} writable", event.token().0);
                     conn.do_send();
                 }
-                conn.reregister(poll, false);
+                conn.reregister(poll);
                 conn.check_close(poll);
                 if conn.closed() {
                     self.pool.remove(i);

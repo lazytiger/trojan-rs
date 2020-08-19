@@ -8,6 +8,7 @@ use rustls::Session;
 #[derive(Copy, Clone)]
 pub enum ConnStatus {
     Established,
+    Shutdown,
     Closing,
     Closed,
 }
@@ -42,6 +43,17 @@ impl<T: Session> TlsConn<T> {
         if let ConnStatus::Closing = self.status {
             self.close_now(poll);
         }
+    }
+
+    pub fn shutdown(&mut self, poll: &Poll) {
+        if !self.session.wants_write() {
+            self.status = ConnStatus::Closing;
+            self.check_close(poll);
+            return;
+        }
+        self.readiness = Ready::writable();
+        self.status = ConnStatus::Shutdown;
+        self.setup(poll);
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
@@ -118,6 +130,12 @@ impl<T: Session> TlsConn<T> {
                 }
             }
         }
+        if let ConnStatus::Shutdown = self.status {
+            if !self.session.wants_write() {
+                self.status = ConnStatus::Closing;
+                log::info!("connection:{} is closing for no data to send", self.index());
+            }
+        }
     }
 
     pub fn write_session(&mut self, data: &[u8]) -> bool {
@@ -130,21 +148,27 @@ impl<T: Session> TlsConn<T> {
         }
     }
 
-    pub fn reregister(&mut self, poll: &Poll, force: bool) {
-        let mut changed = force;
-        if self.session.wants_write() && !self.readiness.is_writable() {
-            self.readiness.insert(Ready::writable());
-            changed = true;
-        }
-        if !self.session.wants_write() && self.readiness.is_writable() {
-            self.readiness.remove(Ready::writable());
-            changed = true;
-        }
-        if changed {
-            if let Err(err) = poll.reregister(&self.stream, self.token(), self.readiness, PollOpt::level()) {
-                log::error!("connection:{} reregister server failed:{}", self.index(), err);
-                self.status = ConnStatus::Closing;
+    pub fn reregister(&mut self, poll: &Poll) {
+        match self.status {
+            ConnStatus::Closing => {
+                let _ = poll.deregister(&self.stream);
+            }
+            ConnStatus::Closed => {
                 return;
+            }
+            _ => {
+                let mut changed = false;
+                if self.session.wants_write() && !self.readiness.is_writable() {
+                    self.readiness.insert(Ready::writable());
+                    changed = true;
+                }
+                if !self.session.wants_write() && self.readiness.is_writable() {
+                    self.readiness.remove(Ready::writable());
+                    changed = true;
+                }
+                if changed {
+                    self.setup(poll);
+                }
             }
         }
     }
@@ -156,14 +180,6 @@ impl<T: Session> TlsConn<T> {
             false
         } else {
             true
-        }
-    }
-
-    pub fn closing(&self) -> bool {
-        if let ConnStatus::Closing = self.status {
-            true
-        } else {
-            false
         }
     }
 

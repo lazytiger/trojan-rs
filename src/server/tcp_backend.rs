@@ -68,14 +68,19 @@ impl TcpBackend {
                 log::debug!("connection:{} write {} bytes to target", self.index, size);
             }
         }
+        if let ConnStatus::Shutdown = self.status {
+            if !self.session.wants_write() {
+                log::info!("connection:{} is closing for no data to send", self.index);
+                self.status = ConnStatus::Closing;
+            }
+        }
     }
 
-
-    fn check_close(&mut self, poll: &Poll) {
-        if let ConnStatus::Closing = self.status {
-            let _ = poll.deregister(&self.conn);
-            let _ = self.conn.shutdown(Shutdown::Both);
-            self.status = ConnStatus::Closed;
+    fn setup(&mut self, poll: &Poll) {
+        if let Err(err) = poll.reregister(&self.conn,
+                                          self.token, self.readiness, PollOpt::edge()) {
+            log::error!("connection:{} reregister tcp target failed:{}", self.index, err);
+            self.status = ConnStatus::Closing;
         }
     }
 }
@@ -130,30 +135,39 @@ impl Backend for TcpBackend {
     }
 
     fn reregister(&mut self, poll: &Poll) {
-        let mut changed = false;
-        if self.session.wants_write() && !self.readiness.is_writable() {
-            self.readiness.insert(Ready::writable());
-            changed = true;
-            log::info!("connection:{} add writable to tcp target", self.index);
-        }
-        if !self.session.wants_write() && self.readiness.is_writable() {
-            self.readiness.remove(Ready::writable());
-            changed = true;
-            log::info!("connection:{} remove writable from tcp target", self.index);
-        }
+        match self.status {
+            ConnStatus::Closing => {
+                let _ = poll.deregister(&self.conn);
+            }
+            ConnStatus::Closed => {
+                return;
+            }
+            _ => {
+                let mut changed = false;
+                if self.session.wants_write() && !self.readiness.is_writable() {
+                    self.readiness.insert(Ready::writable());
+                    changed = true;
+                    log::info!("connection:{} add writable to tcp target", self.index);
+                }
+                if !self.session.wants_write() && self.readiness.is_writable() {
+                    self.readiness.remove(Ready::writable());
+                    changed = true;
+                    log::info!("connection:{} remove writable from tcp target", self.index);
+                }
 
-        if changed {
-            if let Err(err) = poll.reregister(&self.conn,
-                                              self.token, self.readiness, PollOpt::edge()) {
-                log::error!("connection:{} reregister tcp target failed:{}", self.index, err);
-                self.status = ConnStatus::Closing;
+                if changed {
+                    self.setup(poll);
+                }
             }
         }
     }
 
-    fn close_now(&mut self, poll: &Poll) {
-        self.status = ConnStatus::Closing;
-        self.check_close(poll)
+    fn check_close(&mut self, poll: &Poll) {
+        if let ConnStatus::Closing = self.status {
+            let _ = poll.deregister(&self.conn);
+            let _ = self.conn.shutdown(Shutdown::Both);
+            self.status = ConnStatus::Closed;
+        }
     }
 
     fn timeout(&self, _: Instant, _: Instant) -> bool {
@@ -166,5 +180,18 @@ impl Backend for TcpBackend {
 
     fn status(&self) -> ConnStatus {
         self.status
+    }
+
+    fn shutdown(&mut self, poll: &Poll) {
+        if !self.session.wants_write() {
+            self.status = ConnStatus::Closing;
+            self.check_close(poll);
+            return;
+        }
+
+        self.readiness = Ready::writable();
+        self.status = ConnStatus::Shutdown;
+        self.setup(poll);
+        self.check_close(poll);
     }
 }

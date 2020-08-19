@@ -24,7 +24,7 @@ pub trait Backend {
     fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>);
     fn dispatch(&mut self, data: &[u8], opts: &mut Opts);
     fn reregister(&mut self, poll: &Poll);
-    fn close_now(&mut self, poll: &Poll);
+    fn check_close(&mut self, poll: &Poll);
     fn closing(&self) -> bool {
         if let ConnStatus::Closing = self.status() {
             true
@@ -44,6 +44,7 @@ pub trait Backend {
     }
     fn get_timeout(&self) -> Duration;
     fn status(&self) -> ConnStatus;
+    fn shutdown(&mut self, poll: &Poll);
 }
 
 impl TlsServer {
@@ -107,7 +108,7 @@ impl TlsServer {
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();
             conn.ready(poll, event, opts);
-            if conn.is_closed() {
+            if conn.destroyed() {
                 self.conns.remove(&index);
                 log::info!("connection:{} closed, remove from pool", index);
             }

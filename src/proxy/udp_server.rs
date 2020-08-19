@@ -15,7 +15,7 @@ use crate::proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index};
 use crate::proxy::idle_pool::IdlePool;
 use crate::proxy::udp_cache::UdpSvrCache;
 use crate::sys;
-use crate::tls_conn::TlsConn;
+use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct UdpServer {
     udp_listener: Rc<UdpSocket>,
@@ -32,8 +32,7 @@ struct Connection {
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
     server_conn: TlsConn<ClientSession>,
-    closing: bool,
-    closed: bool,
+    status: ConnStatus,
     client_recv: usize,
     client_sent: usize,
     client_time: Instant,
@@ -74,7 +73,7 @@ impl UdpServer {
                                     log::info!("connection:{} is ready", index);
                                     index
                                 } else {
-                                    conn.close_now(poll);
+                                    conn.shutdown(poll);
                                     continue;
                                 }
                             } else {
@@ -106,7 +105,7 @@ impl UdpServer {
         let index = Connection::token2index(event.token());
         if let Some(conn) = self.conns.get_mut(&index) {
             conn.ready(event, opts, poll, udp_cache);
-            if conn.is_closed() {
+            if conn.destroyed() {
                 let src_addr = conn.src_addr;
                 self.conns.remove(&index);
                 self.src_map.remove(&src_addr);
@@ -124,8 +123,7 @@ impl Connection {
             server_conn,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
-            closing: false,
-            closed: false,
+            status: ConnStatus::Established,
             client_recv: 0,
             client_sent: 0,
             client_time: Instant::now(),
@@ -137,14 +135,22 @@ impl Connection {
     }
 
     fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
-        self.server_conn.reregister(poll, true);
+        self.server_conn.setup(poll);
         self.recv_buffer.clear();
         TrojanRequest::generate(&mut self.recv_buffer, UDP_ASSOCIATE, opts.empty_addr.as_ref().unwrap(), opts);
         self.server_conn.write_session(self.recv_buffer.as_ref())
     }
 
-    fn is_closed(&self) -> bool {
-        self.closed
+    fn destroyed(&self) -> bool {
+        self.closed() && self.server_conn.closed()
+    }
+
+    fn closed(&self) -> bool {
+        if let ConnStatus::Closed = self.status {
+            true
+        } else {
+            false
+        }
     }
 
     fn index(&self) -> usize {
@@ -167,11 +173,18 @@ impl Connection {
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
         if !self.server_conn.write_session(self.recv_buffer.as_ref()) {
-            self.closing = true;
+            self.status = ConnStatus::Closing;
         } else if !self.server_conn.write_session(payload) {
-            self.closing = true;
+            self.status = ConnStatus::Closing;
         } else {
             self.try_send_server();
+        }
+    }
+
+    fn shutdown(&mut self, poll: &Poll) {
+        if self.send_buffer.is_empty() {
+            self.status = ConnStatus::Closing;
+            self.check_close(poll);
         }
     }
 
@@ -185,25 +198,30 @@ impl Connection {
         }
 
         self.reregister(poll);
-        if self.closing || self.server_conn.closing() {
+        self.check_close(poll);
+        self.server_conn.reregister(poll);
+        self.server_conn.check_close(poll);
+        if self.closed() && !self.server_conn.closed() {
+            self.server_conn.shutdown(poll);
+        } else if !self.closed() && self.server_conn.closed() {
+            self.shutdown(poll);
+        }
+    }
+
+    fn check_close(&mut self, poll: &Poll) {
+        if let ConnStatus::Closing = self.status {
             self.close_now(poll);
         }
     }
 
-    fn close_now(&mut self, poll: &Poll) {
-        self.server_conn.close_now(poll);
-        self.closed = true;
+    fn close_now(&mut self, _: &Poll) {
+        self.status = ConnStatus::Closed;
         let secs = self.client_time.elapsed().as_secs();
         log::warn!("connection:{} closed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
             self.index(), self.dst_addr.as_ref().unwrap(), secs, self.client_recv, self.client_sent);
     }
 
-    fn reregister(&mut self, poll: &Poll) {
-        if self.closing {
-            return;
-        }
-        self.server_conn.reregister(poll, false);
-    }
+    fn reregister(&mut self, _: &Poll) {}
 
     fn try_send_server(&mut self) {
         self.server_conn.do_send();
@@ -223,6 +241,12 @@ impl Connection {
             let buffer = self.send_buffer.split();
             self.do_send_client(buffer.as_ref(), opts, udp_cache);
         }
+        if let ConnStatus::Shutdown = self.status {
+            if self.send_buffer.is_empty() {
+                self.status = ConnStatus::Closing;
+                log::info!("connection:{} is closing for no data to send", self.index);
+            }
+        }
     }
 
     fn do_send_client(&mut self, mut buffer: &[u8], opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
@@ -240,7 +264,7 @@ impl Connection {
                 }
                 UdpParseResult::InvalidProtocol => {
                     log::error!("connection:{} got invalid protocol", self.index());
-                    self.closing = true;
+                    self.status = ConnStatus::Closing;
                     break;
                 }
             }

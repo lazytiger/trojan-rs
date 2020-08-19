@@ -15,7 +15,7 @@ use crate::proxy::{CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX, next_ind
 use crate::proxy::idle_pool::IdlePool;
 use crate::session::TcpSession;
 use crate::sys;
-use crate::tls_conn::TlsConn;
+use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct TcpServer {
     tcp_listener: TcpListener,
@@ -29,8 +29,7 @@ struct Connection {
     client: TcpStream,
     client_session: TcpSession,
     client_readiness: Ready,
-    closed: bool,
-    closing: bool,
+    status: ConnStatus,
     client_recv: usize,
     client_sent: usize,
     client_time: Instant,
@@ -68,7 +67,7 @@ impl TcpServer {
                                 if conn.setup(opts, poll) {
                                     self.conns.insert(conn.index(), conn);
                                 } else {
-                                    conn.close_now(poll);
+                                    conn.shutdown(poll);
                                     continue;
                                 }
                             } else {
@@ -97,7 +96,7 @@ impl TcpServer {
         let index = Connection::token2index(event.token());
         if let Some(conn) = self.conns.get_mut(&index) {
             conn.ready(event, poll);
-            if conn.closed() {
+            if conn.destroyed() {
                 log::info!("connection:{} removed from list", index);
                 self.conns.remove(&index);
             }
@@ -113,8 +112,7 @@ impl Connection {
             client,
             server_conn,
             client_readiness: Ready::empty(),
-            closed: false,
-            closing: false,
+            status: ConnStatus::Established,
             client_session: TcpSession::new(index),
             client_recv: 0,
             client_sent: 0,
@@ -122,12 +120,20 @@ impl Connection {
         }
     }
 
+    fn destroyed(&self) -> bool {
+        self.closed() && self.server_conn.closed()
+    }
+
     fn closed(&self) -> bool {
-        self.closed
+        if let ConnStatus::Closed = self.status {
+            true
+        } else {
+            false
+        }
     }
 
     fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
-        self.server_conn.reregister(poll, true);
+        self.server_conn.setup(poll);
         let mut request = BytesMut::new();
         self.client_readiness = Ready::readable();
         TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, opts);
@@ -171,50 +177,80 @@ impl Connection {
             }
             _ => {
                 log::error!("invalid token found in tcp listener");
-                self.closing = true;
+                self.status = ConnStatus::Closing;
                 return;
             }
         }
 
-
         self.reregister(poll);
-        if self.closing || self.server_conn.closing() {
+        self.check_close(poll);
+        self.server_conn.reregister(poll);
+        self.server_conn.check_close(poll);
+        if self.closed() && !self.server_conn.closed() {
+            self.server_conn.shutdown(poll);
+        } else if !self.closed() && self.server_conn.closed() {
+            self.shutdown(poll);
+        }
+    }
+
+    fn shutdown(&mut self, poll: &Poll) {
+        if !self.client_session.wants_write() {
+            self.status = ConnStatus::Closing;
+            self.check_close(poll);
+            return;
+        }
+
+        self.client_readiness = Ready::writable();
+        if let Err(err) = poll.register(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
+            log::warn!("connection:{} register client failed:{}", self.index(), err);
+            self.status = ConnStatus::Closing;
+            self.check_close(poll);
+        } else {
+            self.status = ConnStatus::Shutdown;
+        }
+    }
+
+    fn check_close(&mut self, poll: &Poll) {
+        if let ConnStatus::Closing = self.status {
             self.close_now(poll);
         }
     }
 
-    fn close_now(&mut self, poll: &Poll) {
-        self.server_conn.close_now(poll);
-        let _ = poll.deregister(&self.client);
+    fn close_now(&mut self, _: &Poll) {
         let _ = self.client.shutdown(Shutdown::Both);
-        self.closed = true;
+        self.status = ConnStatus::Closed;
         let secs = self.client_time.elapsed().as_secs();
         log::warn!("connection:{} closed, target address {:?}, {} seconds,  {} bytes read, {} bytes sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
     }
 
     fn reregister(&mut self, poll: &Poll) {
-        if self.closing {
-            return;
-        }
-        let mut changed = false;
-        if self.client_session.wants_write() && !self.client_readiness.is_writable() {
-            self.client_readiness.insert(Ready::writable());
-            changed = true;
-        }
-        if !self.client_session.wants_write() && self.client_readiness.is_writable() {
-            self.client_readiness.remove(Ready::writable());
-            changed = true;
-        }
-
-        if changed {
-            if let Err(err) = poll.reregister(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
-                log::error!("connection:{} reregister client failed:{}", self.index(), err);
-                self.closing = true;
+        match self.status {
+            ConnStatus::Closing => {
+                let _ = poll.deregister(&self.client);
+            }
+            ConnStatus::Closed => {
                 return;
             }
-        }
+            _ => {
+                let mut changed = false;
+                if self.client_session.wants_write() && !self.client_readiness.is_writable() {
+                    self.client_readiness.insert(Ready::writable());
+                    changed = true;
+                }
+                if !self.client_session.wants_write() && self.client_readiness.is_writable() {
+                    self.client_readiness.remove(Ready::writable());
+                    changed = true;
+                }
 
-        self.server_conn.reregister(poll, false)
+                if changed {
+                    if let Err(err) = poll.reregister(&self.client, self.client_token(), self.client_readiness, PollOpt::edge()) {
+                        log::error!("connection:{} reregister client failed:{}", self.index(), err);
+                        self.status = ConnStatus::Closing;
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     fn client_token(&self) -> Token {
@@ -224,7 +260,7 @@ impl Connection {
     fn try_read_client(&mut self) {
         if let Err(err) = self.client_session.read_backend(&mut self.client) {
             log::warn!("connection:{} read from client failed:{}", self.index(), err);
-            self.closing = true;
+            self.status = ConnStatus::Closing;
             return;
         }
         let data = self.client_session.read_all();
@@ -233,7 +269,7 @@ impl Connection {
         }
         self.client_sent += data.len();
         if !self.server_conn.write_session(data.as_ref()) {
-            self.closing = true;
+            self.status = ConnStatus::Closing;
             return;
         }
         self.try_send_server();
@@ -243,13 +279,13 @@ impl Connection {
         if self.client_session.wants_write() {
             if let Err(err) = self.client_session.write_all(buffer) {
                 log::error!("connection:{} write to client session failed:{}", self.index(), err);
-                self.closing = true;
+                self.status = ConnStatus::Closing;
                 return;
             } else {
                 match self.client_session.write_backend(&mut self.client) {
                     Err(err) => {
                         log::warn!("connection:{} write to client failed:{}", self.index(), err);
-                        self.closing = true;
+                        self.status = ConnStatus::Closing;
                         return;
                     }
                     Ok(size) => {
@@ -260,6 +296,12 @@ impl Connection {
             }
         } else {
             self.do_send_client(buffer);
+        }
+        if let ConnStatus::Shutdown = self.status {
+            if !self.client_session.wants_write() {
+                self.status = ConnStatus::Closing;
+                log::info!("connection:{} is closing for no data to send", self.index());
+            }
         }
     }
 
@@ -277,13 +319,13 @@ impl Connection {
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     if let Err(err) = self.client_session.write_all(buffer) {
                         log::error!("connection:{} write data to client session failed:{}", self.index(), err);
-                        self.closing = true;
+                        self.status = ConnStatus::Closing;
                     }
                     break;
                 }
                 Err(err) => {
                     log::warn!("connection:{} send to client failed:{}", self.index(), err);
-                    self.closing = true;
+                    self.status = ConnStatus::Closing;
                     return;
                 }
             }

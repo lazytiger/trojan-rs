@@ -75,6 +75,12 @@ impl UdpBackend {
                 }
             }
         }
+        if let ConnStatus::Shutdown = self.status {
+            if self.send_buffer.is_empty() {
+                log::info!("connection:{} is closing for no data to send", self.index);
+                self.status = ConnStatus::Closing;
+            }
+        }
     }
 
     fn do_read(&mut self, conn: &mut TlsConn<ServerSession>) {
@@ -119,10 +125,12 @@ impl UdpBackend {
         }
     }
 
-
-    fn check_close(&mut self, poll: &Poll) {
-        let _ = poll.deregister(&self.socket);
-        self.status = ConnStatus::Closed;
+    fn setup(&mut self, poll: &Poll) {
+        if let Err(err) = poll.reregister(&self.socket,
+                                          self.token, self.readiness, PollOpt::edge()) {
+            log::error!("connection:{} reregister udp target failed:{}", self.index, err);
+            self.status = ConnStatus::Closing;
+        }
     }
 }
 
@@ -148,30 +156,36 @@ impl Backend for UdpBackend {
     }
 
     fn reregister(&mut self, poll: &Poll) {
-        let mut changed = false;
-        if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
-            self.readiness.insert(Ready::writable());
-            changed = true;
-            log::info!("connection:{} add writable to udp target", self.index);
-        }
-        if self.send_buffer.is_empty() && self.readiness.is_writable() {
-            self.readiness.remove(Ready::writable());
-            changed = true;
-            log::info!("connection:{} remove writable from udp target", self.index);
-        }
+        match self.status {
+            ConnStatus::Closing => {
+                let _ = poll.deregister(&self.socket);
+            }
+            ConnStatus::Closed => {
+                return;
+            }
+            _ => {
+                let mut changed = false;
+                if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
+                    self.readiness.insert(Ready::writable());
+                    changed = true;
+                    log::info!("connection:{} add writable to udp target", self.index);
+                }
+                if self.send_buffer.is_empty() && self.readiness.is_writable() {
+                    self.readiness.remove(Ready::writable());
+                    changed = true;
+                    log::info!("connection:{} remove writable from udp target", self.index);
+                }
 
-        if changed {
-            if let Err(err) = poll.reregister(&self.socket,
-                                              self.token, self.readiness, PollOpt::edge()) {
-                log::error!("connection:{} reregister udp target failed:{}", self.index, err);
-                self.status = ConnStatus::Closing;
+                if changed {
+                    self.setup(poll);
+                }
             }
         }
     }
 
-    fn close_now(&mut self, poll: &Poll) {
-        self.status = ConnStatus::Closing;
-        self.check_close(poll)
+    fn check_close(&mut self, poll: &Poll) {
+        let _ = poll.deregister(&self.socket);
+        self.status = ConnStatus::Closed;
     }
 
     fn get_timeout(&self) -> Duration {
@@ -180,5 +194,17 @@ impl Backend for UdpBackend {
 
     fn status(&self) -> ConnStatus {
         self.status
+    }
+
+    fn shutdown(&mut self, poll: &Poll) {
+        if self.send_buffer.is_empty() {
+            self.status = ConnStatus::Closing;
+            self.check_close(poll);
+            return;
+        }
+        self.readiness = Ready::writable();
+        self.status = ConnStatus::Shutdown;
+        self.setup(poll);
+        self.check_close(poll);
     }
 }
