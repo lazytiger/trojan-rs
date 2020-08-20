@@ -28,13 +28,10 @@ pub struct UdpServer {
 struct Connection {
     index: usize,
     src_addr: SocketAddr,
-    dst_addr: Option<SocketAddr>,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
     server_conn: TlsConn<ClientSession>,
     status: ConnStatus,
-    client_recv: usize,
-    client_sent: usize,
     client_time: Instant,
 }
 
@@ -120,13 +117,10 @@ impl Connection {
         Connection {
             index,
             src_addr,
-            dst_addr: None,
             server_conn,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
             status: ConnStatus::Established,
-            client_recv: 0,
-            client_sent: 0,
             client_time: Instant::now(),
         }
     }
@@ -159,18 +153,6 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
-        if self.dst_addr.is_none() {
-            self.dst_addr.replace(*dst_addr);
-        } else if self.dst_addr.as_ref().unwrap() != dst_addr {
-            self.dst_addr.replace(*dst_addr);
-            let secs = self.client_time.elapsed().as_secs();
-            log::warn!("connection:{} changed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
-                self.index(), self.dst_addr.as_ref().unwrap(), secs, self.client_recv, self.client_sent);
-            self.client_recv = 0;
-            self.client_sent = 0;
-            self.client_time = Instant::now();
-        }
-        self.client_sent += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
         if !self.server_conn.write_session(self.recv_buffer.as_ref()) {
@@ -219,8 +201,7 @@ impl Connection {
     fn close_now(&mut self, _: &Poll) {
         self.status = ConnStatus::Closed;
         let secs = self.client_time.elapsed().as_secs();
-        log::warn!("connection:{} closed, target address:{}, {} seconds,  {} bytes read, {} bytes sent",
-            self.index(), self.dst_addr.as_ref().unwrap(), secs, self.client_recv, self.client_sent);
+        log::warn!("connection:{} closed, time:{} ", self.index(), secs);
     }
 
     fn reregister(&mut self, _: &Poll) {}
@@ -253,7 +234,6 @@ impl Connection {
                     break;
                 }
                 UdpParseResult::Packet(packet) => {
-                    self.client_recv += packet.length;
                     let payload = &packet.payload[..packet.length];
                     udp_cache.send_to(self.src_addr, packet.address, payload);
                     buffer = &packet.payload[packet.length..];

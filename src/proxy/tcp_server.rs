@@ -31,8 +31,6 @@ struct Connection {
     send_buffer: BytesMut,
     client_readiness: Ready,
     status: ConnStatus,
-    client_recv: usize,
-    client_sent: usize,
     client_time: Instant,
     server_conn: TlsConn<ClientSession>,
 }
@@ -116,8 +114,6 @@ impl Connection {
             status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
-            client_recv: 0,
-            client_sent: 0,
             client_time: Instant::now(),
         }
     }
@@ -221,7 +217,7 @@ impl Connection {
         let _ = poll.deregister(&self.client);
         self.status = ConnStatus::Closed;
         let secs = self.client_time.elapsed().as_secs();
-        log::warn!("connection:{} closed, target address {:?}, {} seconds,  {} bytes read, {} bytes sent", self.index(), self.dst_addr, secs,  self.client_recv, self.client_sent);
+        log::warn!("connection:{} closed, target address {:?}, {} seconds", self.index(), self.dst_addr, secs);
     }
 
     fn reregister(&mut self, poll: &Poll) {
