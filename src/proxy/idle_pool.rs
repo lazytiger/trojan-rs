@@ -121,7 +121,9 @@ impl IdlePool {
             let conn = self.pool.get_mut(i).unwrap();
             if conn.token() == event.token() {
                 if event.readiness().is_readable() {
-                    conn.do_read();
+                    if let Some(_) = conn.do_read() {
+                        log::error!("found data in https handshake phase");
+                    }
                 }
                 if event.readiness().is_writable() {
                     conn.do_send();
