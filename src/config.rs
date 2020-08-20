@@ -13,7 +13,7 @@ pub struct DnsEntry {
 }
 
 #[derive(Clap)]
-#[clap(version = "0.4", author = "Hoping White", about = "A trojan implementation using rust")]
+#[clap(version = "0.5", author = "Hoping White", about = "A trojan implementation using rust")]
 pub struct Opts {
     #[clap(subcommand)]
     pub mode: Mode,
