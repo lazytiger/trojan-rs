@@ -177,9 +177,8 @@ impl Connection {
             self.status = ConnStatus::Closing;
         } else if !self.server_conn.write_session(payload) {
             self.status = ConnStatus::Closing;
-        } else {
-            self.try_send_server();
         }
+        self.try_send_server();
     }
 
     fn shutdown(&mut self, poll: &Poll) {
