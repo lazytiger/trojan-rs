@@ -99,8 +99,8 @@ impl Connection {
             }
         }
 
-        if self.closing {
-            // handshake failed, close anyway.
+        // handshake failed, no dns query on the way, close now.
+        if self.closing && self.resolver.is_none() {
             self.proxy.shutdown(poll);
             return;
         }
@@ -302,7 +302,10 @@ impl Connection {
 
 
     pub fn destroyed(&self) -> bool {
-        if let Some(backend) = &self.backend {
+        if self.resolver.is_some() {
+            //do not destroy connection until dns query done.
+            false
+        } else if let Some(backend) = &self.backend {
             self.proxy.closed() && backend.closed()
         } else {
             self.proxy.closed()
