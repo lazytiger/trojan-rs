@@ -262,6 +262,7 @@ impl Connection {
                 if !self.data.is_empty() {
                     backend.dispatch(self.data.as_slice(), opts);
                     self.data.clear();
+                    self.data.shrink_to_fit();
                 }
                 self.backend.replace(Box::new(backend));
             }
