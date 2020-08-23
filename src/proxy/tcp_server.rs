@@ -10,7 +10,7 @@ use mio::net::{TcpListener, TcpStream};
 use rustls::ClientSession;
 
 use crate::config::Opts;
-use crate::proto::{CONNECT, MAX_PACKET_SIZE, TrojanRequest};
+use crate::proto::{CONNECT, MAX_BUFFER_SIZE, MAX_PACKET_SIZE, TrojanRequest};
 use crate::proxy::{CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX, next_index};
 use crate::proxy::idle_pool::IdlePool;
 use crate::sys;
@@ -180,13 +180,17 @@ impl Connection {
 
         self.reregister(poll);
         self.check_close(poll);
-        self.server_conn.reregister(poll);
+        self.server_conn.reregister(poll, self.readable());
         self.server_conn.check_close(poll);
         if self.closed() && !self.server_conn.closed() {
             self.server_conn.shutdown(poll);
         } else if !self.closed() && self.server_conn.closed() {
             self.shutdown(poll);
         }
+    }
+
+    fn readable(&self) -> bool {
+        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 
     fn shutdown(&mut self, poll: &Poll) {
@@ -236,6 +240,14 @@ impl Connection {
                 }
                 if self.send_buffer.is_empty() && self.client_readiness.is_writable() {
                     self.client_readiness.remove(Ready::writable());
+                    changed = true;
+                }
+                if self.server_conn.write_finished() && !self.client_readiness.is_readable() {
+                    self.client_readiness.insert(Ready::readable());
+                    changed = true;
+                }
+                if !self.server_conn.write_finished() && self.client_readiness.is_readable() {
+                    self.client_readiness.remove(Ready::readable());
                     changed = true;
                 }
 

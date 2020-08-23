@@ -10,7 +10,7 @@ use mio::net::UdpSocket;
 use rustls::ClientSession;
 
 use crate::config::Opts;
-use crate::proto::{MAX_PACKET_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult};
+use crate::proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult};
 use crate::proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index};
 use crate::proxy::idle_pool::IdlePool;
 use crate::proxy::udp_cache::UdpSvrCache;
@@ -155,6 +155,10 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
+        if !self.server_conn.write_finished() {
+            log::error!("connection:{} too many packets, drop udp packet", self.index);
+            return;
+        }
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
         if !self.server_conn.write_session(self.recv_buffer.as_ref()) {
@@ -185,13 +189,17 @@ impl Connection {
 
         self.reregister(poll);
         self.check_close(poll);
-        self.server_conn.reregister(poll);
+        self.server_conn.reregister(poll, self.readable());
         self.server_conn.check_close(poll);
         if self.closed() && !self.server_conn.closed() {
             self.server_conn.shutdown(poll);
         } else if !self.closed() && self.server_conn.closed() {
             self.shutdown(poll);
         }
+    }
+
+    fn readable(&self) -> bool {
+        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 
     fn check_close(&mut self, poll: &Poll) {

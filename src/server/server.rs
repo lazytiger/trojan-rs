@@ -23,7 +23,7 @@ pub struct TlsServer {
 pub trait Backend {
     fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>);
     fn dispatch(&mut self, data: &[u8], opts: &mut Opts);
-    fn reregister(&mut self, poll: &Poll);
+    fn reregister(&mut self, poll: &Poll, readable: bool);
     fn check_close(&mut self, poll: &Poll);
     fn closing(&self) -> bool {
         if let ConnStatus::Closing = self.status() {
@@ -45,6 +45,7 @@ pub trait Backend {
     fn get_timeout(&self) -> Duration;
     fn status(&self) -> ConnStatus;
     fn shutdown(&mut self, poll: &Poll);
+    fn write_finished(&self) -> bool;
 }
 
 impl TlsServer {

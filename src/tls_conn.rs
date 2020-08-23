@@ -20,6 +20,7 @@ pub struct TlsConn<T: Session> {
     index: usize,
     token: Token,
     status: ConnStatus,
+    write_finished: bool,
 }
 
 impl<T: Session> TlsConn<T> {
@@ -29,6 +30,7 @@ impl<T: Session> TlsConn<T> {
             token,
             session,
             stream,
+            write_finished: true,
             readiness: Ready::readable() | Ready::writable(),
             status: ConnStatus::Established,
         }
@@ -37,7 +39,6 @@ impl<T: Session> TlsConn<T> {
     pub fn reset_index(&mut self, index: usize, token: Token) {
         self.index = index;
         self.token = token;
-
     }
 
     pub fn check_close(&mut self, poll: &Poll) {
@@ -115,8 +116,10 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn do_send(&mut self) {
+        self.write_finished = false;
         loop {
             if !self.session.wants_write() {
+                self.write_finished = true;
                 return;
             }
             match self.session.write_tls(&mut self.stream) {
@@ -151,7 +154,7 @@ impl<T: Session> TlsConn<T> {
         }
     }
 
-    pub fn reregister(&mut self, poll: &Poll) {
+    pub fn reregister(&mut self, poll: &Poll, readable: bool) {
         match self.status {
             ConnStatus::Closing => {
                 let _ = poll.deregister(&self.stream);
@@ -167,6 +170,15 @@ impl<T: Session> TlsConn<T> {
                 }
                 if !self.session.wants_write() && self.readiness.is_writable() {
                     self.readiness.remove(Ready::writable());
+                    changed = true;
+                }
+                if readable && !self.readiness.is_readable() {
+                    self.readiness.insert(Ready::readable());
+                    changed = true;
+                }
+
+                if !readable && self.readiness.is_readable() {
+                    self.readiness.remove(Ready::readable());
                     changed = true;
                 }
                 if changed {
@@ -202,5 +214,9 @@ impl<T: Session> TlsConn<T> {
         } else {
             false
         }
+    }
+
+    pub fn write_finished(&self) -> bool {
+        self.write_finished
     }
 }

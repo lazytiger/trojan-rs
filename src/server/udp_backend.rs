@@ -6,7 +6,7 @@ use mio::net::UdpSocket;
 use rustls::ServerSession;
 
 use crate::config::Opts;
-use crate::proto::{MAX_PACKET_SIZE, UdpAssociate, UdpParseResult};
+use crate::proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE, UdpAssociate, UdpParseResult};
 use crate::server::server::Backend;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
@@ -145,7 +145,7 @@ impl Backend for UdpBackend {
         }
     }
 
-    fn reregister(&mut self, poll: &Poll) {
+    fn reregister(&mut self, poll: &Poll, readable: bool) {
         match self.status {
             ConnStatus::Closing => {
                 let _ = poll.deregister(&self.socket);
@@ -164,6 +164,14 @@ impl Backend for UdpBackend {
                     self.readiness.remove(Ready::writable());
                     changed = true;
                     log::info!("connection:{} remove writable from udp target", self.index);
+                }
+                if readable && !self.readiness.is_readable() {
+                    self.readiness.insert(Ready::readable());
+                    changed = true;
+                }
+                if !readable && self.readiness.is_readable() {
+                    self.readiness.remove(Ready::readable());
+                    changed = true;
                 }
 
                 if changed {
@@ -198,5 +206,9 @@ impl Backend for UdpBackend {
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
         self.check_close(poll);
+    }
+
+    fn write_finished(&self) -> bool {
+        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 }

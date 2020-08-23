@@ -128,7 +128,7 @@ impl IdlePool {
                 if event.readiness().is_writable() {
                     conn.do_send();
                 }
-                conn.reregister(poll);
+                conn.reregister(poll, true);
                 conn.check_close(poll);
                 if conn.closed() {
                     self.pool.remove(i);
