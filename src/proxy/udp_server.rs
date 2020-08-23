@@ -34,6 +34,7 @@ struct Connection {
     status: ConnStatus,
     client_time: Instant,
     socket: Rc<UdpSocket>,
+    buffer_len: usize,
 }
 
 impl UdpServer {
@@ -124,6 +125,7 @@ impl Connection {
             recv_buffer: BytesMut::new(),
             status: ConnStatus::Established,
             client_time: Instant::now(),
+            buffer_len: 0,
         }
     }
 
@@ -155,9 +157,14 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
+        //This is a estimate. Real buffer size should between 0 and 2 * MAX_BUFFER_SIZE
         if !self.server_conn.write_finished() {
-            log::error!("connection:{} too many packets, drop udp packet", self.index);
-            return;
+            if self.buffer_len > 2 * MAX_BUFFER_SIZE {
+                log::error!("connection:{} too many packets, drop udp packet", self.index);
+                return;
+            }
+        } else {
+            self.buffer_len = 0;
         }
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
@@ -165,6 +172,9 @@ impl Connection {
             self.status = ConnStatus::Closing;
         } else if !self.server_conn.write_session(payload) {
             self.status = ConnStatus::Closing;
+        } else {
+            self.buffer_len += self.recv_buffer.len();
+            self.buffer_len += payload.len();
         }
         self.try_send_server();
     }
