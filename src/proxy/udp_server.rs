@@ -34,6 +34,7 @@ struct Connection {
     status: ConnStatus,
     client_time: Instant,
     socket: Rc<UdpSocket>,
+    dst_addr: SocketAddr,
 }
 
 impl UdpServer {
@@ -115,11 +116,13 @@ impl UdpServer {
 
 impl Connection {
     fn new(index: usize, server_conn: TlsConn<ClientSession>, src_addr: SocketAddr, socket: Rc<UdpSocket>) -> Connection {
+        let dst_addr = socket.local_addr().unwrap();
         Connection {
             index,
             src_addr,
             server_conn,
             socket,
+            dst_addr,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
             status: ConnStatus::Established,
@@ -237,9 +240,10 @@ impl Connection {
     }
 
     fn do_send_udp(&mut self, dst_addr: SocketAddr, data: &[u8], udp_cache: &mut UdpSvrCache) {
-        if self.socket.local_addr().unwrap() != dst_addr {
+        if self.dst_addr != dst_addr {
             log::error!("connection:{} udp target changed to {}", self.index, dst_addr);
             self.socket = udp_cache.get_socket(dst_addr);
+            self.dst_addr = dst_addr;
         }
         match self.socket.send_to(data, &self.src_addr) {
             Ok(size) => {
