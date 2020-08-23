@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::rc::Rc;
-use std::time::Instant;
 
 use mio::net::UdpSocket;
 
@@ -34,7 +33,7 @@ impl UdpSvrCache {
         }
     }
 
-    pub fn check_timeout(&mut self, _: Instant) {
+    pub fn check_timeout(&mut self) {
         let mut list = Vec::new();
         for (addr, socket) in &self.conns {
             if Rc::strong_count(socket) == 1 {

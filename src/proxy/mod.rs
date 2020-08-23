@@ -119,8 +119,8 @@ pub fn run(opts: &mut Opts) {
             }
         }
         let now = Instant::now();
-        if now - last_check_time > check_duration {
-            udp_cache.check_timeout(now - opts.udp_idle_duration);
+        if now - last_check_time > opts.udp_idle_duration {
+            udp_cache.check_timeout();
             last_check_time = now;
         }
     }
