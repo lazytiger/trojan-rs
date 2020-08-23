@@ -3,7 +3,10 @@ use std::net::Shutdown;
 
 use mio::{Poll, PollOpt, Ready, Token};
 use mio::net::TcpStream;
+use rustls::internal::msgs::fragmenter::MAX_FRAGMENT_LEN;
 use rustls::Session;
+
+use crate::proto::MAX_BUFFER_SIZE;
 
 #[derive(Copy, Clone)]
 pub enum ConnStatus {
@@ -20,7 +23,7 @@ pub struct TlsConn<T: Session> {
     index: usize,
     token: Token,
     status: ConnStatus,
-    write_finished: bool,
+    buffer_len: usize,
 }
 
 impl<T: Session> TlsConn<T> {
@@ -30,9 +33,9 @@ impl<T: Session> TlsConn<T> {
             token,
             session,
             stream,
-            write_finished: true,
             readiness: Ready::readable() | Ready::writable(),
             status: ConnStatus::Established,
+            buffer_len: 0,
         }
     }
 
@@ -116,15 +119,15 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn do_send(&mut self) {
-        self.write_finished = false;
         loop {
             if !self.session.wants_write() {
-                self.write_finished = true;
+                self.buffer_len = 0;
                 return;
             }
             match self.session.write_tls(&mut self.stream) {
                 Ok(size) => {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
+                    self.buffer_len -= size;
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     break;
@@ -150,6 +153,10 @@ impl<T: Session> TlsConn<T> {
             log::warn!("connection:{} write data to server session failed:{}", self.index(), err);
             false
         } else {
+            //each fragment overhead is 40bytes, and data is fragmented by MAX_FRAGMENT_LEN
+            self.buffer_len += data.len();
+            let packets = data.len() / MAX_FRAGMENT_LEN + 1;
+            self.buffer_len += packets * 40;
             true
         }
     }
@@ -217,6 +224,6 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn write_finished(&self) -> bool {
-        self.write_finished
+        self.buffer_len < MAX_BUFFER_SIZE
     }
 }
