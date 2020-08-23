@@ -18,7 +18,7 @@ use crate::sys;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct UdpServer {
-    udp_listener: Rc<UdpSocket>,
+    udp_listener: UdpSocket,
     conns: HashMap<usize, Connection>,
     src_map: HashMap<SocketAddr, usize>,
     next_id: usize,
@@ -33,12 +33,13 @@ struct Connection {
     server_conn: TlsConn<ClientSession>,
     status: ConnStatus,
     client_time: Instant,
+    socket: Rc<UdpSocket>,
 }
 
 impl UdpServer {
     pub fn new(udp_listener: UdpSocket) -> UdpServer {
         UdpServer {
-            udp_listener: Rc::new(udp_listener),
+            udp_listener,
             conns: HashMap::new(),
             src_map: HashMap::new(),
             next_id: MIN_INDEX,
@@ -46,10 +47,10 @@ impl UdpServer {
         }
     }
 
-    pub fn accept(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, pool: &mut IdlePool) {
+    pub fn accept(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, pool: &mut IdlePool, udp_cache: &mut UdpSvrCache) {
         if event.readiness().is_readable() {
             loop {
-                match sys::recv_from_with_destination(self.udp_listener.as_ref(), self.recv_buffer.as_mut_slice()) {
+                match sys::recv_from_with_destination(&self.udp_listener, self.recv_buffer.as_mut_slice()) {
                     Ok((size, src_addr, dst_addr)) => {
                         if size == MAX_PACKET_SIZE {
                             log::error!("received {} bytes udp data, packet fragmented", size);
@@ -63,7 +64,7 @@ impl UdpServer {
                             if let Some(mut conn) = pool.get(poll) {
                                 let index = next_index(&mut self.next_id);
                                 conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
-                                let mut conn = Connection::new(index, conn, src_addr);
+                                let mut conn = Connection::new(index, conn, src_addr, udp_cache.get_socket(dst_addr));
                                 if conn.setup(opts, poll) {
                                     let _ = self.conns.insert(index, conn);
                                     self.src_map.insert(src_addr, index);
@@ -113,11 +114,12 @@ impl UdpServer {
 }
 
 impl Connection {
-    fn new(index: usize, server_conn: TlsConn<ClientSession>, src_addr: SocketAddr) -> Connection {
+    fn new(index: usize, server_conn: TlsConn<ClientSession>, src_addr: SocketAddr, socket: Rc<UdpSocket>) -> Connection {
         Connection {
             index,
             src_addr,
             server_conn,
+            socket,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
             status: ConnStatus::Established,
@@ -226,6 +228,24 @@ impl Connection {
         }
     }
 
+    fn do_send_udp(&mut self, dst_addr: SocketAddr, data: &[u8], udp_cache: &mut UdpSvrCache) {
+        if self.socket.local_addr().unwrap() != dst_addr {
+            log::error!("connection:{} udp target changed to {}", self.index, dst_addr);
+            self.socket = udp_cache.get_socket(dst_addr);
+        }
+        match self.socket.send_to(data, &self.src_addr) {
+            Ok(size) => {
+                log::debug!("send {} bytes upd data from {} to {}", size, dst_addr, self.src_addr);
+                if size != data.len() {
+                    log::error!("send {} byte to client fragmented to {}", data.len(), size)
+                }
+            }
+            Err(err) => {
+                log::error!("send udp data from {} to {} failed {}", dst_addr, self.src_addr, err);
+            }
+        }
+    }
+
     fn do_send_client(&mut self, mut buffer: &[u8], opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
         loop {
             match UdpAssociate::parse(buffer, opts) {
@@ -235,7 +255,7 @@ impl Connection {
                 }
                 UdpParseResult::Packet(packet) => {
                     let payload = &packet.payload[..packet.length];
-                    udp_cache.send_to(self.src_addr, packet.address, payload);
+                    self.do_send_udp(packet.address, payload, udp_cache);
                     buffer = &packet.payload[packet.length..];
                 }
                 UdpParseResult::InvalidProtocol => {

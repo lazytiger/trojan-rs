@@ -102,7 +102,7 @@ pub fn run(opts: &mut Opts) {
                     tcp_server.accept(&event, opts, &poll, &mut pool);
                 }
                 Token(UDP_LISTENER) => {
-                    udp_server.accept(&event, opts, &poll, &mut pool);
+                    udp_server.accept(&event, opts, &poll, &mut pool, &mut udp_cache);
                 }
                 Token(RESOLVER) => {
                     pool.resolve(&poll);

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::rc::Rc;
 use std::time::Instant;
 
 use mio::net::UdpSocket;
@@ -7,12 +8,7 @@ use mio::net::UdpSocket;
 use crate::proxy::new_socket;
 
 pub struct UdpSvrCache {
-    conns: HashMap<SocketAddr, CacheEntry>,
-}
-
-struct CacheEntry {
-    socket: UdpSocket,
-    last_active_time: Instant,
+    conns: HashMap<SocketAddr, Rc<UdpSocket>>,
 }
 
 impl UdpSvrCache {
@@ -22,60 +18,26 @@ impl UdpSvrCache {
         }
     }
 
-    pub fn send_to(&mut self, src_addr: SocketAddr, dst_addr: SocketAddr, mut payload: &[u8]) {
-        let last_active_time = Instant::now();
-        if !self.conns.contains_key(&dst_addr) {
-            log::info!("socket:{} not found, create a new one", dst_addr);
-            let socket = new_socket(dst_addr, true);
+    pub fn get_socket(&mut self, addr: SocketAddr) -> Rc<UdpSocket> {
+        if let Some(socket) = self.conns.get(&addr) {
+            socket.clone()
+        } else {
+            log::info!("socket:{} not found, create a new one", addr);
+            let socket = new_socket(addr, true);
             let socket = UdpSocket::from_socket(socket.into_udp_socket()).unwrap();
+            let socket = Rc::new(socket);
             self.conns.insert(
-                dst_addr,
-                CacheEntry {
-                    socket,
-                    last_active_time,
-                },
+                addr,
+                socket.clone(),
             );
-        }
-
-        log::info!(
-            "socket is ready, sending {} bytes from {} to {}",
-            payload.len(),
-            dst_addr,
-            src_addr
-        );
-        let entry = self.conns.get_mut(&dst_addr).unwrap();
-        entry.last_active_time = last_active_time;
-        loop {
-            match entry.socket.send_to(payload, &src_addr) {
-                Ok(size) => {
-                    log::debug!(
-                        "send {} bytes upd data from {} to {}",
-                        size,
-                        dst_addr,
-                        src_addr
-                    );
-                    if size == payload.len() {
-                        break;
-                    }
-                    payload = &payload[size..];
-                }
-                Err(err) => {
-                    log::error!(
-                        "send udp data from {} to {} failed {}",
-                        dst_addr,
-                        src_addr,
-                        err
-                    );
-                    return;
-                }
-            }
+            socket
         }
     }
 
-    pub fn check_timeout(&mut self, recent_active_time: Instant) {
+    pub fn check_timeout(&mut self, _: Instant) {
         let mut list = Vec::new();
-        for (addr, entry) in &mut self.conns {
-            if entry.last_active_time < recent_active_time {
+        for (addr, socket) in &self.conns {
+            if Rc::strong_count(socket) == 1 {
                 list.push(*addr);
             }
         }
