@@ -56,7 +56,7 @@ impl UdpServer {
                         if size == MAX_PACKET_SIZE {
                             log::error!("received {} bytes udp data, packet fragmented", size);
                         }
-                        log::info!("udp received {} byte from {} to {}", size, src_addr, dst_addr);
+                        log::debug!("udp received {} byte from {} to {}", size, src_addr, dst_addr);
                         let index = if let Some(index) = self.src_map.get(&src_addr) {
                             log::debug!("connection:{} already exists for address{}", index, src_addr);
                             *index
@@ -69,7 +69,7 @@ impl UdpServer {
                                 if conn.setup(opts, poll) {
                                     let _ = self.conns.insert(index, conn);
                                     self.src_map.insert(src_addr, index);
-                                    log::info!("connection:{} is ready", index);
+                                    log::debug!("connection:{} is ready", index);
                                     index
                                 } else {
                                     conn.shutdown(poll);
@@ -108,7 +108,7 @@ impl UdpServer {
                 let src_addr = conn.src_addr;
                 self.conns.remove(&index);
                 self.src_map.remove(&src_addr);
-                log::info!("connection:{} removed from list", index);
+                log::debug!("connection:{} removed from list", index);
             }
         }
     }
@@ -173,7 +173,7 @@ impl Connection {
     }
 
     fn shutdown(&mut self, poll: &Poll) {
-        log::info!("connection:{} shutdown now", self.index());
+        log::debug!("connection:{} shutdown now", self.index());
         if self.send_buffer.is_empty() {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
@@ -280,7 +280,7 @@ impl Connection {
         if let ConnStatus::Shutdown = self.status {
             if self.send_buffer.is_empty() {
                 self.status = ConnStatus::Closing;
-                log::info!("connection:{} is closing for no data to send", self.index);
+                log::debug!("connection:{} is closing for no data to send", self.index);
             }
         }
     }

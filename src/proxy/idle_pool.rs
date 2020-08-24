@@ -105,7 +105,7 @@ impl IdlePool {
 
     pub fn resolve(&mut self, poll: &Poll) {
         if let Some(address) = self.resolver.as_ref().unwrap().address() {
-            log::info!("idle_pool got resolve result {} = {}", self.domain, address);
+            log::debug!("idle_pool got resolve result {} = {}", self.domain, address);
             let addr = SocketAddr::new(address, self.port);
             self.addr = addr;
         } else {

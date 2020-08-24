@@ -51,7 +51,7 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn shutdown(&mut self, poll: &Poll) {
-        log::info!("connection:{} shutdown now", self.index);
+        log::debug!("connection:{} shutdown now", self.index);
         if !self.session.wants_write() {
             self.status = ConnStatus::Closing;
             self.check_close(poll);
@@ -86,7 +86,7 @@ impl<T: Session> TlsConn<T> {
                         self.status = ConnStatus::Closing;
                         break;
                     }
-                    log::info!("connection:{} read {} bytes from server", self.index(), size);
+                    log::debug!("connection:{} read {} bytes from server", self.index(), size);
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     log::debug!("connection:{} read from server blocked", self.index());
@@ -127,7 +127,7 @@ impl<T: Session> TlsConn<T> {
             match self.session.write_tls(&mut self.stream) {
                 Ok(size) => {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
-                    self.buffer_len -= size;
+                    self.buffer_len = self.buffer_len.saturating_sub(size);
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     break;
@@ -142,7 +142,7 @@ impl<T: Session> TlsConn<T> {
         if let ConnStatus::Shutdown = self.status {
             if !self.session.wants_write() {
                 self.status = ConnStatus::Closing;
-                log::info!("connection:{} is closing for no data to send", self.index());
+                log::debug!("connection:{} is closing for no data to send", self.index());
             }
         }
     }

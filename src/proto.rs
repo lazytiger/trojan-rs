@@ -124,7 +124,7 @@ fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Soc
             } else if let Some(ip) = opts.query_dns(&domain) {
                 Some((length + 3, Sock5Address::Socket(SocketAddr::new(ip, port))))
             } else {
-                log::info!("domain found:{}:{}", domain, port);
+                log::debug!("domain found:{}:{}", domain, port);
                 Some((length + 3, Sock5Address::Domain(domain, port)))
             }
         }

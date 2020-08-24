@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::BytesMut;
@@ -20,10 +21,14 @@ pub struct UdpBackend {
     status: ConnStatus,
     readiness: Ready,
     timeout: Duration,
+    bytes_read: usize,
+    bytes_sent: usize,
+    remote_addr: SocketAddr,
 }
 
 impl UdpBackend {
     pub fn new(socket: UdpSocket, index: usize, token: Token, timeout: Duration) -> UdpBackend {
+        let remote_addr = socket.local_addr().unwrap();
         UdpBackend {
             socket,
             send_buffer: Default::default(),
@@ -34,6 +39,9 @@ impl UdpBackend {
             status: ConnStatus::Established,
             readiness: Ready::empty(),
             timeout,
+            bytes_read: 0,
+            bytes_sent: 0,
+            remote_addr,
         }
     }
 
@@ -43,6 +51,7 @@ impl UdpBackend {
                 UdpParseResult::Packet(packet) => {
                     match self.socket.send_to(&packet.payload[..packet.length], &packet.address) {
                         Ok(size) => {
+                            self.bytes_sent += size;
                             if size != packet.length {
                                 log::error!("connection:{} udp packet is truncated, {}：{}", self.index, packet.length, size);
                                 self.status = ConnStatus::Closing;
@@ -77,7 +86,7 @@ impl UdpBackend {
         }
         if let ConnStatus::Shutdown = self.status {
             if self.send_buffer.is_empty() {
-                log::info!("connection:{} is closing for no data to send", self.index);
+                log::debug!("connection:{} is closing for no data to send", self.index);
                 self.status = ConnStatus::Closing;
             }
         }
@@ -87,6 +96,8 @@ impl UdpBackend {
         loop {
             match self.socket.recv_from(self.recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
+                    self.remote_addr = addr;
+                    self.bytes_read += size;
                     if size == MAX_PACKET_SIZE {
                         log::error!("received {} bytes udp data, packet fragmented", size);
                     }
@@ -158,19 +169,21 @@ impl Backend for UdpBackend {
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
                     self.readiness.insert(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} add writable to udp target", self.index);
+                    log::debug!("connection:{} add writable to udp target", self.index);
                 }
                 if self.send_buffer.is_empty() && self.readiness.is_writable() {
                     self.readiness.remove(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} remove writable from udp target", self.index);
+                    log::debug!("connection:{} remove writable from udp target", self.index);
                 }
                 if readable && !self.readiness.is_readable() {
                     self.readiness.insert(Ready::readable());
+                    log::debug!("connection:{} add readable to udp target", self.index);
                     changed = true;
                 }
                 if !readable && self.readiness.is_readable() {
                     self.readiness.remove(Ready::readable());
+                    log::debug!("connection:{} remove readable to udp target", self.index);
                     changed = true;
                 }
 
@@ -185,6 +198,7 @@ impl Backend for UdpBackend {
         if let ConnStatus::Closing = self.status {
             let _ = poll.deregister(&self.socket);
             self.status = ConnStatus::Closed;
+            log::info!("connection:{} address:{} closed, read {} bytes, sent {} bytes", self.index, self.remote_addr, self.bytes_read, self.bytes_sent);
         }
     }
 

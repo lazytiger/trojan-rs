@@ -111,7 +111,7 @@ impl TlsServer {
             conn.ready(poll, event, opts);
             if conn.destroyed() {
                 self.conns.remove(&index);
-                log::info!("connection:{} closed, remove from pool", index);
+                log::debug!("connection:{} closed, remove from pool", index);
             }
         } else {
             log::error!("connection:{} not found", index);

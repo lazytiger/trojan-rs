@@ -131,7 +131,7 @@ impl Connection {
     fn try_resolve(&mut self, opts: &mut Opts, poll: &Poll) {
         if let Sock5Address::Domain(domain, port) = &self.sock5_addr {
             if let Some(address) = self.resolver.as_ref().unwrap().address() {
-                log::info!("connection:{} got resolve result {} = {}", self.index, domain, address);
+                log::debug!("connection:{} got resolve result {} = {}", self.index, domain, address);
                 opts.update_dns(domain.clone(), address);
                 let addr = SocketAddr::new(address, *port);
                 self.target_addr.replace(addr);
@@ -169,7 +169,7 @@ impl Connection {
             self.sock5_addr = request.address;
             *buffer = request.payload;
         } else {
-            log::info!("connection:{} does not get a trojan request, pass through", self.index);
+            log::debug!("connection:{} does not get a trojan request, pass through", self.index);
             self.command = CONNECT;
             self.sock5_addr = Sock5Address::None;
         }
@@ -179,7 +179,7 @@ impl Connection {
                     //udp associate bind at 0.0.0.0:0, ignore all domain
                     return true;
                 }
-                log::info!("connection:{} has to resolve {}", self.index, domain);
+                log::debug!("connection:{} has to resolve {}", self.index, domain);
                 let resolver = EventedResolver::new(domain.clone());
                 if let Err(err) = poll.register(&resolver, self.target_token(), Ready::readable(), PollOpt::level()) {
                     self.closing = true;
@@ -189,11 +189,11 @@ impl Connection {
                 self.resolver.replace(resolver);
             }
             Sock5Address::Socket(address) => {
-                log::info!("connection:{} got resolved target address:{}", self.index, address);
+                log::debug!("connection:{} got resolved target address:{}", self.index, address);
                 self.target_addr.replace(*address);
             }
             Sock5Address::None => {
-                log::info!("connection:{} got default target address:{}", self.index, opts.back_addr.as_ref().unwrap());
+                log::debug!("connection:{} got default target address:{}", self.index, opts.back_addr.as_ref().unwrap());
                 self.target_addr = opts.back_addr.clone();
             }
         }
@@ -250,7 +250,7 @@ impl Connection {
     }
 
     fn try_setup_tcp_target(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
-        log::info!("connection:{} make a target connection to {}", self.index, self.target_addr.unwrap());
+        log::debug!("connection:{} make a target connection to {}", self.index, self.target_addr.unwrap());
         match TcpStream::connect(self.target_addr.as_ref().unwrap()) {
             Ok(tcp_target) => {
                 if let Err(err) = sys::set_mark(&tcp_target, opts.marker) {

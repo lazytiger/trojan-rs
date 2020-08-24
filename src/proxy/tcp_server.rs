@@ -96,7 +96,7 @@ impl TcpServer {
         if let Some(conn) = self.conns.get_mut(&index) {
             conn.ready(event, poll);
             if conn.destroyed() {
-                log::info!("connection:{} removed from list", index);
+                log::debug!("connection:{} removed from list", index);
                 self.conns.remove(&index);
             }
         }
@@ -292,7 +292,7 @@ impl Connection {
         if let ConnStatus::Shutdown = self.status {
             if self.send_buffer.is_empty() {
                 self.status = ConnStatus::Closing;
-                log::info!("connection:{} is closing for no data to send", self.index());
+                log::debug!("connection:{} is closing for no data to send", self.index());
             }
         }
     }

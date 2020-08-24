@@ -52,7 +52,7 @@ impl TcpBackend {
 
         if let ConnStatus::Shutdown = self.status {
             if self.send_buffer.is_empty() {
-                log::info!("connection:{} is closing for no data to send", self.index);
+                log::debug!("connection:{} is closing for no data to send", self.index);
                 self.status = ConnStatus::Closing;
             }
         }
@@ -101,19 +101,21 @@ impl Backend for TcpBackend {
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
                     self.readiness.insert(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} add writable to tcp target", self.index);
+                    log::debug!("connection:{} add writable to tcp target", self.index);
                 }
                 if self.send_buffer.is_empty() && self.readiness.is_writable() {
                     self.readiness.remove(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} remove writable from tcp target", self.index);
+                    log::debug!("connection:{} remove writable from tcp target", self.index);
                 }
                 if readable && !self.readiness.is_readable() {
                     self.readiness.insert(Ready::readable());
+                    log::debug!("connection:{} add readable to tcp target", self.index);
                     changed = true;
                 }
                 if !readable && self.readiness.is_readable() {
                     self.readiness.remove(Ready::readable());
+                    log::debug!("connection:{} remove readable from tcp target", self.index);
                     changed = true;
                 }
 
