@@ -223,7 +223,7 @@ impl<T: Session> TlsConn<T> {
         }
     }
 
-    pub fn write_finished(&self) -> bool {
+    pub fn writable(&self) -> bool {
         self.buffer_len < MAX_BUFFER_SIZE
     }
 }

@@ -105,10 +105,10 @@ impl Connection {
             return;
         }
 
-        self.proxy.reregister(poll, self.get_readable());
+        self.proxy.reregister(poll, self.proxy_readable());
         self.proxy.check_close(poll);
         if let Some(backend) = &mut self.backend {
-            backend.reregister(poll, self.proxy.write_finished());
+            backend.reregister(poll, self.proxy.writable());
             backend.check_close(poll);
             if self.proxy.closed() && !backend.closed() {
                 //proxy is closing, backend is ok, register backend with write only
@@ -120,9 +120,9 @@ impl Connection {
         }
     }
 
-    fn get_readable(&self) -> bool {
+    fn proxy_readable(&self) -> bool {
         if let Some(backend) = &self.backend {
-            backend.write_finished()
+            backend.writable()
         } else {
             true
         }

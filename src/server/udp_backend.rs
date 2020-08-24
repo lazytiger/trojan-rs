@@ -208,7 +208,7 @@ impl Backend for UdpBackend {
         self.check_close(poll);
     }
 
-    fn write_finished(&self) -> bool {
+    fn writable(&self) -> bool {
         self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 }

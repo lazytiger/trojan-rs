@@ -45,7 +45,7 @@ pub trait Backend {
     fn get_timeout(&self) -> Duration;
     fn status(&self) -> ConnStatus;
     fn shutdown(&mut self, poll: &Poll);
-    fn write_finished(&self) -> bool;
+    fn writable(&self) -> bool;
 }
 
 impl TlsServer {

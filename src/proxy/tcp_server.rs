@@ -242,11 +242,11 @@ impl Connection {
                     self.client_readiness.remove(Ready::writable());
                     changed = true;
                 }
-                if self.server_conn.write_finished() && !self.client_readiness.is_readable() {
+                if self.server_conn.writable() && !self.client_readiness.is_readable() {
                     self.client_readiness.insert(Ready::readable());
                     changed = true;
                 }
-                if !self.server_conn.write_finished() && self.client_readiness.is_readable() {
+                if !self.server_conn.writable() && self.client_readiness.is_readable() {
                     self.client_readiness.remove(Ready::readable());
                     changed = true;
                 }

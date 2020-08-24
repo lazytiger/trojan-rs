@@ -158,8 +158,8 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
-        if !self.server_conn.write_finished() {
-            log::error!("connection:{} too many packets, drop udp packet", self.index);
+        if !self.server_conn.writable() {
+            log::warn!("connection:{} too many packets, drop udp packet", self.index);
             return;
         }
         self.recv_buffer.clear();
@@ -241,7 +241,7 @@ impl Connection {
 
     fn do_send_udp(&mut self, dst_addr: SocketAddr, data: &[u8], udp_cache: &mut UdpSvrCache) {
         if self.dst_addr != dst_addr {
-            log::error!("connection:{} udp target changed to {}", self.index, dst_addr);
+            log::warn!("connection:{} udp target changed to {}", self.index, dst_addr);
             self.socket = udp_cache.get_socket(dst_addr);
             self.dst_addr = dst_addr;
         }
