@@ -166,7 +166,7 @@ impl Connection {
             log::warn!("connection:{} too many packets, drop udp packet", self.index);
             return;
         }
-        self.bytes_sent += payload.len();
+        self.bytes_read += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
         if !self.server_conn.write_session(self.recv_buffer.as_ref()) {
