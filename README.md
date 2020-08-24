@@ -17,7 +17,7 @@ should work with the [original server](https://github.com/trojan-gfw/trojan) in 
 ## How to use it
 ```bash
 hoping@HopingPC:~/workspace/trojan-rs$ trojan --help
-trojan 0.4
+trojan 0.6
 Hoping White
 A trojan implementation using rust
 
