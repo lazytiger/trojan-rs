@@ -35,6 +35,8 @@ struct Connection {
     client_time: Instant,
     socket: Rc<UdpSocket>,
     dst_addr: SocketAddr,
+    bytes_read: usize,
+    bytes_sent: usize,
 }
 
 impl UdpServer {
@@ -127,6 +129,8 @@ impl Connection {
             recv_buffer: BytesMut::new(),
             status: ConnStatus::Established,
             client_time: Instant::now(),
+            bytes_read: 0,
+            bytes_sent: 0,
         }
     }
 
@@ -162,6 +166,7 @@ impl Connection {
             log::warn!("connection:{} too many packets, drop udp packet", self.index);
             return;
         }
+        self.bytes_sent += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
         if !self.server_conn.write_session(self.recv_buffer.as_ref()) {
@@ -214,7 +219,7 @@ impl Connection {
     fn close_now(&mut self, _: &Poll) {
         self.status = ConnStatus::Closed;
         let secs = self.client_time.elapsed().as_secs();
-        log::warn!("connection:{} closed, time:{} ", self.index(), secs);
+        log::info!("connection:{} address:{} closed, time:{} read {} bytes, send {} bytes", self.index(), self.dst_addr, secs, self.bytes_read, self.bytes_sent);
     }
 
     fn reregister(&mut self, _: &Poll) {}
@@ -247,6 +252,7 @@ impl Connection {
         }
         match self.socket.send_to(data, &self.src_addr) {
             Ok(size) => {
+                self.bytes_sent += size;
                 log::debug!("send {} bytes upd data from {} to {}", size, dst_addr, self.src_addr);
                 if size != data.len() {
                     log::error!("send {} byte to client fragmented to {}", data.len(), size)
