@@ -1,17 +1,16 @@
-use clap::{App, AppSettings, FromArgMatches};
 use clap::derive::IntoApp;
+use clap::{App, AppSettings, FromArgMatches};
 
 use crate::config::{Mode, Opts};
 
-mod server;
 mod config;
 mod proto;
-mod sys;
 mod proxy;
-mod tls_conn;
 mod resolver;
+mod server;
+mod sys;
 mod tcp_util;
-
+mod tls_conn;
 
 fn main() {
     let mut app: App = <Opts as IntoApp>::into_app();

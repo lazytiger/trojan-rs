@@ -6,7 +6,12 @@ use rustls::Session;
 
 use crate::tls_conn::TlsConn;
 
-pub fn tcp_read<T: Session>(index: usize, mut conn: &TcpStream, recv_buf: &mut Vec<u8>, server_conn: &mut TlsConn<T>) -> bool {
+pub fn tcp_read<T: Session>(
+    index: usize,
+    mut conn: &TcpStream,
+    recv_buf: &mut Vec<u8>,
+    server_conn: &mut TlsConn<T>,
+) -> bool {
     loop {
         match conn.read(recv_buf.as_mut_slice()) {
             Ok(size) => {
@@ -14,10 +19,8 @@ pub fn tcp_read<T: Session>(index: usize, mut conn: &TcpStream, recv_buf: &mut V
                 if size == 0 {
                     log::warn!("connection:{} meets end of file", index);
                     return false;
-                } else {
-                    if !server_conn.write_session(&recv_buf.as_slice()[..size]) {
-                        return false;
-                    }
+                } else if !server_conn.write_session(&recv_buf.as_slice()[..size]) {
+                    return false;
                 }
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -33,18 +36,31 @@ pub fn tcp_read<T: Session>(index: usize, mut conn: &TcpStream, recv_buf: &mut V
     true
 }
 
-pub fn tcp_send(index: usize, mut conn: &TcpStream, send_buffer: &mut BytesMut, mut data: &[u8]) -> bool {
+pub fn tcp_send(
+    index: usize,
+    mut conn: &TcpStream,
+    send_buffer: &mut BytesMut,
+    mut data: &[u8],
+) -> bool {
     loop {
-        if data.len() == 0 {
+        if data.is_empty() {
             return true;
         }
         match conn.write(data) {
             Ok(size) => {
                 data = &data[size..];
-                log::debug!("connection:{} session write {} byte to backend", index, size);
+                log::debug!(
+                    "connection:{} session write {} byte to backend",
+                    index,
+                    size
+                );
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                log::debug!("connection:{} session write blocked, remaining:{}", index, data.len());
+                log::debug!(
+                    "connection:{} session write blocked, remaining:{}",
+                    index,
+                    data.len()
+                );
                 send_buffer.extend_from_slice(data);
                 break;
             }

@@ -2,17 +2,17 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::time::Instant;
 
-use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpStream, UdpSocket};
+use mio::{Event, Poll, PollOpt, Ready, Token};
 use rustls::ServerSession;
 
 use crate::config::Opts;
-use crate::proto::{CONNECT, Sock5Address, TrojanRequest};
+use crate::proto::{Sock5Address, TrojanRequest, CONNECT};
 use crate::resolver::EventedResolver;
-use crate::server::{CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY};
-use crate::server::server::Backend;
 use crate::server::tcp_backend::TcpBackend;
+use crate::server::tls_server::Backend;
 use crate::server::udp_backend::UdpBackend;
+use crate::server::{CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY};
 use crate::sys;
 use crate::tls_conn::TlsConn;
 
@@ -131,7 +131,12 @@ impl Connection {
     fn try_resolve(&mut self, opts: &mut Opts, poll: &Poll) {
         if let Sock5Address::Domain(domain, port) = &self.sock5_addr {
             if let Some(address) = self.resolver.as_ref().unwrap().address() {
-                log::debug!("connection:{} got resolve result {} = {}", self.index, domain, address);
+                log::debug!(
+                    "connection:{} got resolve result {} = {}",
+                    self.index,
+                    domain,
+                    address
+                );
                 opts.update_dns(domain.clone(), address);
                 let addr = SocketAddr::new(address, *port);
                 self.target_addr.replace(addr);
@@ -151,7 +156,6 @@ impl Connection {
         self.proxy.do_send();
     }
 
-
     fn try_read_proxy(&mut self, opts: &mut Opts, poll: &Poll) {
         if let Some(buffer) = self.proxy.do_read() {
             self.dispatch(buffer.as_slice(), opts, poll);
@@ -162,14 +166,16 @@ impl Connection {
         self.proxy.register(poll)
     }
 
-
     fn try_handshake(&mut self, buffer: &mut &[u8], opts: &mut Opts, poll: &Poll) -> bool {
         if let Some(request) = TrojanRequest::parse(buffer, opts) {
             self.command = request.command;
             self.sock5_addr = request.address;
             *buffer = request.payload;
         } else {
-            log::debug!("connection:{} does not get a trojan request, pass through", self.index);
+            log::debug!(
+                "connection:{} does not get a trojan request, pass through",
+                self.index
+            );
             self.command = CONNECT;
             self.sock5_addr = Sock5Address::None;
         }
@@ -181,7 +187,12 @@ impl Connection {
                 }
                 log::debug!("connection:{} has to resolve {}", self.index, domain);
                 let resolver = EventedResolver::new(domain.clone());
-                if let Err(err) = poll.register(&resolver, self.target_token(), Ready::readable(), PollOpt::level()) {
+                if let Err(err) = poll.register(
+                    &resolver,
+                    self.target_token(),
+                    Ready::readable(),
+                    PollOpt::level(),
+                ) {
                     self.closing = true;
                     log::error!("connection:{} register resolver failed:{}", self.index, err);
                     return false;
@@ -189,19 +200,31 @@ impl Connection {
                 self.resolver.replace(resolver);
             }
             Sock5Address::Socket(address) => {
-                log::debug!("connection:{} got resolved target address:{}", self.index, address);
+                log::debug!(
+                    "connection:{} got resolved target address:{}",
+                    self.index,
+                    address
+                );
                 self.target_addr.replace(*address);
             }
             Sock5Address::None => {
-                log::debug!("connection:{} got default target address:{}", self.index, opts.back_addr.as_ref().unwrap());
-                self.target_addr = opts.back_addr.clone();
+                log::debug!(
+                    "connection:{} got default target address:{}",
+                    self.index,
+                    opts.back_addr.as_ref().unwrap()
+                );
+                self.target_addr = opts.back_addr;
             }
         }
         true
     }
 
     fn dispatch(&mut self, mut buffer: &[u8], opts: &mut Opts, poll: &Poll) {
-        log::debug!("connection:{} dispatch {} bytes request data", self.index, buffer.len());
+        log::debug!(
+            "connection:{} dispatch {} bytes request data",
+            self.index,
+            buffer.len()
+        );
         loop {
             match self.status {
                 Status::HandShake => {
@@ -229,12 +252,10 @@ impl Connection {
                             self.status = Status::TCPForward;
                         }
                         return;
+                    } else if self.try_setup_udp_target(opts, poll) {
+                        self.status = Status::UDPForward;
                     } else {
-                        if self.try_setup_udp_target(opts, poll) {
-                            self.status = Status::UDPForward;
-                        } else {
-                            return;
-                        }
+                        return;
                     }
                 }
                 _ => {
@@ -250,14 +271,23 @@ impl Connection {
     }
 
     fn try_setup_tcp_target(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
-        log::debug!("connection:{} make a target connection to {}", self.index, self.target_addr.unwrap());
+        log::debug!(
+            "connection:{} make a target connection to {}",
+            self.index,
+            self.target_addr.unwrap()
+        );
         match TcpStream::connect(self.target_addr.as_ref().unwrap()) {
             Ok(tcp_target) => {
                 if let Err(err) = sys::set_mark(&tcp_target, opts.marker) {
                     log::error!("connection:{} set mark failed:{}", self.index, err);
                     self.closing = true;
                     return false;
-                } else if let Err(err) = poll.register(&tcp_target, self.target_token(), Ready::readable(), PollOpt::edge()) {
+                } else if let Err(err) = poll.register(
+                    &tcp_target,
+                    self.target_token(),
+                    Ready::readable(),
+                    PollOpt::edge(),
+                ) {
                     log::error!("connection:{} register target failed:{}", self.index, err);
                     self.closing = true;
                     return false;
@@ -266,7 +296,12 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let mut backend = TcpBackend::new(tcp_target, self.index, self.target_token(), opts.tcp_idle_duration);
+                let mut backend = TcpBackend::new(
+                    tcp_target,
+                    self.index,
+                    self.target_token(),
+                    opts.tcp_idle_duration,
+                );
                 if !self.data.is_empty() {
                     backend.dispatch(self.data.as_slice(), opts);
                     self.data.clear();
@@ -297,18 +332,31 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                if let Err(err) = poll.register(&udp_target, self.target_token(), Ready::readable(), PollOpt::edge()) {
-                    log::error!("connection:{} register udp target failed:{}", self.index, err);
+                if let Err(err) = poll.register(
+                    &udp_target,
+                    self.target_token(),
+                    Ready::readable(),
+                    PollOpt::edge(),
+                ) {
+                    log::error!(
+                        "connection:{} register udp target failed:{}",
+                        self.index,
+                        err
+                    );
                     self.closing = true;
                     return false;
                 }
-                let backend = UdpBackend::new(udp_target, self.index, self.target_token(), opts.udp_idle_duration);
+                let backend = UdpBackend::new(
+                    udp_target,
+                    self.index,
+                    self.target_token(),
+                    opts.udp_idle_duration,
+                );
                 self.backend.replace(Box::new(backend));
             }
         }
         true
     }
-
 
     pub fn destroyed(&self) -> bool {
         if self.resolver.is_some() {

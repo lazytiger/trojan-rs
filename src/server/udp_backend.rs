@@ -2,13 +2,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::UdpSocket;
+use mio::{Event, Poll, PollOpt, Ready, Token};
 use rustls::ServerSession;
 
 use crate::config::Opts;
-use crate::proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE, UdpAssociate, UdpParseResult};
-use crate::server::server::Backend;
+use crate::proto::{UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE};
+use crate::server::tls_server::Backend;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct UdpBackend {
@@ -49,15 +49,28 @@ impl UdpBackend {
         loop {
             match UdpAssociate::parse(buffer, opts) {
                 UdpParseResult::Packet(packet) => {
-                    match self.socket.send_to(&packet.payload[..packet.length], &packet.address) {
+                    match self
+                        .socket
+                        .send_to(&packet.payload[..packet.length], &packet.address)
+                    {
                         Ok(size) => {
                             self.bytes_sent += size;
                             if size != packet.length {
-                                log::error!("connection:{} udp packet is truncated, {}：{}", self.index, packet.length, size);
+                                log::error!(
+                                    "connection:{} udp packet is truncated, {}：{}",
+                                    self.index,
+                                    packet.length,
+                                    size
+                                );
                                 self.status = ConnStatus::Closing;
                                 return;
                             }
-                            log::debug!("connection:{} write {} bytes to udp target:{}", self.index, size, packet.address);
+                            log::debug!(
+                                "connection:{} write {} bytes to udp target:{}",
+                                self.index,
+                                size,
+                                packet.address
+                            );
                             buffer = &packet.payload[packet.length..];
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -66,7 +79,12 @@ impl UdpBackend {
                             break;
                         }
                         Err(err) => {
-                            log::warn!("connection:{} send_to {} failed:{}", self.index, packet.address, err);
+                            log::warn!(
+                                "connection:{} send_to {} failed:{}",
+                                self.index,
+                                packet.address,
+                                err
+                            );
                             self.status = ConnStatus::Closing;
                             return;
                         }
@@ -101,7 +119,12 @@ impl UdpBackend {
                     if size == MAX_PACKET_SIZE {
                         log::error!("received {} bytes udp data, packet fragmented", size);
                     }
-                    log::debug!("connection:{} got {} bytes udp data from:{}", self.index, size, addr);
+                    log::debug!(
+                        "connection:{} got {} bytes udp data from:{}",
+                        self.index,
+                        size,
+                        addr
+                    );
                     self.recv_head.clear();
                     UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
                     if !conn.write_session(self.recv_head.as_ref()) {
@@ -128,9 +151,13 @@ impl UdpBackend {
     }
 
     fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll.reregister(&self.socket,
-                                          self.token, self.readiness, PollOpt::edge()) {
-            log::error!("connection:{} reregister udp target failed:{}", self.index, err);
+        if let Err(err) = poll.reregister(&self.socket, self.token, self.readiness, PollOpt::edge())
+        {
+            log::error!(
+                "connection:{} reregister udp target failed:{}",
+                self.index,
+                err
+            );
             self.status = ConnStatus::Closing;
         }
     }
@@ -161,9 +188,7 @@ impl Backend for UdpBackend {
             ConnStatus::Closing => {
                 let _ = poll.deregister(&self.socket);
             }
-            ConnStatus::Closed => {
-                return;
-            }
+            ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
@@ -198,7 +223,13 @@ impl Backend for UdpBackend {
         if let ConnStatus::Closing = self.status {
             let _ = poll.deregister(&self.socket);
             self.status = ConnStatus::Closed;
-            log::info!("connection:{} address:{} closed, read {} bytes, sent {} bytes", self.index, self.remote_addr, self.bytes_read, self.bytes_sent);
+            log::info!(
+                "connection:{} address:{} closed, read {} bytes, sent {} bytes",
+                self.index,
+                self.remote_addr,
+                self.bytes_read,
+                self.bytes_sent
+            );
         }
     }
 

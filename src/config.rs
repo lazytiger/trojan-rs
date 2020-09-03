@@ -13,23 +13,46 @@ pub struct DnsEntry {
 }
 
 #[derive(Clap)]
-#[clap(version = "0.6", author = "Hoping White", about = "A trojan implementation using rust")]
+#[clap(
+    version = "0.6",
+    author = "Hoping White",
+    about = "A trojan implementation using rust"
+)]
 pub struct Opts {
     #[clap(subcommand)]
     pub mode: Mode,
     #[clap(short, long, help = "log file path")]
     pub log_file: Option<String>,
-    #[clap(short = "a", long, help = "listen address for server, format like 0.0.0.0:443")]
+    #[clap(
+        short = "a",
+        long,
+        help = "listen address for server, format like 0.0.0.0:443"
+    )]
     pub local_addr: String,
     #[clap(short, long, help = "passwords for negotiation")]
     password: String,
-    #[clap(short = "L", long, default_value = "2", help = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off")]
+    #[clap(
+        short = "L",
+        long,
+        default_value = "2",
+        help = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off"
+    )]
     pub log_level: u8,
     #[clap(short, long, default_value = "1", help = "set marker used by tproxy")]
     pub marker: u8,
-    #[clap(short, long, default_value = "60", help = "time in seconds before closing an inactive udp connection")]
+    #[clap(
+        short,
+        long,
+        default_value = "60",
+        help = "time in seconds before closing an inactive udp connection"
+    )]
     pub udp_idle_timeout: u64,
-    #[clap(short, long, default_value = "600", help = "time in seconds before closing an inactive tcp connection")]
+    #[clap(
+        short,
+        long,
+        default_value = "600",
+        help = "time in seconds before closing an inactive tcp connection"
+    )]
     pub tcp_idle_timeout: u64,
     #[clap(skip)]
     dns_cache_duration: Duration,
@@ -65,19 +88,42 @@ pub struct ProxyArgs {
     pub hostname: String,
     #[clap(short = "o", long, default_value = "443", help = "trojan server port")]
     pub port: u16,
-    #[clap(short = "P", long, default_value = "0", help = "pool size, 0 for disable")]
+    #[clap(
+        short = "P",
+        long,
+        default_value = "0",
+        help = "pool size, 0 for disable"
+    )]
     pub pool_size: usize,
 }
 
 #[derive(Clap)]
 pub struct ServerArgs {
-    #[clap(short, long, help = "certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA")]
+    #[clap(
+        short,
+        long,
+        help = "certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA"
+    )]
     pub cert: String,
-    #[clap(short, long, help = "private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format.")]
+    #[clap(
+        short,
+        long,
+        help = "private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format."
+    )]
     pub key: String,
-    #[clap(short, long, default_value = "127.0.0.1:80", help = "http backend server address")]
+    #[clap(
+        short,
+        long,
+        default_value = "127.0.0.1:80",
+        help = "http backend server address"
+    )]
     pub remote_addr: String,
-    #[clap(short, long, default_value = "300", help = "time in seconds for dns query cache")]
+    #[clap(
+        short,
+        long,
+        default_value = "300",
+        help = "time in seconds for dns query cache"
+    )]
     dns_cache_time: u64,
     #[clap(short = "n", long, help = "alpn protocol supported")]
     pub alpn: Vec<String>,
@@ -107,7 +153,7 @@ impl Opts {
             }
             Mode::Proxy(ref args) => {
                 let mut hostname = args.hostname.clone();
-                if !hostname.ends_with(".") {
+                if !hostname.ends_with('.') {
                     hostname.push('.');
                 }
                 let resolver = Resolver::from_system_conf().unwrap();
@@ -144,7 +190,12 @@ impl Opts {
         encoder.input(self.password.as_bytes());
         let result = encoder.result_str();
         self.pass_len = result.len();
-        log::info!("sha224({}) = {}, length = {}", self.password, result, self.pass_len);
+        log::info!(
+            "sha224({}) = {}, length = {}",
+            self.password,
+            result,
+            self.pass_len
+        );
         self.sha_pass = result;
     }
 
@@ -163,14 +214,16 @@ impl Opts {
     pub fn update_dns(&mut self, domain: String, address: IpAddr) {
         log::trace!("update dns cache, {} = {}", domain, address);
         let expired_time = Instant::now() + self.dns_cache_duration;
-        self.dns_cache.insert(domain,
-                              DnsEntry {
-                                  address,
-                                  expired_time,
-                              });
+        self.dns_cache.insert(
+            domain,
+            DnsEntry {
+                address,
+                expired_time,
+            },
+        );
     }
 
-    pub fn query_dns(&mut self, domain: &String) -> Option<IpAddr> {
+    pub fn query_dns(&mut self, domain: &str) -> Option<IpAddr> {
         if let Some(entry) = self.dns_cache.get(domain) {
             log::debug!("found {} = {} in dns cache", domain, entry.address);
             if entry.expired_time > Instant::now() {
@@ -219,4 +272,3 @@ pub fn setup_logger(logfile: &Option<String>, level: u8) {
     }
     builder.apply().unwrap();
 }
-

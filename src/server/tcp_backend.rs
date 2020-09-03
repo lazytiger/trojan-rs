@@ -2,13 +2,13 @@ use std::net::Shutdown;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::TcpStream;
+use mio::{Event, Poll, PollOpt, Ready, Token};
 use rustls::ServerSession;
 
 use crate::config::Opts;
 use crate::proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE};
-use crate::server::server::Backend;
+use crate::server::tls_server::Backend;
 use crate::tcp_util;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
@@ -59,9 +59,12 @@ impl TcpBackend {
     }
 
     fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll.reregister(&self.conn,
-                                          self.token, self.readiness, PollOpt::edge()) {
-            log::error!("connection:{} reregister tcp target failed:{}", self.index, err);
+        if let Err(err) = poll.reregister(&self.conn, self.token, self.readiness, PollOpt::edge()) {
+            log::error!(
+                "connection:{} reregister tcp target failed:{}",
+                self.index,
+                err
+            );
             self.status = ConnStatus::Closing;
         }
     }
@@ -93,9 +96,7 @@ impl Backend for TcpBackend {
             ConnStatus::Closing => {
                 let _ = poll.deregister(&self.conn);
             }
-            ConnStatus::Closed => {
-                return;
-            }
+            ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {

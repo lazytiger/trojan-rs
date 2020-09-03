@@ -1,13 +1,13 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::TcpStream;
+use mio::{Event, Poll, PollOpt, Ready, Token};
 use rustls::{ClientConfig, ClientSession};
 use webpki::DNSName;
 
 use crate::config::Opts;
-use crate::proxy::{CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, next_index, RESOLVER};
+use crate::proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER};
 use crate::resolver::EventedResolver;
 use crate::sys;
 use crate::tls_conn::TlsConn;
@@ -87,7 +87,12 @@ impl IdlePool {
         if let Some(server) = server {
             let session = ClientSession::new(&self.config, self.hostname.as_ref());
             let index = next_index(&mut self.next_index);
-            let conn = TlsConn::new(index, Token(index * CHANNEL_CNT + CHANNEL_IDLE), session, server);
+            let conn = TlsConn::new(
+                index,
+                Token(index * CHANNEL_CNT + CHANNEL_IDLE),
+                session,
+                server,
+            );
             Some(conn)
         } else {
             None
@@ -97,7 +102,12 @@ impl IdlePool {
     fn update_dns(&mut self, poll: &Poll) {
         let resolver = EventedResolver::new(self.domain.clone());
         self.resolver.replace(resolver);
-        if let Err(err) = poll.register(self.resolver.as_ref().unwrap(), Token(RESOLVER), Ready::readable(), PollOpt::level()) {
+        if let Err(err) = poll.register(
+            self.resolver.as_ref().unwrap(),
+            Token(RESOLVER),
+            Ready::readable(),
+            PollOpt::level(),
+        ) {
             log::error!("idle_pool register resolver failed:{}", err);
             let _ = self.resolver.take();
         }
@@ -120,10 +130,8 @@ impl IdlePool {
         for i in 0..self.pool.len() {
             let conn = self.pool.get_mut(i).unwrap();
             if conn.token() == event.token() {
-                if event.readiness().is_readable() {
-                    if let Some(_) = conn.do_read() {
-                        log::error!("found data in https handshake phase");
-                    }
+                if event.readiness().is_readable() && conn.do_read().is_some() {
+                    log::error!("found data in https handshake phase");
                 }
                 if event.readiness().is_writable() {
                     conn.do_send();

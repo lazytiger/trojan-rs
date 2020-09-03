@@ -153,7 +153,7 @@ fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Soc
         }
         _ => {
             log::warn!("unknown protocol, invalid address type:{}", atyp);
-            return None;
+            None
         }
     }
 }

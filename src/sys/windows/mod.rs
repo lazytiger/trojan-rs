@@ -14,6 +14,9 @@ pub fn get_oridst_addr<T: Any>(_s: &T) -> Result<SocketAddr> {
     unimplemented!("proxy mode not supported in windows");
 }
 
-pub fn recv_from_with_destination<T: Any>(_socket: &T, _buf: &mut [u8]) -> Result<(usize, SocketAddr, SocketAddr)> {
+pub fn recv_from_with_destination<T: Any>(
+    _socket: &T,
+    _buf: &mut [u8],
+) -> Result<(usize, SocketAddr, SocketAddr)> {
     unimplemented!("proxy mode not supported in windows");
 }

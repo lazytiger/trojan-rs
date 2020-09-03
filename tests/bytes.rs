@@ -7,7 +7,7 @@ fn bytes_memory() {
     let len = buffer.len();
     assert_eq!(buffer.capacity(), len);
     {
-        let new_buffer = buffer.split();
+        let _ = buffer.split();
         buffer.extend_from_slice("hello, world".as_bytes());
     }
     println!("buffer capacity:{}", buffer.capacity());
