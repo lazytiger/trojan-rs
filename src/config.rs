@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use clap::Clap;
@@ -157,13 +158,20 @@ impl Opts {
                     hostname.push('.');
                 }
                 let resolver = Resolver::from_system_conf().unwrap();
-                let response = resolver.lookup_ip(hostname.as_str()).unwrap();
-                for ip in response.iter() {
-                    if ip.is_ipv4() {
-                        self.back_addr.replace(SocketAddr::new(ip, args.port));
+                for i in 0..10 {
+                    let response = resolver.lookup_ip(hostname.as_str()).unwrap();
+                    for ip in response.iter() {
+                        if ip.is_ipv4() {
+                            self.back_addr.replace(SocketAddr::new(ip, args.port));
+                            break;
+                        } else if self.back_addr.is_none() {
+                            self.back_addr.replace(SocketAddr::new(ip, args.port));
+                        }
+                    }
+                    if self.back_addr.is_none() {
+                        sleep(Duration::new(i + 1, 0));
+                    } else {
                         break;
-                    } else if self.back_addr.is_none() {
-                        self.back_addr.replace(SocketAddr::new(ip, args.port));
                     }
                 }
                 if self.back_addr.is_none() {
