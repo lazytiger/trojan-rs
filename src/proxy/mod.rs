@@ -2,9 +2,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::net::TcpListener;
 use mio::net::UdpSocket;
+use mio::{Events, Poll, PollOpt, Ready, Token};
 use rustls::ClientConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use webpki::DNSNameRef;
@@ -16,10 +16,10 @@ use crate::proxy::udp_cache::UdpSvrCache;
 use crate::proxy::udp_server::UdpServer;
 use crate::sys;
 
-mod tcp_server;
-mod udp_server;
-mod udp_cache;
 mod idle_pool;
+mod tcp_server;
+mod udp_cache;
+mod udp_server;
 
 const MIN_INDEX: usize = 2;
 const MAX_INDEX: usize = std::usize::MAX / CHANNEL_CNT;
@@ -73,13 +73,28 @@ pub fn run(opts: &mut Opts) {
     }
     let mut udp_cache = UdpSvrCache::new();
     let poll = Poll::new().unwrap();
-    poll.register(&tcp_listener, Token(TCP_LISTENER), Ready::readable(), PollOpt::edge()).unwrap();
-    poll.register(&udp_listener, Token(UDP_LISTENER), Ready::readable(), PollOpt::edge()).unwrap();
+    poll.register(
+        &tcp_listener,
+        Token(TCP_LISTENER),
+        Ready::readable(),
+        PollOpt::edge(),
+    )
+    .unwrap();
+    poll.register(
+        &udp_listener,
+        Token(UDP_LISTENER),
+        Ready::readable(),
+        PollOpt::edge(),
+    )
+    .unwrap();
 
-
-    let hostname = DNSNameRef::try_from_ascii(opts.proxy_args().hostname.as_bytes()).unwrap().to_owned();
+    let hostname = DNSNameRef::try_from_ascii(opts.proxy_args().hostname.as_bytes())
+        .unwrap()
+        .to_owned();
     let mut config = ClientConfig::new();
-    config.root_store.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+    config
+        .root_store
+        .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     let config = Arc::new(config);
 
     let mut tcp_server = TcpServer::new(tcp_listener);

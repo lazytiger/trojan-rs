@@ -3,18 +3,18 @@ use std::io::BufReader;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::net::TcpListener;
-use rustls::{KeyLogFile, NoClientAuth, ServerConfig};
+use mio::{Events, Poll, PollOpt, Ready, Token};
 use rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
+use rustls::{KeyLogFile, NoClientAuth, ServerConfig};
 
-pub use server::TlsServer;
+pub use tls_server::TlsServer;
 
 use crate::config::Opts;
 
 mod connection;
-mod server;
 mod tcp_backend;
+mod tls_server;
 mod udp_backend;
 
 const MIN_INDEX: usize = 2;
@@ -65,7 +65,13 @@ pub fn run(opts: &mut Opts) {
     let poll = Poll::new().unwrap();
     let addr = opts.local_addr.parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
-    poll.register(&listener, Token(LISTENER), Ready::readable(), PollOpt::edge()).unwrap();
+    poll.register(
+        &listener,
+        Token(LISTENER),
+        Ready::readable(),
+        PollOpt::edge(),
+    )
+    .unwrap();
     let mut server = TlsServer::new(listener, config);
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();

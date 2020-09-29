@@ -21,14 +21,11 @@ impl UdpSvrCache {
         if let Some(socket) = self.conns.get(&addr) {
             socket.clone()
         } else {
-            log::info!("socket:{} not found, create a new one", addr);
+            log::debug!("socket:{} not found, create a new one", addr);
             let socket = new_socket(addr, true);
             let socket = UdpSocket::from_socket(socket.into_udp_socket()).unwrap();
             let socket = Rc::new(socket);
-            self.conns.insert(
-                addr,
-                socket.clone(),
-            );
+            self.conns.insert(addr, socket.clone());
             socket
         }
     }

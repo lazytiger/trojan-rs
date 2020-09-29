@@ -3,13 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use mio::{Event, Poll, Token};
 use mio::net::TcpListener;
+use mio::{Event, Poll, Token};
 use rustls::{ServerConfig, ServerSession};
 
 use crate::config::Opts;
-use crate::server::{CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX};
 use crate::server::connection::Connection;
+use crate::server::{CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX};
 use crate::sys;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
@@ -17,13 +17,13 @@ pub struct TlsServer {
     listener: TcpListener,
     config: Arc<ServerConfig>,
     next_id: usize,
-    conns: HashMap<usize, Connection<>>,
+    conns: HashMap<usize, Connection>,
 }
 
 pub trait Backend {
     fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>);
     fn dispatch(&mut self, data: &[u8], opts: &mut Opts);
-    fn reregister(&mut self, poll: &Poll);
+    fn reregister(&mut self, poll: &Poll, readable: bool);
     fn check_close(&mut self, poll: &Poll);
     fn closing(&self) -> bool {
         if let ConnStatus::Closing = self.status() {
@@ -45,6 +45,7 @@ pub trait Backend {
     fn get_timeout(&self) -> Duration;
     fn status(&self) -> ConnStatus;
     fn shutdown(&mut self, poll: &Poll);
+    fn writable(&self) -> bool;
 }
 
 impl TlsServer {
@@ -61,7 +62,11 @@ impl TlsServer {
         loop {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
-                    log::debug!("get new connection, token:{}, address:{}", self.next_id, addr);
+                    log::debug!(
+                        "get new connection, token:{}, address:{}",
+                        self.next_id,
+                        addr
+                    );
                     if let Err(err) = sys::set_mark(&stream, opts.marker) {
                         log::error!("set mark failed:{}", err);
                         continue;
@@ -71,7 +76,15 @@ impl TlsServer {
                     }
                     let session = ServerSession::new(&self.config);
                     let index = self.next_index();
-                    let mut conn = Connection::new(index, TlsConn::new(index, Token(index * CHANNEL_CNT + CHANNEL_PROXY), session, stream));
+                    let mut conn = Connection::new(
+                        index,
+                        TlsConn::new(
+                            index,
+                            Token(index * CHANNEL_CNT + CHANNEL_PROXY),
+                            session,
+                            stream,
+                        ),
+                    );
                     if conn.setup(poll, opts) {
                         self.conns.insert(index, conn);
                     } else {
@@ -110,7 +123,7 @@ impl TlsServer {
             conn.ready(poll, event, opts);
             if conn.destroyed() {
                 self.conns.remove(&index);
-                log::info!("connection:{} closed, remove from pool", index);
+                log::debug!("connection:{} closed, remove from pool", index);
             }
         } else {
             log::error!("connection:{} not found", index);

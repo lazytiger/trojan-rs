@@ -1,13 +1,14 @@
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::UdpSocket;
+use mio::{Event, Poll, PollOpt, Ready, Token};
 use rustls::ServerSession;
 
 use crate::config::Opts;
-use crate::proto::{MAX_PACKET_SIZE, UdpAssociate, UdpParseResult};
-use crate::server::server::Backend;
+use crate::proto::{UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE};
+use crate::server::tls_server::Backend;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct UdpBackend {
@@ -20,10 +21,14 @@ pub struct UdpBackend {
     status: ConnStatus,
     readiness: Ready,
     timeout: Duration,
+    bytes_read: usize,
+    bytes_sent: usize,
+    remote_addr: SocketAddr,
 }
 
 impl UdpBackend {
     pub fn new(socket: UdpSocket, index: usize, token: Token, timeout: Duration) -> UdpBackend {
+        let remote_addr = socket.local_addr().unwrap();
         UdpBackend {
             socket,
             send_buffer: Default::default(),
@@ -34,6 +39,9 @@ impl UdpBackend {
             status: ConnStatus::Established,
             readiness: Ready::empty(),
             timeout,
+            bytes_read: 0,
+            bytes_sent: 0,
+            remote_addr,
         }
     }
 
@@ -41,14 +49,28 @@ impl UdpBackend {
         loop {
             match UdpAssociate::parse(buffer, opts) {
                 UdpParseResult::Packet(packet) => {
-                    match self.socket.send_to(&packet.payload[..packet.length], &packet.address) {
+                    match self
+                        .socket
+                        .send_to(&packet.payload[..packet.length], &packet.address)
+                    {
                         Ok(size) => {
+                            self.bytes_sent += size;
                             if size != packet.length {
-                                log::error!("connection:{} udp packet is truncated, {}：{}", self.index, packet.length, size);
+                                log::error!(
+                                    "connection:{} udp packet is truncated, {}：{}",
+                                    self.index,
+                                    packet.length,
+                                    size
+                                );
                                 self.status = ConnStatus::Closing;
                                 return;
                             }
-                            log::debug!("connection:{} write {} bytes to udp target:{}", self.index, size, packet.address);
+                            log::debug!(
+                                "connection:{} write {} bytes to udp target:{}",
+                                self.index,
+                                size,
+                                packet.address
+                            );
                             buffer = &packet.payload[packet.length..];
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -57,7 +79,12 @@ impl UdpBackend {
                             break;
                         }
                         Err(err) => {
-                            log::warn!("connection:{} send_to {} failed:{}", self.index, packet.address, err);
+                            log::warn!(
+                                "connection:{} send_to {} failed:{}",
+                                self.index,
+                                packet.address,
+                                err
+                            );
                             self.status = ConnStatus::Closing;
                             return;
                         }
@@ -77,7 +104,7 @@ impl UdpBackend {
         }
         if let ConnStatus::Shutdown = self.status {
             if self.send_buffer.is_empty() {
-                log::info!("connection:{} is closing for no data to send", self.index);
+                log::debug!("connection:{} is closing for no data to send", self.index);
                 self.status = ConnStatus::Closing;
             }
         }
@@ -87,10 +114,17 @@ impl UdpBackend {
         loop {
             match self.socket.recv_from(self.recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
+                    self.remote_addr = addr;
+                    self.bytes_read += size;
                     if size == MAX_PACKET_SIZE {
                         log::error!("received {} bytes udp data, packet fragmented", size);
                     }
-                    log::debug!("connection:{} got {} bytes udp data from:{}", self.index, size, addr);
+                    log::debug!(
+                        "connection:{} got {} bytes udp data from:{}",
+                        self.index,
+                        size,
+                        addr
+                    );
                     self.recv_head.clear();
                     UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
                     if !conn.write_session(self.recv_head.as_ref()) {
@@ -117,9 +151,13 @@ impl UdpBackend {
     }
 
     fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll.reregister(&self.socket,
-                                          self.token, self.readiness, PollOpt::edge()) {
-            log::error!("connection:{} reregister udp target failed:{}", self.index, err);
+        if let Err(err) = poll.reregister(&self.socket, self.token, self.readiness, PollOpt::edge())
+        {
+            log::error!(
+                "connection:{} reregister udp target failed:{}",
+                self.index,
+                err
+            );
             self.status = ConnStatus::Closing;
         }
     }
@@ -145,25 +183,33 @@ impl Backend for UdpBackend {
         }
     }
 
-    fn reregister(&mut self, poll: &Poll) {
+    fn reregister(&mut self, poll: &Poll, readable: bool) {
         match self.status {
             ConnStatus::Closing => {
                 let _ = poll.deregister(&self.socket);
             }
-            ConnStatus::Closed => {
-                return;
-            }
+            ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
                     self.readiness.insert(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} add writable to udp target", self.index);
+                    log::debug!("connection:{} add writable to udp target", self.index);
                 }
                 if self.send_buffer.is_empty() && self.readiness.is_writable() {
                     self.readiness.remove(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} remove writable from udp target", self.index);
+                    log::debug!("connection:{} remove writable from udp target", self.index);
+                }
+                if readable && !self.readiness.is_readable() {
+                    self.readiness.insert(Ready::readable());
+                    log::debug!("connection:{} add readable to udp target", self.index);
+                    changed = true;
+                }
+                if !readable && self.readiness.is_readable() {
+                    self.readiness.remove(Ready::readable());
+                    log::debug!("connection:{} remove readable to udp target", self.index);
+                    changed = true;
                 }
 
                 if changed {
@@ -177,6 +223,13 @@ impl Backend for UdpBackend {
         if let ConnStatus::Closing = self.status {
             let _ = poll.deregister(&self.socket);
             self.status = ConnStatus::Closed;
+            log::info!(
+                "connection:{} address:{} closed, read {} bytes, sent {} bytes",
+                self.index,
+                self.remote_addr,
+                self.bytes_read,
+                self.bytes_sent
+            );
         }
     }
 
@@ -198,5 +251,9 @@ impl Backend for UdpBackend {
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
         self.check_close(poll);
+    }
+
+    fn writable(&self) -> bool {
+        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 }

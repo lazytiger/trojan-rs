@@ -14,7 +14,7 @@ pub struct EventedResolver {
 
 impl EventedResolver {
     pub fn new(mut domain: String) -> EventedResolver {
-        if !domain.ends_with(".") {
+        if !domain.ends_with('.') {
             domain.push('.');
         }
         let (registration, set_readiness) = Registration::new2();
@@ -25,9 +25,7 @@ impl EventedResolver {
                 if let Ok(response) = resolver.lookup_ip(domain.as_str()) {
                     let mut address = address2.lock().unwrap();
                     for addr in response.iter() {
-                        if address.is_none() {
-                            address.replace(addr);
-                        } else if addr.is_ipv4() {
+                        if address.is_none() || addr.is_ipv4() {
                             address.replace(addr);
                         }
                         if address.as_ref().unwrap().is_ipv4() {
@@ -48,16 +46,28 @@ impl EventedResolver {
     }
 
     pub fn address(&self) -> Option<IpAddr> {
-        self.address.lock().unwrap().clone()
+        *self.address.lock().unwrap()
     }
 }
 
 impl Evented for EventedResolver {
-    fn register(&self, poll: &Poll, token: Token, interest: Ready, opts: PollOpt) -> Result<(), Error> {
+    fn register(
+        &self,
+        poll: &Poll,
+        token: Token,
+        interest: Ready,
+        opts: PollOpt,
+    ) -> Result<(), Error> {
         self.registration.register(poll, token, interest, opts)
     }
 
-    fn reregister(&self, poll: &Poll, token: Token, interest: Ready, opts: PollOpt) -> Result<(), Error> {
+    fn reregister(
+        &self,
+        poll: &Poll,
+        token: Token,
+        interest: Ready,
+        opts: PollOpt,
+    ) -> Result<(), Error> {
         self.registration.reregister(poll, token, interest, opts)
     }
 

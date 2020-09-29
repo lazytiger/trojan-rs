@@ -6,7 +6,8 @@ use crate::config::Opts;
 
 pub const CONNECT: u8 = 0x01;
 pub const UDP_ASSOCIATE: u8 = 0x03;
-pub const MAX_PACKET_SIZE: usize = 8193;
+pub const MAX_PACKET_SIZE: usize = 1450;
+pub const MAX_BUFFER_SIZE: usize = 1024 * 1024;
 const IPV4: u8 = 0x01;
 const DOMAIN: u8 = 0x03;
 const IPV6: u8 = 0x04;
@@ -123,7 +124,7 @@ fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Soc
             } else if let Some(ip) = opts.query_dns(&domain) {
                 Some((length + 3, Sock5Address::Socket(SocketAddr::new(ip, port))))
             } else {
-                log::info!("domain found:{}:{}", domain, port);
+                log::debug!("domain found:{}:{}", domain, port);
                 Some((length + 3, Sock5Address::Domain(domain, port)))
             }
         }
@@ -152,7 +153,7 @@ fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Soc
         }
         _ => {
             log::warn!("unknown protocol, invalid address type:{}", atyp);
-            return None;
+            None
         }
     }
 }

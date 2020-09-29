@@ -2,13 +2,13 @@ use std::net::Shutdown;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use mio::{Event, Poll, PollOpt, Ready, Token};
 use mio::net::TcpStream;
+use mio::{Event, Poll, PollOpt, Ready, Token};
 use rustls::ServerSession;
 
 use crate::config::Opts;
-use crate::proto::MAX_PACKET_SIZE;
-use crate::server::server::Backend;
+use crate::proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE};
+use crate::server::tls_server::Backend;
 use crate::tcp_util;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
@@ -52,16 +52,19 @@ impl TcpBackend {
 
         if let ConnStatus::Shutdown = self.status {
             if self.send_buffer.is_empty() {
-                log::info!("connection:{} is closing for no data to send", self.index);
+                log::debug!("connection:{} is closing for no data to send", self.index);
                 self.status = ConnStatus::Closing;
             }
         }
     }
 
     fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll.reregister(&self.conn,
-                                          self.token, self.readiness, PollOpt::edge()) {
-            log::error!("connection:{} reregister tcp target failed:{}", self.index, err);
+        if let Err(err) = poll.reregister(&self.conn, self.token, self.readiness, PollOpt::edge()) {
+            log::error!(
+                "connection:{} reregister tcp target failed:{}",
+                self.index,
+                err
+            );
             self.status = ConnStatus::Closing;
         }
     }
@@ -88,25 +91,33 @@ impl Backend for TcpBackend {
         }
     }
 
-    fn reregister(&mut self, poll: &Poll) {
+    fn reregister(&mut self, poll: &Poll, readable: bool) {
         match self.status {
             ConnStatus::Closing => {
                 let _ = poll.deregister(&self.conn);
             }
-            ConnStatus::Closed => {
-                return;
-            }
+            ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
                     self.readiness.insert(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} add writable to tcp target", self.index);
+                    log::debug!("connection:{} add writable to tcp target", self.index);
                 }
                 if self.send_buffer.is_empty() && self.readiness.is_writable() {
                     self.readiness.remove(Ready::writable());
                     changed = true;
-                    log::info!("connection:{} remove writable from tcp target", self.index);
+                    log::debug!("connection:{} remove writable from tcp target", self.index);
+                }
+                if readable && !self.readiness.is_readable() {
+                    self.readiness.insert(Ready::readable());
+                    log::debug!("connection:{} add readable to tcp target", self.index);
+                    changed = true;
+                }
+                if !readable && self.readiness.is_readable() {
+                    self.readiness.remove(Ready::readable());
+                    log::debug!("connection:{} remove readable from tcp target", self.index);
+                    changed = true;
                 }
 
                 if changed {
@@ -143,5 +154,9 @@ impl Backend for TcpBackend {
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
         self.check_close(poll);
+    }
+
+    fn writable(&self) -> bool {
+        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 }
