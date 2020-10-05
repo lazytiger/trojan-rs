@@ -17,16 +17,19 @@ impl UdpSvrCache {
         }
     }
 
-    pub fn get_socket(&mut self, addr: SocketAddr) -> Rc<UdpSocket> {
+    pub fn get_socket(&mut self, addr: SocketAddr) -> Option<Rc<UdpSocket>> {
         if let Some(socket) = self.conns.get(&addr) {
-            socket.clone()
+            Some(socket.clone())
         } else {
             log::debug!("socket:{} not found, create a new one", addr);
-            let socket = new_socket(addr, true);
-            let socket = UdpSocket::from_socket(socket.into_udp_socket()).unwrap();
-            let socket = Rc::new(socket);
-            self.conns.insert(addr, socket.clone());
-            socket
+            if let Some(socket) = new_socket(addr, true) {
+                let socket = UdpSocket::from_socket(socket.into_udp_socket()).unwrap();
+                let socket = Rc::new(socket);
+                self.conns.insert(addr, socket.clone());
+                Some(socket)
+            } else {
+                None
+            }
         }
     }
 

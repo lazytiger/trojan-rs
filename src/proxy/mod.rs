@@ -2,9 +2,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::net::TcpListener;
 use mio::net::UdpSocket;
-use mio::{Events, Poll, PollOpt, Ready, Token};
 use rustls::ClientConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use webpki::DNSNameRef;
@@ -41,7 +41,7 @@ fn next_index(index: &mut usize) -> usize {
     current
 }
 
-pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Socket {
+pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
     let domain = if addr.is_ipv4() {
         Domain::ipv4()
     } else {
@@ -52,21 +52,42 @@ pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Socket {
     } else {
         (Type::stream(), Protocol::tcp())
     };
-    let socket = Socket::new(domain, typ, Some(protocol)).unwrap();
-    sys::set_socket_opts(addr.is_ipv4(), is_udp, &socket).unwrap();
-    socket.set_nonblocking(true).unwrap();
-    socket.set_reuse_address(true).unwrap();
-    socket.bind(&SockAddr::from(addr)).unwrap();
-    if !is_udp {
-        socket.listen(1024).unwrap();
+    let socket = match Socket::new(domain, typ, Some(protocol)) {
+        Ok(socket) => socket,
+        Err(err) => {
+            log::error!("new socket address:{} udp:{} failed:{}", addr, is_udp, err);
+            return None;
+        }
+    };
+    if let Err(err) = sys::set_socket_opts(addr.is_ipv4(), is_udp, &socket) {
+        log::error!("set_socket_opts failed:{}", err);
+        return None;
     }
-    socket
+    if let Err(err) = socket.set_nonblocking(true) {
+        log::error!("set_nonblocking failed:{}", err);
+        return None;
+    }
+    if let Err(err) = socket.set_reuse_address(true) {
+        log::error!("set_reuse_address failed:{}", err);
+        return None;
+    }
+    if let Err(err) = socket.bind(&SockAddr::from(addr)) {
+        log::error!("bind address:{} failed:{}", addr, err);
+        return None;
+    }
+    if !is_udp {
+        if let Err(err) = socket.listen(1024) {
+            log::error!("socket listen failed:{}", err);
+            return None;
+        }
+    }
+    Some(socket)
 }
 
 pub fn run(opts: &mut Opts) {
     let addr: SocketAddr = opts.local_addr.parse().unwrap();
-    let tcp_listener = TcpListener::from_std(new_socket(addr, false).into_tcp_listener()).unwrap();
-    let udp_listener = UdpSocket::from_socket(new_socket(addr, true).into_udp_socket()).unwrap();
+    let tcp_listener = TcpListener::from_std(new_socket(addr, false).unwrap().into_tcp_listener()).unwrap();
+    let udp_listener = UdpSocket::from_socket(new_socket(addr, true).unwrap().into_udp_socket()).unwrap();
     if let Err(err) = sys::set_mark(&udp_listener, opts.marker) {
         log::error!("udp socket set mark failed:{}", err);
         return;

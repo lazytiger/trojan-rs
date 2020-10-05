@@ -5,17 +5,17 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use bytes::BytesMut;
-use mio::net::UdpSocket;
 use mio::{Event, Poll, Token};
+use mio::net::UdpSocket;
 use rustls::ClientSession;
 
 use crate::config::Opts;
 use crate::proto::{
-    TrojanRequest, UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE, UDP_ASSOCIATE,
+    MAX_BUFFER_SIZE, MAX_PACKET_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult,
 };
+use crate::proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index};
 use crate::proxy::idle_pool::IdlePool;
 use crate::proxy::udp_cache::UdpSvrCache;
-use crate::proxy::{next_index, CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX};
 use crate::sys;
 use crate::tls_conn::{ConnStatus, TlsConn};
 
@@ -90,19 +90,24 @@ impl UdpServer {
                                 opts.back_addr.as_ref().unwrap()
                             );
                             if let Some(mut conn) = pool.get(poll) {
-                                let index = next_index(&mut self.next_id);
-                                conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
-                                let mut conn = Connection::new(
-                                    index,
-                                    conn,
-                                    src_addr,
-                                    udp_cache.get_socket(dst_addr),
-                                );
-                                if conn.setup(opts, poll) {
-                                    let _ = self.conns.insert(index, conn);
-                                    self.src_map.insert(src_addr, index);
-                                    log::debug!("connection:{} is ready", index);
-                                    index
+                                if let Some(socket) = udp_cache.get_socket(dst_addr) {
+                                    let index = next_index(&mut self.next_id);
+                                    conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
+                                    let mut conn = Connection::new(
+                                        index,
+                                        conn,
+                                        src_addr,
+                                        socket,
+                                    );
+                                    if conn.setup(opts, poll) {
+                                        let _ = self.conns.insert(index, conn);
+                                        self.src_map.insert(src_addr, index);
+                                        log::debug!("connection:{} is ready", index);
+                                        index
+                                    } else {
+                                        conn.shutdown(poll);
+                                        continue;
+                                    }
                                 } else {
                                     conn.shutdown(poll);
                                     continue;
@@ -307,8 +312,10 @@ impl Connection {
                 self.index,
                 dst_addr
             );
-            self.socket = udp_cache.get_socket(dst_addr);
-            self.dst_addr = dst_addr;
+            if let Some(socket) = udp_cache.get_socket(dst_addr) {
+                self.socket = socket;
+                self.dst_addr = dst_addr;
+            }
         }
         match self.socket.send_to(data, &self.src_addr) {
             Ok(size) => {
