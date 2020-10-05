@@ -315,6 +315,8 @@ impl Connection {
             if let Some(socket) = udp_cache.get_socket(dst_addr) {
                 self.socket = socket;
                 self.dst_addr = dst_addr;
+            } else {
+                return;
             }
         }
         match self.socket.send_to(data, &self.src_addr) {
