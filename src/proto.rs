@@ -4,20 +4,31 @@ use bytes::{BufMut, BytesMut};
 
 use crate::config::Opts;
 
+/// protocol code for CONNECT command
 pub const CONNECT: u8 = 0x01;
+/// protocol code for UDP_ASSOCIATE command
 pub const UDP_ASSOCIATE: u8 = 0x03;
+/// max packet size for udp, MTU = 1500 minus IP head size
 pub const MAX_PACKET_SIZE: usize = 1450;
+/// buffer size for connections
 pub const MAX_BUFFER_SIZE: usize = 1024 * 1024;
+/// protocol code for IPV4 type
 const IPV4: u8 = 0x01;
+/// protocol code for DOMAIN type
 const DOMAIN: u8 = 0x03;
+/// protocol code for IPV6 type
 const IPV6: u8 = 0x04;
 
+/// Trojan Socks5 address enum
 pub enum Sock5Address {
     Socket(SocketAddr),
+    // IP address
     Domain(String, u16),
-    None,
+    // Domain type
+    None, // Invalid
 }
 
+/// Trojan protocol for a request
 pub struct TrojanRequest<'a> {
     pub command: u8,
     pub address: Sock5Address,
