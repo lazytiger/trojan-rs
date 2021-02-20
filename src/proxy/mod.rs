@@ -1,10 +1,11 @@
+//! This module provides functions used in proxy mod.
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::net::TcpListener;
 use mio::net::UdpSocket;
+use mio::{Events, Poll, PollOpt, Ready, Token};
 use rustls::ClientConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use webpki::DNSNameRef;
@@ -21,17 +22,30 @@ mod tcp_server;
 mod udp_cache;
 mod udp_server;
 
+/// minimal index used in `IdlePool`, `TcpServer` and `UdpServer`
 const MIN_INDEX: usize = 2;
+/// maximum index used in `IdlePool`, `TcpServer` and `UdpServer`
 const MAX_INDEX: usize = std::usize::MAX / CHANNEL_CNT;
+/// Token used for TcpListener
 const TCP_LISTENER: usize = 1;
+/// Token used for main Udp Socket
 const UDP_LISTENER: usize = 2;
+/// Token used for dns resolver
 const RESOLVER: usize = 3;
+/// total channel count for Poll
 const CHANNEL_CNT: usize = 4;
+/// channel index  for `IdlePool`
 const CHANNEL_IDLE: usize = 0;
+/// channel index for client `UdpConnection`
 const CHANNEL_UDP: usize = 1;
+/// channel index for client tcp connection
 const CHANNEL_CLIENT: usize = 2;
+/// channel index for remote tcp connection
 const CHANNEL_TCP: usize = 3;
 
+/// Returns next index based on the current one.
+/// If the next index overflows (larger than [`MAX_INDEX`]),
+/// the [`MIN_INDEX`] returns.
 fn next_index(index: &mut usize) -> usize {
     let current = *index;
     *index += 1;
@@ -86,8 +100,10 @@ pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
 
 pub fn run(opts: &mut Opts) {
     let addr: SocketAddr = opts.local_addr.parse().unwrap();
-    let tcp_listener = TcpListener::from_std(new_socket(addr, false).unwrap().into_tcp_listener()).unwrap();
-    let udp_listener = UdpSocket::from_socket(new_socket(addr, true).unwrap().into_udp_socket()).unwrap();
+    let tcp_listener =
+        TcpListener::from_std(new_socket(addr, false).unwrap().into_tcp_listener()).unwrap();
+    let udp_listener =
+        UdpSocket::from_socket(new_socket(addr, true).unwrap().into_udp_socket()).unwrap();
     if let Err(err) = sys::set_mark(&udp_listener, opts.marker) {
         log::error!("udp socket set mark failed:{}", err);
         return;
