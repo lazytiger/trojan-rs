@@ -1,7 +1,9 @@
-use std::io::Error;
-use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::{
+    io::Error,
+    net::IpAddr,
+    sync::{Arc, Mutex},
+    thread::JoinHandle,
+};
 
 use mio::{Evented, Poll, PollOpt, Ready, Registration, Token};
 use trust_dns_resolver::Resolver;

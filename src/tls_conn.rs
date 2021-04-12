@@ -1,10 +1,7 @@
-use std::io::ErrorKind;
-use std::net::Shutdown;
+use std::{io::ErrorKind, net::Shutdown};
 
-use mio::net::TcpStream;
-use mio::{Poll, PollOpt, Ready, Token};
-use rustls::internal::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use rustls::Session;
+use mio::{net::TcpStream, Poll, PollOpt, Ready, Token};
+use rustls::{internal::msgs::fragmenter::MAX_FRAGMENT_LEN, Session};
 
 use crate::proto::MAX_BUFFER_SIZE;
 

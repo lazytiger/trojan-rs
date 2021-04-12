@@ -1,17 +1,18 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use mio::net::TcpListener;
-use mio::{Event, Poll, Token};
+use mio::{net::TcpListener, Event, Poll, Token};
 use rustls::{ServerConfig, ServerSession};
 
-use crate::config::Opts;
-use crate::server::connection::Connection;
-use crate::server::{CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX};
-use crate::sys;
-use crate::tls_conn::{ConnStatus, TlsConn};
+use crate::{
+    config::Opts,
+    server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
+    sys,
+    tls_conn::{ConnStatus, TlsConn},
+};
 
 pub struct TlsServer {
     listener: TcpListener,

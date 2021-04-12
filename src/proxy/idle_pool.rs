@@ -1,16 +1,16 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
-use mio::net::TcpStream;
-use mio::{Event, Poll, PollOpt, Ready, Token};
+use mio::{net::TcpStream, Event, Poll, PollOpt, Ready, Token};
 use rustls::{ClientConfig, ClientSession};
 use webpki::DNSName;
 
-use crate::config::Opts;
-use crate::proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER};
-use crate::resolver::EventedResolver;
-use crate::sys;
-use crate::tls_conn::TlsConn;
+use crate::{
+    config::Opts,
+    proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER},
+    resolver::EventedResolver,
+    sys,
+    tls_conn::TlsConn,
+};
 
 pub struct IdlePool {
     pool: Vec<TlsConn<ClientSession>>,

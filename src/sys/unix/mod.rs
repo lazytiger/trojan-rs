@@ -1,8 +1,10 @@
 use mio::net::TcpStream;
-use std::convert::TryFrom;
-use std::io::{Error, ErrorKind, Result};
-use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
-use std::os::unix::io::AsRawFd;
+use std::{
+    convert::TryFrom,
+    io::{Error, ErrorKind, Result},
+    net::{SocketAddr, SocketAddrV4, SocketAddrV6},
+    os::unix::io::AsRawFd,
+};
 
 pub fn set_mark<T: AsRawFd>(socket: &T, mark: u8) -> Result<()> {
     let fd = socket.as_raw_fd();

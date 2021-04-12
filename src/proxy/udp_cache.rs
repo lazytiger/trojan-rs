@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::rc::Rc;
+use std::{collections::HashMap, net::SocketAddr, rc::Rc};
 
 use mio::net::UdpSocket;
 

@@ -1,11 +1,12 @@
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 use clap::Clap;
-use crypto::digest::Digest;
-use crypto::sha2::Sha224;
+use crypto::{digest::Digest, sha2::Sha224};
 use trust_dns_resolver::Resolver;
 
 pub struct DnsEntry {

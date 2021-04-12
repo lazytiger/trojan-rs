@@ -1,6 +1,4 @@
-use std::any::Any;
-use std::io::Result;
-use std::net::SocketAddr;
+use std::{any::Any, io::Result, net::SocketAddr};
 
 pub fn set_mark<T: Any>(_socket: &T, _mark: u8) -> Result<()> {
     Ok(())

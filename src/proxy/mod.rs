@@ -1,21 +1,25 @@
 //! This module provides functions used in proxy mod.
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use mio::net::TcpListener;
-use mio::net::UdpSocket;
-use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio::{
+    net::{TcpListener, UdpSocket},
+    Events, Poll, PollOpt, Ready, Token,
+};
 use rustls::ClientConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use webpki::DNSNameRef;
 
-use crate::config::Opts;
-use crate::proxy::idle_pool::IdlePool;
-use crate::proxy::tcp_server::TcpServer;
-use crate::proxy::udp_cache::UdpSvrCache;
-use crate::proxy::udp_server::UdpServer;
-use crate::sys;
+use crate::{
+    config::Opts,
+    proxy::{
+        idle_pool::IdlePool, tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer,
+    },
+    sys,
+};
 
 mod idle_pool;
 mod tcp_server;

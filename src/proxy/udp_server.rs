@@ -1,23 +1,22 @@
-use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::net::SocketAddr;
-use std::rc::Rc;
-use std::time::Instant;
+use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, time::Instant};
 
 use bytes::BytesMut;
-use mio::{Event, Poll, Token};
-use mio::net::UdpSocket;
+use mio::{net::UdpSocket, Event, Poll, Token};
 use rustls::ClientSession;
 
-use crate::config::Opts;
-use crate::proto::{
-    MAX_BUFFER_SIZE, MAX_PACKET_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult,
+use crate::{
+    config::Opts,
+    proto::{
+        TrojanRequest, UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE,
+        UDP_ASSOCIATE,
+    },
+    proxy::{
+        idle_pool::IdlePool, next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP,
+        MIN_INDEX,
+    },
+    sys,
+    tls_conn::{ConnStatus, TlsConn},
 };
-use crate::proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index};
-use crate::proxy::idle_pool::IdlePool;
-use crate::proxy::udp_cache::UdpSvrCache;
-use crate::sys;
-use crate::tls_conn::{ConnStatus, TlsConn};
 
 pub struct UdpServer {
     udp_listener: UdpSocket,
@@ -92,13 +91,11 @@ impl UdpServer {
                             if let Some(mut conn) = pool.get(poll) {
                                 if let Some(socket) = udp_cache.get_socket(dst_addr) {
                                     let index = next_index(&mut self.next_id);
-                                    conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
-                                    let mut conn = Connection::new(
+                                    conn.reset_index(
                                         index,
-                                        conn,
-                                        src_addr,
-                                        socket,
+                                        Token(index * CHANNEL_CNT + CHANNEL_UDP),
                                     );
+                                    let mut conn = Connection::new(index, conn, src_addr, socket);
                                     if conn.setup(opts, poll) {
                                         let _ = self.conns.insert(index, conn);
                                         self.src_map.insert(src_addr, index);

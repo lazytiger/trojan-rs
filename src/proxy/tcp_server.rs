@@ -1,21 +1,24 @@
-use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::net::Shutdown;
-use std::net::SocketAddr;
-use std::time::Instant;
+use std::{
+    collections::HashMap,
+    io::ErrorKind,
+    net::{Shutdown, SocketAddr},
+    time::Instant,
+};
 
 use bytes::BytesMut;
-use mio::net::{TcpListener, TcpStream};
-use mio::{Event, Poll, PollOpt, Ready, Token};
+use mio::{
+    net::{TcpListener, TcpStream},
+    Event, Poll, PollOpt, Ready, Token,
+};
 use rustls::ClientSession;
 
-use crate::config::Opts;
-use crate::proto::{TrojanRequest, CONNECT, MAX_BUFFER_SIZE, MAX_PACKET_SIZE};
-use crate::proxy::idle_pool::IdlePool;
-use crate::proxy::{next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX};
-use crate::sys;
-use crate::tcp_util;
-use crate::tls_conn::{ConnStatus, TlsConn};
+use crate::{
+    config::Opts,
+    proto::{TrojanRequest, CONNECT, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
+    proxy::{idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
+    sys, tcp_util,
+    tls_conn::{ConnStatus, TlsConn},
+};
 
 pub struct TcpServer {
     tcp_listener: TcpListener,

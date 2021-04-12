@@ -1,5 +1,4 @@
-use clap::derive::IntoApp;
-use clap::{App, AppSettings, FromArgMatches};
+use clap::{derive::IntoApp, App, AppSettings, FromArgMatches};
 
 use crate::config::{Mode, Opts};
 

@@ -1,15 +1,15 @@
-use std::net::SocketAddr;
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
-use mio::net::UdpSocket;
-use mio::{Event, Poll, PollOpt, Ready, Token};
+use mio::{net::UdpSocket, Event, Poll, PollOpt, Ready, Token};
 use rustls::ServerSession;
 
-use crate::config::Opts;
-use crate::proto::{UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE};
-use crate::server::tls_server::Backend;
-use crate::tls_conn::{ConnStatus, TlsConn};
+use crate::{
+    config::Opts,
+    proto::{UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
+    server::tls_server::Backend,
+    tls_conn::{ConnStatus, TlsConn},
+};
 
 pub struct UdpBackend {
     socket: UdpSocket,

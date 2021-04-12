@@ -1,20 +1,22 @@
-use std::io::Write;
-use std::net::SocketAddr;
-use std::time::Instant;
+use std::{io::Write, net::SocketAddr, time::Instant};
 
-use mio::net::{TcpStream, UdpSocket};
-use mio::{Event, Poll, PollOpt, Ready, Token};
+use mio::{
+    net::{TcpStream, UdpSocket},
+    Event, Poll, PollOpt, Ready, Token,
+};
 use rustls::ServerSession;
 
-use crate::config::Opts;
-use crate::proto::{Sock5Address, TrojanRequest, CONNECT};
-use crate::resolver::EventedResolver;
-use crate::server::tcp_backend::TcpBackend;
-use crate::server::tls_server::Backend;
-use crate::server::udp_backend::UdpBackend;
-use crate::server::{CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY};
-use crate::sys;
-use crate::tls_conn::TlsConn;
+use crate::{
+    config::Opts,
+    proto::{Sock5Address, TrojanRequest, CONNECT},
+    resolver::EventedResolver,
+    server::{
+        tcp_backend::TcpBackend, tls_server::Backend, udp_backend::UdpBackend, CHANNEL_BACKEND,
+        CHANNEL_CNT, CHANNEL_PROXY,
+    },
+    sys,
+    tls_conn::TlsConn,
+};
 
 enum Status {
     HandShake,

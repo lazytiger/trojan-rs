@@ -1,16 +1,16 @@
-use std::net::Shutdown;
-use std::time::Duration;
+use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
-use mio::net::TcpStream;
-use mio::{Event, Poll, PollOpt, Ready, Token};
+use mio::{net::TcpStream, Event, Poll, PollOpt, Ready, Token};
 use rustls::ServerSession;
 
-use crate::config::Opts;
-use crate::proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE};
-use crate::server::tls_server::Backend;
-use crate::tcp_util;
-use crate::tls_conn::{ConnStatus, TlsConn};
+use crate::{
+    config::Opts,
+    proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
+    server::tls_server::Backend,
+    tcp_util,
+    tls_conn::{ConnStatus, TlsConn},
+};
 
 pub struct TcpBackend {
     conn: TcpStream,

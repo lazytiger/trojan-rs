@@ -1,12 +1,15 @@
-use std::fs::File;
-use std::io::BufReader;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    fs::File,
+    io::BufReader,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use mio::net::TcpListener;
-use mio::{Events, Poll, PollOpt, Ready, Token};
-use rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
-use rustls::{KeyLogFile, NoClientAuth, ServerConfig};
+use mio::{net::TcpListener, Events, Poll, PollOpt, Ready, Token};
+use rustls::{
+    internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys},
+    KeyLogFile, NoClientAuth, ServerConfig,
+};
 
 pub use tls_server::TlsServer;
 
