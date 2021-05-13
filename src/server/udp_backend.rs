@@ -116,9 +116,6 @@ impl UdpBackend {
                 Ok((size, addr)) => {
                     self.remote_addr = addr;
                     self.bytes_read += size;
-                    if size == MAX_PACKET_SIZE {
-                        log::error!("received {} bytes udp data, packet fragmented", size);
-                    }
                     log::debug!(
                         "connection:{} got {} bytes udp data from:{}",
                         self.index,

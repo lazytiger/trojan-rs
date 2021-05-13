@@ -66,9 +66,6 @@ impl UdpServer {
                     self.recv_buffer.as_mut_slice(),
                 ) {
                     Ok((size, src_addr, dst_addr)) => {
-                        if size == MAX_PACKET_SIZE {
-                            log::error!("received {} bytes udp data, packet fragmented", size);
-                        }
                         log::debug!(
                             "udp received {} byte from {} to {}",
                             size,
@@ -198,11 +195,7 @@ impl Connection {
     }
 
     fn closed(&self) -> bool {
-        if let ConnStatus::Closed = self.status {
-            true
-        } else {
-            false
-        }
+        matches!(self.status, ConnStatus::Closed)
     }
 
     fn index(&self) -> usize {

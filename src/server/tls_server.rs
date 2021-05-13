@@ -27,18 +27,10 @@ pub trait Backend {
     fn reregister(&mut self, poll: &Poll, readable: bool);
     fn check_close(&mut self, poll: &Poll);
     fn closing(&self) -> bool {
-        if let ConnStatus::Closing = self.status() {
-            true
-        } else {
-            false
-        }
+        matches!(self.status(), ConnStatus::Closing)
     }
     fn closed(&self) -> bool {
-        if let ConnStatus::Closed = self.status() {
-            true
-        } else {
-            false
-        }
+        matches!(self.status(), ConnStatus::Closed)
     }
     fn timeout(&self, t1: Instant, t2: Instant) -> bool {
         t2 - t1 > self.get_timeout()
@@ -98,7 +90,7 @@ impl TlsServer {
                 }
                 Err(err) => {
                     log::error!("accept failed with error:{}, exit now", err);
-                    panic!(err)
+                    std::panic::panic_any(err)
                 }
             }
         }

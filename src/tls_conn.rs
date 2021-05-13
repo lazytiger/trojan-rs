@@ -242,11 +242,7 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn closed(&self) -> bool {
-        if let ConnStatus::Closed = self.status {
-            true
-        } else {
-            false
-        }
+        matches!(self.status, ConnStatus::Closed)
     }
 
     pub fn writable(&self) -> bool {

@@ -129,11 +129,7 @@ impl Connection {
     }
 
     fn closed(&self) -> bool {
-        if let ConnStatus::Closed = self.status {
-            true
-        } else {
-            false
-        }
+        matches!(self.status, ConnStatus::Closed)
     }
 
     fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
