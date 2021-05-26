@@ -34,7 +34,7 @@ struct Connection {
     client: TcpStream,
     recv_buffer: Vec<u8>,
     send_buffer: BytesMut,
-    client_readiness: Interest,
+    client_interest: Interest,
     status: ConnStatus,
     client_time: Instant,
     server_conn: TlsConn<ClientSession>,
@@ -125,7 +125,7 @@ impl Connection {
             dst_addr,
             client,
             server_conn,
-            client_readiness: Interest::READABLE,
+            client_interest: Interest::READABLE,
             status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
@@ -144,14 +144,14 @@ impl Connection {
     fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
         self.server_conn.setup(poll);
         let mut request = BytesMut::new();
-        self.client_readiness = Interest::READABLE;
+        self.client_interest = Interest::READABLE;
         TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, opts);
         let token = self.client_token();
         if !self.server_conn.write_session(request.as_ref()) {
             false
         } else if let Err(err) =
             poll.registry()
-                .register(&mut self.client, token, self.client_readiness)
+                .register(&mut self.client, token, self.client_interest)
         {
             log::warn!("connection:{} register client failed:{}", self.index(), err);
             false
@@ -215,11 +215,11 @@ impl Connection {
             return;
         }
 
-        self.client_readiness = Interest::WRITABLE;
+        self.client_interest = Interest::WRITABLE;
         let token = self.client_token();
         if let Err(err) = poll
             .registry()
-            .reregister(&mut self.client, token, self.client_readiness)
+            .reregister(&mut self.client, token, self.client_interest)
         {
             log::warn!("connection:{} register client failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;
@@ -256,24 +256,24 @@ impl Connection {
             ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
-                if !self.send_buffer.is_empty() && !self.client_readiness.is_writable() {
-                    self.client_readiness |= Interest::WRITABLE;
+                if !self.send_buffer.is_empty() && !self.client_interest.is_writable() {
+                    self.client_interest |= Interest::WRITABLE;
                     changed = true;
                 }
-                if self.send_buffer.is_empty() && self.client_readiness.is_writable() {
-                    self.client_readiness = self
-                        .client_readiness
+                if self.send_buffer.is_empty() && self.client_interest.is_writable() {
+                    self.client_interest = self
+                        .client_interest
                         .remove(Interest::WRITABLE)
                         .unwrap_or(Interest::READABLE);
                     changed = true;
                 }
-                if self.server_conn.writable() && !self.client_readiness.is_readable() {
-                    self.client_readiness |= Interest::READABLE;
+                if self.server_conn.writable() && !self.client_interest.is_readable() {
+                    self.client_interest |= Interest::READABLE;
                     changed = true;
                 }
-                if !self.server_conn.writable() && self.client_readiness.is_readable() {
-                    self.client_readiness = self
-                        .client_readiness
+                if !self.server_conn.writable() && self.client_interest.is_readable() {
+                    self.client_interest = self
+                        .client_interest
                         .remove(Interest::READABLE)
                         .unwrap_or(Interest::WRITABLE);
                     changed = true;
@@ -283,7 +283,7 @@ impl Connection {
                     let token = self.client_token();
                     if let Err(err) =
                         poll.registry()
-                            .reregister(&mut self.client, token, self.client_readiness)
+                            .reregister(&mut self.client, token, self.client_interest)
                     {
                         log::error!(
                             "connection:{} reregister client failed:{}",

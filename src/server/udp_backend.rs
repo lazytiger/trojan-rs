@@ -19,7 +19,7 @@ pub struct UdpBackend {
     index: usize,
     token: Token,
     status: ConnStatus,
-    readiness: Interest,
+    interest: Interest,
     timeout: Duration,
     bytes_read: usize,
     bytes_sent: usize,
@@ -37,7 +37,7 @@ impl UdpBackend {
             index,
             token,
             status: ConnStatus::Established,
-            readiness: Interest::READABLE,
+            interest: Interest::READABLE,
             timeout,
             bytes_read: 0,
             bytes_sent: 0,
@@ -150,7 +150,7 @@ impl UdpBackend {
     fn setup(&mut self, poll: &Poll) {
         if let Err(err) = poll
             .registry()
-            .reregister(&mut self.socket, self.token, self.readiness)
+            .reregister(&mut self.socket, self.token, self.interest)
         {
             log::error!(
                 "connection:{} reregister udp target failed:{}",
@@ -190,27 +190,27 @@ impl Backend for UdpBackend {
             ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
-                if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
-                    self.readiness |= Interest::WRITABLE;
+                if !self.send_buffer.is_empty() && !self.interest.is_writable() {
+                    self.interest |= Interest::WRITABLE;
                     changed = true;
                     log::debug!("connection:{} add writable to udp target", self.index);
                 }
-                if self.send_buffer.is_empty() && self.readiness.is_writable() {
-                    self.readiness = self
-                        .readiness
+                if self.send_buffer.is_empty() && self.interest.is_writable() {
+                    self.interest = self
+                        .interest
                         .remove(Interest::WRITABLE)
                         .unwrap_or(Interest::READABLE);
                     changed = true;
                     log::debug!("connection:{} remove writable from udp target", self.index);
                 }
-                if readable && !self.readiness.is_readable() {
-                    self.readiness |= Interest::READABLE;
+                if readable && !self.interest.is_readable() {
+                    self.interest |= Interest::READABLE;
                     log::debug!("connection:{} add readable to udp target", self.index);
                     changed = true;
                 }
-                if !readable && self.readiness.is_readable() {
-                    self.readiness = self
-                        .readiness
+                if !readable && self.interest.is_readable() {
+                    self.interest = self
+                        .interest
                         .remove(Interest::READABLE)
                         .unwrap_or(Interest::WRITABLE);
                     log::debug!("connection:{} remove readable to udp target", self.index);
@@ -252,7 +252,7 @@ impl Backend for UdpBackend {
             self.check_close(poll);
             return;
         }
-        self.readiness = Interest::WRITABLE;
+        self.interest = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
         self.check_close(poll);

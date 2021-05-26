@@ -16,7 +16,7 @@ pub enum ConnStatus {
 pub struct TlsConn<T: Session> {
     session: T,
     stream: TcpStream,
-    readiness: Interest,
+    interest: Interest,
     index: usize,
     token: Token,
     status: ConnStatus,
@@ -30,7 +30,7 @@ impl<T: Session> TlsConn<T> {
             token,
             session,
             stream,
-            readiness: Interest::READABLE | Interest::WRITABLE,
+            interest: Interest::READABLE | Interest::WRITABLE,
             status: ConnStatus::Established,
             buffer_len: 0,
         }
@@ -54,7 +54,7 @@ impl<T: Session> TlsConn<T> {
             self.check_close(poll);
             return;
         }
-        self.readiness = Interest::WRITABLE;
+        self.interest = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
     }
@@ -189,25 +189,25 @@ impl<T: Session> TlsConn<T> {
             ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
-                if self.session.wants_write() && !self.readiness.is_writable() {
-                    self.readiness |= Interest::WRITABLE;
+                if self.session.wants_write() && !self.interest.is_writable() {
+                    self.interest |= Interest::WRITABLE;
                     changed = true;
                 }
-                if !self.session.wants_write() && self.readiness.is_writable() {
-                    self.readiness = self
-                        .readiness
+                if !self.session.wants_write() && self.interest.is_writable() {
+                    self.interest = self
+                        .interest
                         .remove(Interest::WRITABLE)
                         .unwrap_or(Interest::READABLE);
                     changed = true;
                 }
-                if readable && !self.readiness.is_readable() {
-                    self.readiness |= Interest::READABLE;
+                if readable && !self.interest.is_readable() {
+                    self.interest |= Interest::READABLE;
                     changed = true;
                 }
 
-                if !readable && self.readiness.is_readable() {
-                    self.readiness = self
-                        .readiness
+                if !readable && self.interest.is_readable() {
+                    self.interest = self
+                        .interest
                         .remove(Interest::READABLE)
                         .unwrap_or(Interest::WRITABLE);
                     changed = true;
@@ -222,7 +222,7 @@ impl<T: Session> TlsConn<T> {
     pub fn setup(&mut self, poll: &Poll) -> bool {
         if let Err(err) = poll
             .registry()
-            .reregister(&mut self.stream, self.token, self.readiness)
+            .reregister(&mut self.stream, self.token, self.interest)
         {
             log::warn!(
                 "connection:{} reregister server failed:{}",
@@ -239,7 +239,7 @@ impl<T: Session> TlsConn<T> {
     pub fn register(&mut self, poll: &Poll) -> bool {
         if let Err(err) = poll
             .registry()
-            .register(&mut self.stream, self.token, self.readiness)
+            .register(&mut self.stream, self.token, self.interest)
         {
             log::warn!("connection:{} register server failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;

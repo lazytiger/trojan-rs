@@ -15,7 +15,7 @@ use crate::{
 pub struct TcpBackend {
     conn: TcpStream,
     status: ConnStatus,
-    readiness: Interest,
+    interest: Interest,
     index: usize,
     token: Token,
     timeout: Duration,
@@ -29,7 +29,7 @@ impl TcpBackend {
             conn,
             timeout,
             status: ConnStatus::Established,
-            readiness: Interest::READABLE,
+            interest: Interest::READABLE,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             index,
@@ -61,7 +61,7 @@ impl TcpBackend {
     fn setup(&mut self, poll: &Poll) {
         if let Err(err) = poll
             .registry()
-            .reregister(&mut self.conn, self.token, self.readiness)
+            .reregister(&mut self.conn, self.token, self.interest)
         {
             log::error!(
                 "connection:{} reregister tcp target failed:{}",
@@ -102,27 +102,27 @@ impl Backend for TcpBackend {
             ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
-                if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
-                    self.readiness |= Interest::WRITABLE;
+                if !self.send_buffer.is_empty() && !self.interest.is_writable() {
+                    self.interest |= Interest::WRITABLE;
                     changed = true;
                     log::debug!("connection:{} add writable to tcp target", self.index);
                 }
-                if self.send_buffer.is_empty() && self.readiness.is_writable() {
-                    self.readiness = self
-                        .readiness
+                if self.send_buffer.is_empty() && self.interest.is_writable() {
+                    self.interest = self
+                        .interest
                         .remove(Interest::WRITABLE)
                         .unwrap_or(Interest::READABLE);
                     changed = true;
                     log::debug!("connection:{} remove writable from tcp target", self.index);
                 }
-                if readable && !self.readiness.is_readable() {
-                    self.readiness |= Interest::READABLE;
+                if readable && !self.interest.is_readable() {
+                    self.interest |= Interest::READABLE;
                     log::debug!("connection:{} add readable to tcp target", self.index);
                     changed = true;
                 }
-                if !readable && self.readiness.is_readable() {
-                    self.readiness = self
-                        .readiness
+                if !readable && self.interest.is_readable() {
+                    self.interest = self
+                        .interest
                         .remove(Interest::READABLE)
                         .unwrap_or(Interest::WRITABLE);
                     log::debug!("connection:{} remove readable from tcp target", self.index);
@@ -159,7 +159,7 @@ impl Backend for TcpBackend {
             return;
         }
 
-        self.readiness = Interest::WRITABLE;
+        self.interest = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
         self.check_close(poll);
