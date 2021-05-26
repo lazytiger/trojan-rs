@@ -1,4 +1,4 @@
-use clap::{derive::IntoApp, App, AppSettings, FromArgMatches};
+use clap::Clap;
 
 use crate::config::{Mode, Opts};
 
@@ -12,9 +12,7 @@ mod tcp_util;
 mod tls_conn;
 
 fn main() {
-    let mut app: App = <Opts as IntoApp>::into_app();
-    app.set(AppSettings::AllowExternalSubcommands);
-    let mut opts = <Opts as FromArgMatches>::from_arg_matches(&app.get_matches());
+    let mut opts: Opts = Opts::parse();
 
     config::setup_logger(&opts.log_file, opts.log_level);
     opts.setup();

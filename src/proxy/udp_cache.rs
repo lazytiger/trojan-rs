@@ -21,7 +21,7 @@ impl UdpSvrCache {
         } else {
             log::debug!("socket:{} not found, create a new one", addr);
             if let Some(socket) = new_socket(addr, true) {
-                let socket = UdpSocket::from_socket(socket.into_udp_socket()).unwrap();
+                let socket = UdpSocket::from_std(socket.into());
                 let socket = Rc::new(socket);
                 self.conns.insert(addr, socket.clone());
                 Some(socket)

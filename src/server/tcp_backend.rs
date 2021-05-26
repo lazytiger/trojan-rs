@@ -1,7 +1,7 @@
 use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
-use mio::{net::TcpStream, Event, Poll, PollOpt, Ready, Token};
+use mio::{event::Event, net::TcpStream, Interest, Poll, Token};
 use rustls::ServerSession;
 
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
 pub struct TcpBackend {
     conn: TcpStream,
     status: ConnStatus,
-    readiness: Ready,
+    readiness: Interest,
     index: usize,
     token: Token,
     timeout: Duration,
@@ -29,7 +29,7 @@ impl TcpBackend {
             conn,
             timeout,
             status: ConnStatus::Established,
-            readiness: Ready::readable(),
+            readiness: Interest::READABLE,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             index,
@@ -59,7 +59,10 @@ impl TcpBackend {
     }
 
     fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll.reregister(&self.conn, self.token, self.readiness, PollOpt::edge()) {
+        if let Err(err) = poll
+            .registry()
+            .reregister(&mut self.conn, self.token, self.readiness)
+        {
             log::error!(
                 "connection:{} reregister tcp target failed:{}",
                 self.index,
@@ -72,10 +75,10 @@ impl TcpBackend {
 
 impl Backend for TcpBackend {
     fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>) {
-        if event.readiness().is_readable() {
+        if event.is_readable() {
             self.do_read(conn);
         }
-        if event.readiness().is_writable() {
+        if event.is_writable() {
             self.dispatch(&[], opts);
         }
     }
@@ -94,28 +97,28 @@ impl Backend for TcpBackend {
     fn reregister(&mut self, poll: &Poll, readable: bool) {
         match self.status {
             ConnStatus::Closing => {
-                let _ = poll.deregister(&self.conn);
+                let _ = poll.registry().deregister(&mut self.conn);
             }
             ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
-                    self.readiness.insert(Ready::writable());
+                    self.readiness.add(Interest::WRITABLE);
                     changed = true;
                     log::debug!("connection:{} add writable to tcp target", self.index);
                 }
                 if self.send_buffer.is_empty() && self.readiness.is_writable() {
-                    self.readiness.remove(Ready::writable());
+                    self.readiness.remove(Interest::WRITABLE);
                     changed = true;
                     log::debug!("connection:{} remove writable from tcp target", self.index);
                 }
                 if readable && !self.readiness.is_readable() {
-                    self.readiness.insert(Ready::readable());
+                    self.readiness.add(Interest::READABLE);
                     log::debug!("connection:{} add readable to tcp target", self.index);
                     changed = true;
                 }
                 if !readable && self.readiness.is_readable() {
-                    self.readiness.remove(Ready::readable());
+                    self.readiness.remove(Interest::READABLE);
                     log::debug!("connection:{} remove readable from tcp target", self.index);
                     changed = true;
                 }
@@ -129,7 +132,7 @@ impl Backend for TcpBackend {
 
     fn check_close(&mut self, poll: &Poll) {
         if let ConnStatus::Closing = self.status {
-            let _ = poll.deregister(&self.conn);
+            let _ = poll.registry().deregister(&mut self.conn);
             let _ = self.conn.shutdown(Shutdown::Both);
             self.status = ConnStatus::Closed;
         }
@@ -150,7 +153,7 @@ impl Backend for TcpBackend {
             return;
         }
 
-        self.readiness = Ready::writable();
+        self.readiness = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
         self.check_close(poll);

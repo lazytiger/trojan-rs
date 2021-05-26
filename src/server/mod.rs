@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{net::TcpListener, Events, Poll, PollOpt, Ready, Token};
+use mio::{net::TcpListener, Events, Interest, Poll, Token};
 use rustls::{
     internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys},
     KeyLogFile, NoClientAuth, ServerConfig,
@@ -14,17 +14,19 @@ use rustls::{
 pub use tls_server::TlsServer;
 
 use crate::config::Opts;
+use crate::resolver::EventedResolver;
 
 mod connection;
 mod tcp_backend;
 mod tls_server;
 mod udp_backend;
 
-const MIN_INDEX: usize = 2;
-const MAX_INDEX: usize = std::usize::MAX / CHANNEL_CNT;
+const MIN_INDEX: usize = 3;
+const MAX_INDEX: usize = usize::MAX / CHANNEL_CNT;
 const CHANNEL_CNT: usize = 2;
 const CHANNEL_PROXY: usize = 0;
 const CHANNEL_BACKEND: usize = 1;
+const RESOLVER: usize = 2;
 const LISTENER: usize = 1;
 
 fn init_config(opts: &Opts) -> Arc<ServerConfig> {
@@ -65,30 +67,31 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
 
 pub fn run(opts: &mut Opts) {
     let config = init_config(opts);
-    let poll = Poll::new().unwrap();
+    let mut poll = Poll::new().unwrap();
+    let resolver = EventedResolver::new(&poll, Token(RESOLVER));
     let addr = opts.local_addr.parse().unwrap();
-    let listener = TcpListener::bind(&addr).unwrap();
-    poll.register(
-        &listener,
-        Token(LISTENER),
-        Ready::readable(),
-        PollOpt::edge(),
-    )
-    .unwrap();
+    let mut listener = TcpListener::bind(addr).unwrap();
+    poll.registry()
+        .register(&mut listener, Token(LISTENER), Interest::READABLE)
+        .unwrap();
     let mut server = TlsServer::new(listener, config);
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
     loop {
-        let nevent = poll.poll(&mut events, Some(check_duration)).unwrap();
-        log::trace!("poll got {} events", nevent);
+        poll.poll(&mut events, Some(check_duration)).unwrap();
         for event in &events {
             match event.token() {
                 Token(LISTENER) => {
                     server.accept(&poll, opts);
                 }
+                Token(RESOLVER) => {
+                    resolver.consume(|(token, ip)| {
+                        server.do_conn_resolve(token, &poll, opts, ip, &resolver);
+                    });
+                }
                 _ => {
-                    server.do_conn_event(&poll, &event, opts);
+                    server.do_conn_event(&poll, &event, opts, &resolver);
                 }
             }
         }

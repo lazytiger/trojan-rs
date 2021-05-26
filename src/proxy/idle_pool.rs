@@ -1,16 +1,17 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use mio::{net::TcpStream, Event, Poll, PollOpt, Ready, Token};
+use mio::{event::Event, net::TcpStream, Poll, Token};
 use rustls::{ClientConfig, ClientSession};
 use webpki::DNSName;
 
+use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER},
-    resolver::EventedResolver,
     sys,
     tls_conn::TlsConn,
 };
+use std::net::IpAddr;
 
 pub struct IdlePool {
     pool: Vec<TlsConn<ClientSession>>,
@@ -21,7 +22,6 @@ pub struct IdlePool {
     port: u16,
     marker: u8,
     config: Arc<ClientConfig>,
-    resolver: Option<EventedResolver>,
     hostname: DNSName,
 }
 
@@ -35,24 +35,27 @@ impl IdlePool {
             domain: opts.proxy_args().hostname.clone(),
             pool: Vec::new(),
             next_index: MIN_INDEX,
-            resolver: None,
             config,
             hostname,
         }
     }
 
-    pub fn init(&mut self, poll: &Poll) {
+    pub fn init(&mut self, poll: &Poll, resolver: &EventedResolver) {
         if self.size > 1 {
-            self.alloc(poll);
+            self.alloc(poll, resolver);
         }
     }
 
-    pub fn get(&mut self, poll: &Poll) -> Option<TlsConn<ClientSession>> {
-        self.alloc(poll);
+    pub fn get(
+        &mut self,
+        poll: &Poll,
+        resolver: &EventedResolver,
+    ) -> Option<TlsConn<ClientSession>> {
+        self.alloc(poll, resolver);
         self.pool.pop()
     }
 
-    fn alloc(&mut self, poll: &Poll) {
+    fn alloc(&mut self, poll: &Poll, resolver: &EventedResolver) {
         let size = self.pool.len();
         for _ in size..self.size {
             let conn = self.new_conn();
@@ -61,13 +64,13 @@ impl IdlePool {
                     self.pool.push(conn);
                 }
             } else {
-                self.update_dns(poll);
+                self.update_dns(resolver);
             }
         }
     }
 
     fn new_conn(&mut self) -> Option<TlsConn<ClientSession>> {
-        let server = match TcpStream::connect(&self.addr) {
+        let server = match TcpStream::connect(self.addr) {
             Ok(server) => {
                 if let Err(err) = sys::set_mark(&server, self.marker) {
                     log::error!("set mark failed:{}", err);
@@ -99,30 +102,18 @@ impl IdlePool {
         }
     }
 
-    fn update_dns(&mut self, poll: &Poll) {
-        let resolver = EventedResolver::new(self.domain.clone());
-        self.resolver.replace(resolver);
-        if let Err(err) = poll.register(
-            self.resolver.as_ref().unwrap(),
-            Token(RESOLVER),
-            Ready::readable(),
-            PollOpt::level(),
-        ) {
-            log::error!("idle_pool register resolver failed:{}", err);
-            let _ = self.resolver.take();
-        }
+    fn update_dns(&mut self, resolver: &EventedResolver) {
+        resolver.resolve(self.domain.clone(), Token(RESOLVER));
     }
 
-    pub fn resolve(&mut self, poll: &Poll) {
-        if let Some(address) = self.resolver.as_ref().unwrap().address() {
+    pub fn resolve(&mut self, ip: Option<IpAddr>) {
+        if let Some(address) = ip {
             log::debug!("idle_pool got resolve result {} = {}", self.domain, address);
             let addr = SocketAddr::new(address, self.port);
             self.addr = addr;
         } else {
             log::error!("idle_pool resolve host:{} failed", self.domain);
         }
-        let _ = poll.deregister(self.resolver.as_ref().unwrap());
-        let _ = self.resolver.take();
     }
 
     pub fn ready(&mut self, event: &Event, poll: &Poll) {
@@ -130,10 +121,10 @@ impl IdlePool {
         for i in 0..self.pool.len() {
             let conn = self.pool.get_mut(i).unwrap();
             if conn.token() == event.token() {
-                if event.readiness().is_readable() && conn.do_read().is_some() {
+                if event.is_readable() && conn.do_read().is_some() {
                     log::error!("found data in https handshake phase");
                 }
-                if event.readiness().is_writable() {
+                if event.is_writable() {
                     conn.do_send();
                 }
                 conn.reregister(poll, true);

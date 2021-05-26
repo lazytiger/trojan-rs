@@ -1,9 +1,10 @@
 use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, time::Instant};
 
 use bytes::BytesMut;
-use mio::{net::UdpSocket, Event, Poll, Token};
+use mio::{event::Event, net::UdpSocket, Poll, Token};
 use rustls::ClientSession;
 
+use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     proto::{
@@ -58,8 +59,9 @@ impl UdpServer {
         poll: &Poll,
         pool: &mut IdlePool,
         udp_cache: &mut UdpSvrCache,
+        resolver: &EventedResolver,
     ) {
-        if event.readiness().is_readable() {
+        if event.is_readable() {
             loop {
                 match sys::recv_from_with_destination(
                     &self.udp_listener,
@@ -85,7 +87,7 @@ impl UdpServer {
                                 src_addr,
                                 opts.back_addr.as_ref().unwrap()
                             );
-                            if let Some(mut conn) = pool.get(poll) {
+                            if let Some(mut conn) = pool.get(poll, resolver) {
                                 if let Some(socket) = udp_cache.get_socket(dst_addr) {
                                     let index = next_index(&mut self.next_id);
                                     conn.reset_index(
@@ -232,10 +234,10 @@ impl Connection {
     }
 
     fn ready(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, udp_cache: &mut UdpSvrCache) {
-        if event.readiness().is_readable() {
+        if event.is_readable() {
             self.try_read_server(opts, udp_cache);
         }
-        if event.readiness().is_writable() {
+        if event.is_writable() {
             self.try_send_server();
         }
 
@@ -309,7 +311,7 @@ impl Connection {
                 return;
             }
         }
-        match self.socket.send_to(data, &self.src_addr) {
+        match self.socket.send_to(data, self.src_addr) {
             Ok(size) => {
                 self.bytes_sent += size;
                 log::debug!(

@@ -1,26 +1,27 @@
 [package]
 name = "trojan"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Hoping White <baihaoping@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { git = "https://github.com/clap-rs/clap/" }
-mio = "0.6"
+clap = "3.0.0-beta.2"
+mio = {version = "0.7", features = ["net", "os-poll"]}
 log = "0.4"
 chrono = "0.4"
 libc = "0.2"
-rustls = "0.17"
+rustls = "0.19"
 rust-crypto = "0.2"
-bytes = "0.5"
-trust-dns-resolver = "0.19"
-cfg-if = "0.1"
-webpki-roots = "0.19"
-webpki = "0.21"
+bytes = "1.0"
+trust-dns-resolver = "0.20"
+cfg-if = "1.0"
+webpki-roots = "0.21"
+webpki = {version = "0.21"}
 mio-extras = "2.0"
-socket2 = "0.3"
+socket2 = "0.4"
+rayon = "1.5"
 
 [dependencies.fern]
 version = "0.6"

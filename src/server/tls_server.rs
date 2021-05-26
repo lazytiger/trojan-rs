@@ -4,15 +4,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{net::TcpListener, Event, Poll, Token};
+use mio::{event::Event, net::TcpListener, Poll, Token};
 use rustls::{ServerConfig, ServerSession};
 
+use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
     sys,
     tls_conn::{ConnStatus, TlsConn},
 };
+use std::net::IpAddr;
 
 pub struct TlsServer {
     listener: TcpListener,
@@ -109,11 +111,38 @@ impl TlsServer {
         token.0 / CHANNEL_CNT
     }
 
-    pub fn do_conn_event(&mut self, poll: &Poll, event: &Event, opts: &mut Opts) {
+    pub fn do_conn_event(
+        &mut self,
+        poll: &Poll,
+        event: &Event,
+        opts: &mut Opts,
+        resolver: &EventedResolver,
+    ) {
         let index = self.token2index(event.token());
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();
-            conn.ready(poll, event, opts);
+            conn.ready(poll, event, opts, resolver);
+            if conn.destroyed() {
+                self.conns.remove(&index);
+                log::debug!("connection:{} closed, remove from pool", index);
+            }
+        } else {
+            log::error!("connection:{} not found", index);
+        }
+    }
+
+    pub fn do_conn_resolve(
+        &mut self,
+        token: Token,
+        poll: &Poll,
+        opts: &mut Opts,
+        ip: Option<IpAddr>,
+        resolver: &EventedResolver,
+    ) {
+        let index = self.token2index(token);
+        if self.conns.contains_key(&index) {
+            let conn = self.conns.get_mut(&index).unwrap();
+            conn.try_resolve(poll, opts, ip, resolver);
             if conn.destroyed() {
                 self.conns.remove(&index);
                 log::debug!("connection:{} closed, remove from pool", index);

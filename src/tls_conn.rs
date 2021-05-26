@@ -1,6 +1,6 @@
 use std::{io::ErrorKind, net::Shutdown};
 
-use mio::{net::TcpStream, Poll, PollOpt, Ready, Token};
+use mio::{net::TcpStream, Interest, Poll, Token};
 use rustls::{internal::msgs::fragmenter::MAX_FRAGMENT_LEN, Session};
 
 use crate::proto::MAX_BUFFER_SIZE;
@@ -16,7 +16,7 @@ pub enum ConnStatus {
 pub struct TlsConn<T: Session> {
     session: T,
     stream: TcpStream,
-    readiness: Ready,
+    readiness: Interest,
     index: usize,
     token: Token,
     status: ConnStatus,
@@ -30,7 +30,7 @@ impl<T: Session> TlsConn<T> {
             token,
             session,
             stream,
-            readiness: Ready::readable() | Ready::writable(),
+            readiness: Interest::READABLE | Interest::WRITABLE,
             status: ConnStatus::Established,
             buffer_len: 0,
         }
@@ -54,14 +54,14 @@ impl<T: Session> TlsConn<T> {
             self.check_close(poll);
             return;
         }
-        self.readiness = Ready::writable();
+        self.readiness = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
         log::info!("connection:{} closed now", self.index);
-        let _ = poll.deregister(&self.stream);
+        let _ = poll.registry().deregister(&mut self.stream);
         let _ = self.stream.shutdown(Shutdown::Both);
         self.status = ConnStatus::Closed
     }
@@ -184,26 +184,26 @@ impl<T: Session> TlsConn<T> {
     pub fn reregister(&mut self, poll: &Poll, readable: bool) {
         match self.status {
             ConnStatus::Closing => {
-                let _ = poll.deregister(&self.stream);
+                let _ = poll.registry().deregister(&mut self.stream);
             }
             ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
                 if self.session.wants_write() && !self.readiness.is_writable() {
-                    self.readiness.insert(Ready::writable());
+                    self.readiness.add(Interest::WRITABLE);
                     changed = true;
                 }
                 if !self.session.wants_write() && self.readiness.is_writable() {
-                    self.readiness.remove(Ready::writable());
+                    self.readiness.remove(Interest::WRITABLE);
                     changed = true;
                 }
                 if readable && !self.readiness.is_readable() {
-                    self.readiness.insert(Ready::readable());
+                    self.readiness.add(Interest::READABLE);
                     changed = true;
                 }
 
                 if !readable && self.readiness.is_readable() {
-                    self.readiness.remove(Ready::readable());
+                    self.readiness.remove(Interest::READABLE);
                     changed = true;
                 }
                 if changed {
@@ -214,8 +214,9 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn setup(&mut self, poll: &Poll) -> bool {
-        if let Err(err) =
-            poll.reregister(&self.stream, self.token(), self.readiness, PollOpt::level())
+        if let Err(err) = poll
+            .registry()
+            .reregister(&mut self.stream, self.token, self.readiness)
         {
             log::warn!(
                 "connection:{} reregister server failed:{}",
@@ -230,8 +231,9 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn register(&mut self, poll: &Poll) -> bool {
-        if let Err(err) =
-            poll.register(&self.stream, self.token(), self.readiness, PollOpt::level())
+        if let Err(err) = poll
+            .registry()
+            .register(&mut self.stream, self.token, self.readiness)
         {
             log::warn!("connection:{} register server failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;

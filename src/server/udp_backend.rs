@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
-use mio::{net::UdpSocket, Event, Poll, PollOpt, Ready, Token};
+use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use rustls::ServerSession;
 
 use crate::{
@@ -19,7 +19,7 @@ pub struct UdpBackend {
     index: usize,
     token: Token,
     status: ConnStatus,
-    readiness: Ready,
+    readiness: Interest,
     timeout: Duration,
     bytes_read: usize,
     bytes_sent: usize,
@@ -37,7 +37,7 @@ impl UdpBackend {
             index,
             token,
             status: ConnStatus::Established,
-            readiness: Ready::empty(),
+            readiness: Interest::READABLE,
             timeout,
             bytes_read: 0,
             bytes_sent: 0,
@@ -51,7 +51,7 @@ impl UdpBackend {
                 UdpParseResult::Packet(packet) => {
                     match self
                         .socket
-                        .send_to(&packet.payload[..packet.length], &packet.address)
+                        .send_to(&packet.payload[..packet.length], packet.address)
                     {
                         Ok(size) => {
                             self.bytes_sent += size;
@@ -148,7 +148,9 @@ impl UdpBackend {
     }
 
     fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll.reregister(&self.socket, self.token, self.readiness, PollOpt::edge())
+        if let Err(err) = poll
+            .registry()
+            .reregister(&mut self.socket, self.token, self.readiness)
         {
             log::error!(
                 "connection:{} reregister udp target failed:{}",
@@ -162,10 +164,10 @@ impl UdpBackend {
 
 impl Backend for UdpBackend {
     fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>) {
-        if event.readiness().is_readable() {
+        if event.is_readable() {
             self.do_read(conn);
         }
-        if event.readiness().is_writable() {
+        if event.is_writable() {
             self.dispatch(&[], opts);
         }
     }
@@ -183,28 +185,28 @@ impl Backend for UdpBackend {
     fn reregister(&mut self, poll: &Poll, readable: bool) {
         match self.status {
             ConnStatus::Closing => {
-                let _ = poll.deregister(&self.socket);
+                let _ = poll.registry().deregister(&mut self.socket);
             }
             ConnStatus::Closed => {}
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
-                    self.readiness.insert(Ready::writable());
+                    self.readiness.add(Interest::WRITABLE);
                     changed = true;
                     log::debug!("connection:{} add writable to udp target", self.index);
                 }
                 if self.send_buffer.is_empty() && self.readiness.is_writable() {
-                    self.readiness.remove(Ready::writable());
+                    self.readiness.remove(Interest::WRITABLE);
                     changed = true;
                     log::debug!("connection:{} remove writable from udp target", self.index);
                 }
                 if readable && !self.readiness.is_readable() {
-                    self.readiness.insert(Ready::readable());
+                    self.readiness.add(Interest::READABLE);
                     log::debug!("connection:{} add readable to udp target", self.index);
                     changed = true;
                 }
                 if !readable && self.readiness.is_readable() {
-                    self.readiness.remove(Ready::readable());
+                    self.readiness.remove(Interest::READABLE);
                     log::debug!("connection:{} remove readable to udp target", self.index);
                     changed = true;
                 }
@@ -218,7 +220,7 @@ impl Backend for UdpBackend {
 
     fn check_close(&mut self, poll: &Poll) {
         if let ConnStatus::Closing = self.status {
-            let _ = poll.deregister(&self.socket);
+            let _ = poll.registry().deregister(&mut self.socket);
             self.status = ConnStatus::Closed;
             log::info!(
                 "connection:{} address:{} closed, read {} bytes, sent {} bytes",
@@ -244,7 +246,7 @@ impl Backend for UdpBackend {
             self.check_close(poll);
             return;
         }
-        self.readiness = Ready::writable();
+        self.readiness = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
         self.setup(poll);
         self.check_close(poll);

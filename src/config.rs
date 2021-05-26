@@ -16,44 +16,44 @@ pub struct DnsEntry {
 
 #[derive(Clap)]
 #[clap(
-    version = "0.6",
+    version = "0.7",
     author = "Hoping White",
     about = "A trojan implementation using rust"
 )]
 pub struct Opts {
     #[clap(subcommand)]
     pub mode: Mode,
-    #[clap(short, long, help = "log file path")]
+    #[clap(short, long, about = "log file path")]
     pub log_file: Option<String>,
     #[clap(
-        short = "a",
+        short = 'a',
         long,
-        help = "listen address for server, format like 0.0.0.0:443"
+        about = "listen address for server, format like 0.0.0.0:443"
     )]
     pub local_addr: String,
-    #[clap(short, long, help = "passwords for negotiation")]
+    #[clap(short, long, about = "passwords for negotiation")]
     password: String,
     #[clap(
-        short = "L",
+        short = 'L',
         long,
         default_value = "2",
-        help = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off"
+        about = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off"
     )]
     pub log_level: u8,
-    #[clap(short, long, default_value = "1", help = "set marker used by tproxy")]
+    #[clap(short, long, default_value = "1", about = "set marker used by tproxy")]
     pub marker: u8,
     #[clap(
         short,
         long,
         default_value = "60",
-        help = "time in seconds before closing an inactive udp connection"
+        about = "time in seconds before closing an inactive udp connection"
     )]
     pub udp_idle_timeout: u64,
     #[clap(
         short,
         long,
         default_value = "600",
-        help = "time in seconds before closing an inactive tcp connection"
+        about = "time in seconds before closing an inactive tcp connection"
     )]
     pub tcp_idle_timeout: u64,
     #[clap(skip)]
@@ -86,15 +86,15 @@ pub enum Mode {
 
 #[derive(Clap)]
 pub struct ProxyArgs {
-    #[clap(short = "H", long, help = "trojan server hostname")]
+    #[clap(short = 'H', long, about = "trojan server hostname")]
     pub hostname: String,
-    #[clap(short = "o", long, default_value = "443", help = "trojan server port")]
+    #[clap(short = 'o', long, default_value = "443", about = "trojan server port")]
     pub port: u16,
     #[clap(
-        short = "P",
+        short = 'P',
         long,
         default_value = "0",
-        help = "pool size, 0 for disable"
+        about = "pool size, 0 for disable"
     )]
     pub pool_size: usize,
 }
@@ -104,30 +104,30 @@ pub struct ServerArgs {
     #[clap(
         short,
         long,
-        help = "certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA"
+        about = "certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA"
     )]
     pub cert: String,
     #[clap(
         short,
         long,
-        help = "private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format."
+        about = "private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format."
     )]
     pub key: String,
     #[clap(
         short,
         long,
         default_value = "127.0.0.1:80",
-        help = "http backend server address"
+        about = "http backend server address"
     )]
     pub remote_addr: String,
     #[clap(
         short,
         long,
         default_value = "300",
-        help = "time in seconds for dns query cache"
+        about = "time in seconds for dns query cache"
     )]
     dns_cache_time: u64,
-    #[clap(short = "n", long, help = "alpn protocol supported")]
+    #[clap(short = 'n', long, about = "alpn protocol supported")]
     pub alpn: Vec<String>,
 }
 

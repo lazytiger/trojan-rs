@@ -7,12 +7,13 @@ use std::{
 
 use mio::{
     net::{TcpListener, UdpSocket},
-    Events, Poll, PollOpt, Ready, Token,
+    Events, Interest, Poll, Token,
 };
 use rustls::ClientConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use webpki::DNSNameRef;
 
+use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     proxy::{
@@ -61,14 +62,14 @@ fn next_index(index: &mut usize) -> usize {
 
 pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
     let domain = if addr.is_ipv4() {
-        Domain::ipv4()
+        Domain::IPV4
     } else {
-        Domain::ipv6()
+        Domain::IPV6
     };
     let (typ, protocol) = if is_udp {
-        (Type::dgram(), Protocol::udp())
+        (Type::DGRAM, Protocol::UDP)
     } else {
-        (Type::stream(), Protocol::tcp())
+        (Type::STREAM, Protocol::TCP)
     };
     let socket = match Socket::new(domain, typ, Some(protocol)) {
         Ok(socket) => socket,
@@ -104,30 +105,21 @@ pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
 
 pub fn run(opts: &mut Opts) {
     let addr: SocketAddr = opts.local_addr.parse().unwrap();
-    let tcp_listener =
-        TcpListener::from_std(new_socket(addr, false).unwrap().into_tcp_listener()).unwrap();
-    let udp_listener =
-        UdpSocket::from_socket(new_socket(addr, true).unwrap().into_udp_socket()).unwrap();
+    let mut tcp_listener = TcpListener::from_std(new_socket(addr, false).unwrap().into());
+    let mut udp_listener = UdpSocket::from_std(new_socket(addr, true).unwrap().into());
     if let Err(err) = sys::set_mark(&udp_listener, opts.marker) {
         log::error!("udp socket set mark failed:{}", err);
         return;
     }
     let mut udp_cache = UdpSvrCache::new();
-    let poll = Poll::new().unwrap();
-    poll.register(
-        &tcp_listener,
-        Token(TCP_LISTENER),
-        Ready::readable(),
-        PollOpt::edge(),
-    )
-    .unwrap();
-    poll.register(
-        &udp_listener,
-        Token(UDP_LISTENER),
-        Ready::readable(),
-        PollOpt::edge(),
-    )
-    .unwrap();
+    let mut poll = Poll::new().unwrap();
+    let resolver = EventedResolver::new(&poll, Token(RESOLVER));
+    poll.registry()
+        .register(&mut tcp_listener, Token(TCP_LISTENER), Interest::READABLE)
+        .unwrap();
+    poll.registry()
+        .register(&mut udp_listener, Token(UDP_LISTENER), Interest::READABLE)
+        .unwrap();
 
     let hostname = DNSNameRef::try_from_ascii(opts.proxy_args().hostname.as_bytes())
         .unwrap()
@@ -146,22 +138,23 @@ pub fn run(opts: &mut Opts) {
     let check_duration = Duration::new(1, 0);
 
     let mut pool = IdlePool::new(opts, config, hostname);
-    pool.init(&poll);
+    pool.init(&poll, &resolver);
 
     loop {
-        let nevent = poll.poll(&mut events, Some(check_duration)).unwrap();
-        log::trace!("poll got {} events", nevent);
+        poll.poll(&mut events, Some(check_duration)).unwrap();
         for event in &events {
             log::trace!("dispatch token:{}", event.token().0);
             match event.token() {
                 Token(TCP_LISTENER) => {
-                    tcp_server.accept(&event, opts, &poll, &mut pool);
+                    tcp_server.accept(&event, opts, &poll, &mut pool, &resolver);
                 }
                 Token(UDP_LISTENER) => {
-                    udp_server.accept(&event, opts, &poll, &mut pool, &mut udp_cache);
+                    udp_server.accept(&event, opts, &poll, &mut pool, &mut udp_cache, &resolver);
                 }
                 Token(RESOLVER) => {
-                    pool.resolve(&poll);
+                    resolver.consume(|(_, ip)| {
+                        pool.resolve(ip);
+                    });
                 }
                 Token(i) if i % CHANNEL_CNT == CHANNEL_IDLE => {
                     pool.ready(&event, &poll);
