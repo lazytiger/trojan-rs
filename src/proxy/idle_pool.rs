@@ -7,7 +7,7 @@ use webpki::DNSName;
 use crate::{
     config::Opts,
     proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER},
-    resolver::EventedResolver,
+    resolver::DnsResolver,
     sys,
     tls_conn::TlsConn,
 };
@@ -40,22 +40,18 @@ impl IdlePool {
         }
     }
 
-    pub fn init(&mut self, poll: &Poll, resolver: &EventedResolver) {
+    pub fn init(&mut self, poll: &Poll, resolver: &DnsResolver) {
         if self.size > 1 {
             self.alloc(poll, resolver);
         }
     }
 
-    pub fn get(
-        &mut self,
-        poll: &Poll,
-        resolver: &EventedResolver,
-    ) -> Option<TlsConn<ClientSession>> {
+    pub fn get(&mut self, poll: &Poll, resolver: &DnsResolver) -> Option<TlsConn<ClientSession>> {
         self.alloc(poll, resolver);
         self.pool.pop()
     }
 
-    fn alloc(&mut self, poll: &Poll, resolver: &EventedResolver) {
+    fn alloc(&mut self, poll: &Poll, resolver: &DnsResolver) {
         let size = self.pool.len();
         for _ in size..self.size {
             let conn = self.new_conn();
@@ -102,7 +98,7 @@ impl IdlePool {
         }
     }
 
-    fn update_dns(&mut self, resolver: &EventedResolver) {
+    fn update_dns(&mut self, resolver: &DnsResolver) {
         resolver.resolve(self.domain.clone(), Token(RESOLVER));
     }
 

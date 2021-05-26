@@ -9,7 +9,7 @@ use rustls::{ServerConfig, ServerSession};
 
 use crate::{
     config::Opts,
-    resolver::EventedResolver,
+    resolver::DnsResolver,
     server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
     sys,
     tls_conn::{ConnStatus, TlsConn},
@@ -116,7 +116,7 @@ impl TlsServer {
         poll: &Poll,
         event: &Event,
         opts: &mut Opts,
-        resolver: &EventedResolver,
+        resolver: &DnsResolver,
     ) {
         let index = self.token2index(event.token());
         if self.conns.contains_key(&index) {
@@ -137,7 +137,7 @@ impl TlsServer {
         poll: &Poll,
         opts: &mut Opts,
         ip: Option<IpAddr>,
-        resolver: &EventedResolver,
+        resolver: &DnsResolver,
     ) {
         let index = self.token2index(token);
         if self.conns.contains_key(&index) {

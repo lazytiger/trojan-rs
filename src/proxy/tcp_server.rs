@@ -17,7 +17,7 @@ use crate::{
     config::Opts,
     proto::{TrojanRequest, CONNECT, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
     proxy::{idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
-    resolver::EventedResolver,
+    resolver::DnsResolver,
     sys, tcp_util,
     tls_conn::{ConnStatus, TlsConn},
 };
@@ -55,7 +55,7 @@ impl TcpServer {
         opts: &mut Opts,
         poll: &Poll,
         pool: &mut IdlePool,
-        resolver: &EventedResolver,
+        resolver: &DnsResolver,
     ) {
         loop {
             match self.tcp_listener.accept() {

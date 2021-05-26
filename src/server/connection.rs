@@ -10,7 +10,7 @@ use rustls::ServerSession;
 use crate::{
     config::Opts,
     proto::{Sock5Address, TrojanRequest, CONNECT},
-    resolver::EventedResolver,
+    resolver::DnsResolver,
     server::{
         tcp_backend::TcpBackend, tls_server::Backend, udp_backend::UdpBackend, CHANNEL_BACKEND,
         CHANNEL_CNT, CHANNEL_PROXY,
@@ -75,13 +75,7 @@ impl Connection {
         token.0 % CHANNEL_CNT == CHANNEL_PROXY
     }
 
-    pub fn ready(
-        &mut self,
-        poll: &Poll,
-        event: &Event,
-        opts: &mut Opts,
-        resolver: &EventedResolver,
-    ) {
+    pub fn ready(&mut self, poll: &Poll, event: &Event, opts: &mut Opts, resolver: &DnsResolver) {
         self.last_active_time = Instant::now();
 
         if self.proxy_token(event.token()) {
@@ -138,7 +132,7 @@ impl Connection {
         poll: &Poll,
         opts: &mut Opts,
         ip: Option<IpAddr>,
-        resolver: &EventedResolver,
+        resolver: &DnsResolver,
     ) {
         if let Status::DnsWait = self.status {
             if let Sock5Address::Domain(domain, port) = &self.sock5_addr {
@@ -172,7 +166,7 @@ impl Connection {
         self.proxy.do_send();
     }
 
-    fn try_read_proxy(&mut self, opts: &mut Opts, poll: &Poll, resolver: &EventedResolver) {
+    fn try_read_proxy(&mut self, opts: &mut Opts, poll: &Poll, resolver: &DnsResolver) {
         if let Some(buffer) = self.proxy.do_read() {
             self.dispatch(buffer.as_slice(), opts, poll, resolver);
         }
@@ -186,7 +180,7 @@ impl Connection {
         &mut self,
         buffer: &mut &[u8],
         opts: &mut Opts,
-        resolver: &EventedResolver,
+        resolver: &DnsResolver,
     ) -> bool {
         if let Some(request) = TrojanRequest::parse(buffer, opts) {
             self.command = request.command;
@@ -234,7 +228,7 @@ impl Connection {
         mut buffer: &[u8],
         opts: &mut Opts,
         poll: &Poll,
-        resolver: &EventedResolver,
+        resolver: &DnsResolver,
     ) {
         log::debug!(
             "connection:{} dispatch {} bytes request data",

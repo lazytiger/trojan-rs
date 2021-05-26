@@ -13,7 +13,7 @@ use rustls::{
 
 pub use tls_server::TlsServer;
 
-use crate::{config::Opts, resolver::EventedResolver};
+use crate::{config::Opts, resolver::DnsResolver};
 
 mod connection;
 mod tcp_backend;
@@ -67,7 +67,7 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
 pub fn run(opts: &mut Opts) {
     let config = init_config(opts);
     let mut poll = Poll::new().unwrap();
-    let resolver = EventedResolver::new(&poll, Token(RESOLVER));
+    let resolver = DnsResolver::new(&poll, Token(RESOLVER));
     let addr = opts.local_addr.parse().unwrap();
     let mut listener = TcpListener::bind(addr).unwrap();
     poll.registry()

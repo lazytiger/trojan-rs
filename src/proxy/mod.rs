@@ -18,7 +18,7 @@ use crate::{
     proxy::{
         idle_pool::IdlePool, tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer,
     },
-    resolver::EventedResolver,
+    resolver::DnsResolver,
     sys,
 };
 
@@ -113,7 +113,7 @@ pub fn run(opts: &mut Opts) {
     }
     let mut udp_cache = UdpSvrCache::new();
     let mut poll = Poll::new().unwrap();
-    let resolver = EventedResolver::new(&poll, Token(RESOLVER));
+    let resolver = DnsResolver::new(&poll, Token(RESOLVER));
     poll.registry()
         .register(&mut tcp_listener, Token(TCP_LISTENER), Interest::READABLE)
         .unwrap();

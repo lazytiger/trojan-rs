@@ -14,7 +14,7 @@ use crate::{
         idle_pool::IdlePool, next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP,
         MIN_INDEX,
     },
-    resolver::EventedResolver,
+    resolver::DnsResolver,
     sys,
     tls_conn::{ConnStatus, TlsConn},
 };
@@ -59,7 +59,7 @@ impl UdpServer {
         poll: &Poll,
         pool: &mut IdlePool,
         udp_cache: &mut UdpSvrCache,
-        resolver: &EventedResolver,
+        resolver: &DnsResolver,
     ) {
         if event.is_readable() {
             loop {

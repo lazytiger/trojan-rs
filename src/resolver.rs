@@ -4,13 +4,13 @@ use mio::{Poll, Token, Waker};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use trust_dns_resolver::Resolver;
 
-pub struct EventedResolver {
+pub struct DnsResolver {
     waker: Arc<Waker>,
     receiver: Receiver<(Token, Option<IpAddr>)>,
     sender: Sender<(Token, Option<IpAddr>)>,
 }
 
-impl EventedResolver {
+impl DnsResolver {
     pub fn resolve(&self, mut domain: String, token: Token) {
         if !domain.ends_with('.') {
             domain.push('.');
