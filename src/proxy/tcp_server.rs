@@ -257,19 +257,25 @@ impl Connection {
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.client_readiness.is_writable() {
-                    self.client_readiness.add(Interest::WRITABLE);
+                    self.client_readiness |= Interest::WRITABLE;
                     changed = true;
                 }
                 if self.send_buffer.is_empty() && self.client_readiness.is_writable() {
-                    self.client_readiness.remove(Interest::WRITABLE);
+                    self.client_readiness = self
+                        .client_readiness
+                        .remove(Interest::WRITABLE)
+                        .unwrap_or(Interest::READABLE);
                     changed = true;
                 }
                 if self.server_conn.writable() && !self.client_readiness.is_readable() {
-                    self.client_readiness.add(Interest::READABLE);
+                    self.client_readiness |= Interest::READABLE;
                     changed = true;
                 }
                 if !self.server_conn.writable() && self.client_readiness.is_readable() {
-                    self.client_readiness.remove(Interest::READABLE);
+                    self.client_readiness = self
+                        .client_readiness
+                        .remove(Interest::READABLE)
+                        .unwrap_or(Interest::WRITABLE);
                     changed = true;
                 }
 

@@ -190,20 +190,26 @@ impl<T: Session> TlsConn<T> {
             _ => {
                 let mut changed = false;
                 if self.session.wants_write() && !self.readiness.is_writable() {
-                    self.readiness.add(Interest::WRITABLE);
+                    self.readiness |= Interest::WRITABLE;
                     changed = true;
                 }
                 if !self.session.wants_write() && self.readiness.is_writable() {
-                    self.readiness.remove(Interest::WRITABLE);
+                    self.readiness = self
+                        .readiness
+                        .remove(Interest::WRITABLE)
+                        .unwrap_or(Interest::READABLE);
                     changed = true;
                 }
                 if readable && !self.readiness.is_readable() {
-                    self.readiness.add(Interest::READABLE);
+                    self.readiness |= Interest::READABLE;
                     changed = true;
                 }
 
                 if !readable && self.readiness.is_readable() {
-                    self.readiness.remove(Interest::READABLE);
+                    self.readiness = self
+                        .readiness
+                        .remove(Interest::READABLE)
+                        .unwrap_or(Interest::WRITABLE);
                     changed = true;
                 }
                 if changed {

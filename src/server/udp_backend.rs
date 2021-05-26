@@ -191,22 +191,28 @@ impl Backend for UdpBackend {
             _ => {
                 let mut changed = false;
                 if !self.send_buffer.is_empty() && !self.readiness.is_writable() {
-                    self.readiness.add(Interest::WRITABLE);
+                    self.readiness |= Interest::WRITABLE;
                     changed = true;
                     log::debug!("connection:{} add writable to udp target", self.index);
                 }
                 if self.send_buffer.is_empty() && self.readiness.is_writable() {
-                    self.readiness.remove(Interest::WRITABLE);
+                    self.readiness = self
+                        .readiness
+                        .remove(Interest::WRITABLE)
+                        .unwrap_or(Interest::READABLE);
                     changed = true;
                     log::debug!("connection:{} remove writable from udp target", self.index);
                 }
                 if readable && !self.readiness.is_readable() {
-                    self.readiness.add(Interest::READABLE);
+                    self.readiness |= Interest::READABLE;
                     log::debug!("connection:{} add readable to udp target", self.index);
                     changed = true;
                 }
                 if !readable && self.readiness.is_readable() {
-                    self.readiness.remove(Interest::READABLE);
+                    self.readiness = self
+                        .readiness
+                        .remove(Interest::READABLE)
+                        .unwrap_or(Interest::WRITABLE);
                     log::debug!("connection:{} remove readable to udp target", self.index);
                     changed = true;
                 }
