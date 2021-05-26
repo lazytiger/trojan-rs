@@ -48,7 +48,7 @@ impl TlsServer {
         TlsServer {
             listener,
             config,
-            next_id: 2,
+            next_id: MIN_INDEX,
             conns: HashMap::new(),
         }
     }
@@ -127,7 +127,7 @@ impl TlsServer {
                 log::debug!("connection:{} closed, remove from pool", index);
             }
         } else {
-            log::error!("connection:{} not found", index);
+            log::error!("connection:{} not found to do event", index);
         }
     }
 
@@ -148,7 +148,7 @@ impl TlsServer {
                 log::debug!("connection:{} closed, remove from pool", index);
             }
         } else {
-            log::error!("connection:{} not found", index);
+            log::error!("connection:{} not found to do resolve", index);
         }
     }
 

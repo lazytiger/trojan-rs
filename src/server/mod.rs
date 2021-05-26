@@ -20,7 +20,7 @@ mod tcp_backend;
 mod tls_server;
 mod udp_backend;
 
-const MIN_INDEX: usize = 3;
+const MIN_INDEX: usize = 2;
 const MAX_INDEX: usize = usize::MAX / CHANNEL_CNT;
 const CHANNEL_CNT: usize = 2;
 const CHANNEL_PROXY: usize = 0;
