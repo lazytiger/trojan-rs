@@ -4,7 +4,6 @@ use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Poll, Token};
 use rustls::ClientSession;
 
-use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     proto::{
@@ -15,6 +14,7 @@ use crate::{
         idle_pool::IdlePool, next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP,
         MIN_INDEX,
     },
+    resolver::EventedResolver,
     sys,
     tls_conn::{ConnStatus, TlsConn},
 };

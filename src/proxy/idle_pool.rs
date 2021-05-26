@@ -4,10 +4,10 @@ use mio::{event::Event, net::TcpStream, Poll, Token};
 use rustls::{ClientConfig, ClientSession};
 use webpki::DNSName;
 
-use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER},
+    resolver::EventedResolver,
     sys,
     tls_conn::TlsConn,
 };

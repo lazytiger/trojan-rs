@@ -13,12 +13,12 @@ use rustls::ClientConfig;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use webpki::DNSNameRef;
 
-use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     proxy::{
         idle_pool::IdlePool, tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer,
     },
+    resolver::EventedResolver,
     sys,
 };
 

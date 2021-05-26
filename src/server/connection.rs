@@ -7,10 +7,10 @@ use mio::{
 };
 use rustls::ServerSession;
 
-use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
     proto::{Sock5Address, TrojanRequest, CONNECT},
+    resolver::EventedResolver,
     server::{
         tcp_backend::TcpBackend, tls_server::Backend, udp_backend::UdpBackend, CHANNEL_BACKEND,
         CHANNEL_CNT, CHANNEL_PROXY,

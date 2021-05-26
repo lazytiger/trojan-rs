@@ -13,8 +13,7 @@ use rustls::{
 
 pub use tls_server::TlsServer;
 
-use crate::config::Opts;
-use crate::resolver::EventedResolver;
+use crate::{config::Opts, resolver::EventedResolver};
 
 mod connection;
 mod tcp_backend;

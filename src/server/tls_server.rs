@@ -7,9 +7,9 @@ use std::{
 use mio::{event::Event, net::TcpListener, Poll, Token};
 use rustls::{ServerConfig, ServerSession};
 
-use crate::resolver::EventedResolver;
 use crate::{
     config::Opts,
+    resolver::EventedResolver,
     server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
     sys,
     tls_conn::{ConnStatus, TlsConn},
