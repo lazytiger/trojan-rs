@@ -10,7 +10,7 @@ use trust_dns_resolver::Resolver;
 
 #[derive(Clap)]
 #[clap(
-    version = "0.7",
+    version = "0.7.1",
     author = "Hoping White",
     about = "A trojan implementation using rust"
 )]
