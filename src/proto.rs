@@ -36,7 +36,7 @@ pub struct TrojanRequest<'a> {
 }
 
 impl<'a> TrojanRequest<'a> {
-    pub fn parse(mut buffer: &'a [u8], opts: &mut Opts) -> Option<TrojanRequest<'a>> {
+    pub fn parse(mut buffer: &'a [u8], opts: &Opts) -> Option<TrojanRequest<'a>> {
         if buffer.len() < opts.pass_len {
             log::debug!(
                 "data length:{} is too short for a trojan request",
@@ -79,7 +79,7 @@ impl<'a> TrojanRequest<'a> {
         let command = buffer[0];
         let atyp = buffer[1];
         buffer = &buffer[2..];
-        if let Some((size, address)) = parse_address(atyp, buffer, opts) {
+        if let Some((size, address)) = parse_address(atyp, buffer) {
             buffer = &buffer[size..];
             if buffer[0] != b'\r' || buffer[1] != b'\n' {
                 log::error!("unknown protocol, expected CRLF after address");
@@ -106,7 +106,7 @@ impl<'a> TrojanRequest<'a> {
     }
 }
 
-fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Sock5Address)> {
+fn parse_address(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Address)> {
     match atyp {
         IPV4 => {
             log::debug!("ipv4 address found");
@@ -131,8 +131,6 @@ fn parse_address(atyp: u8, buffer: &[u8], opts: &mut Opts) -> Option<(usize, Soc
             let domain: String = String::from_utf8_lossy(&buffer[1..length + 1]).into();
             let port = to_u16(&buffer[length + 1..]);
             if let Ok(ip) = domain.parse::<IpAddr>() {
-                Some((length + 3, Sock5Address::Socket(SocketAddr::new(ip, port))))
-            } else if let Some(ip) = opts.query_dns(&domain) {
                 Some((length + 3, Sock5Address::Socket(SocketAddr::new(ip, port))))
             } else {
                 log::debug!("domain found:{}:{}", domain, port);
@@ -182,14 +180,14 @@ pub enum UdpParseResult<'a> {
 }
 
 impl<'a> UdpAssociate<'a> {
-    pub fn parse(mut buffer: &'a [u8], opts: &mut Opts) -> UdpParseResult<'a> {
+    pub fn parse(mut buffer: &'a [u8]) -> UdpParseResult<'a> {
         if buffer.len() < 11 {
             log::debug!("data is too short for UDP_ASSOCIATE");
             return UdpParseResult::Continued;
         }
         let atyp = buffer[0];
         buffer = &buffer[1..];
-        if let Some((size, addr)) = parse_address(atyp, buffer, opts) {
+        if let Some((size, addr)) = parse_address(atyp, buffer) {
             buffer = &buffer[size..];
             if buffer.len() < 4 {
                 return UdpParseResult::Continued;

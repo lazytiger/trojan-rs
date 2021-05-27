@@ -24,10 +24,10 @@ pub struct TcpBackend {
 }
 
 impl TcpBackend {
-    pub fn new(conn: TcpStream, index: usize, token: Token, timeout: Duration) -> TcpBackend {
+    pub fn new(conn: TcpStream, index: usize, token: Token, opts: &'static Opts) -> TcpBackend {
         TcpBackend {
             conn,
-            timeout,
+            timeout: opts.tcp_idle_duration,
             status: ConnStatus::Established,
             interest: Interest::READABLE,
             send_buffer: BytesMut::new(),
@@ -74,16 +74,16 @@ impl TcpBackend {
 }
 
 impl Backend for TcpBackend {
-    fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>) {
         if event.is_readable() {
             self.do_read(conn);
         }
         if event.is_writable() {
-            self.dispatch(&[], opts);
+            self.dispatch(&[]);
         }
     }
 
-    fn dispatch(&mut self, buffer: &[u8], _: &mut Opts) {
+    fn dispatch(&mut self, buffer: &[u8]) {
         // send immediately first
         if self.send_buffer.is_empty() {
             self.do_send(buffer);

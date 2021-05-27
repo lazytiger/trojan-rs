@@ -21,11 +21,12 @@ pub struct TlsServer {
     config: Arc<ServerConfig>,
     next_id: usize,
     conns: HashMap<usize, Connection>,
+    opts: &'static Opts,
 }
 
 pub trait Backend {
-    fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>);
-    fn dispatch(&mut self, data: &[u8], opts: &mut Opts);
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>);
+    fn dispatch(&mut self, data: &[u8]);
     fn reregister(&mut self, poll: &Poll, readable: bool);
     fn check_close(&mut self, poll: &Poll);
     fn closing(&self) -> bool {
@@ -44,16 +45,17 @@ pub trait Backend {
 }
 
 impl TlsServer {
-    pub fn new(listener: TcpListener, config: Arc<ServerConfig>) -> TlsServer {
+    pub fn new(listener: TcpListener, config: Arc<ServerConfig>, opts: &'static Opts) -> TlsServer {
         TlsServer {
             listener,
             config,
             next_id: MIN_INDEX,
             conns: HashMap::new(),
+            opts,
         }
     }
 
-    pub fn accept(&mut self, poll: &Poll, opts: &Opts) {
+    pub fn accept(&mut self, poll: &Poll) {
         loop {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
@@ -62,7 +64,7 @@ impl TlsServer {
                         self.next_id,
                         addr
                     );
-                    if let Err(err) = sys::set_mark(&stream, opts.marker) {
+                    if let Err(err) = sys::set_mark(&stream, self.opts.marker) {
                         log::error!("set mark failed:{}", err);
                         continue;
                     } else if let Err(err) = stream.set_nodelay(true) {
@@ -79,8 +81,9 @@ impl TlsServer {
                             session,
                             stream,
                         ),
+                        self.opts,
                     );
-                    if conn.setup(poll, opts) {
+                    if conn.setup(poll) {
                         self.conns.insert(index, conn);
                     } else {
                         conn.close_now(poll);
@@ -111,17 +114,11 @@ impl TlsServer {
         token.0 / CHANNEL_CNT
     }
 
-    pub fn do_conn_event(
-        &mut self,
-        poll: &Poll,
-        event: &Event,
-        opts: &mut Opts,
-        resolver: &DnsResolver,
-    ) {
+    pub fn do_conn_event(&mut self, poll: &Poll, event: &Event, resolver: &mut DnsResolver) {
         let index = self.token2index(event.token());
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();
-            conn.ready(poll, event, opts, resolver);
+            conn.ready(poll, event, resolver);
             if conn.destroyed() {
                 self.conns.remove(&index);
                 log::debug!("connection:{} closed, remove from pool", index);
@@ -131,18 +128,11 @@ impl TlsServer {
         }
     }
 
-    pub fn do_conn_resolve(
-        &mut self,
-        token: Token,
-        poll: &Poll,
-        opts: &mut Opts,
-        ip: Option<IpAddr>,
-        resolver: &DnsResolver,
-    ) {
+    pub fn do_conn_resolve(&mut self, token: Token, poll: &Poll, ip: Option<IpAddr>) {
         let index = self.token2index(token);
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();
-            conn.try_resolve(poll, opts, ip, resolver);
+            conn.try_resolve(poll, ip);
             if conn.destroyed() {
                 self.conns.remove(&index);
                 log::debug!("connection:{} closed, remove from pool", index);

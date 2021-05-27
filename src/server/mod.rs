@@ -64,16 +64,17 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
     Arc::new(config)
 }
 
-pub fn run(opts: &mut Opts) {
+pub fn run(opts: &'static Opts) {
     let config = init_config(opts);
     let mut poll = Poll::new().unwrap();
-    let resolver = DnsResolver::new(&poll, Token(RESOLVER));
+    let mut resolver = DnsResolver::new(&poll, Token(RESOLVER));
+    resolver.set_cache_timeout(opts.server_args().dns_cache_time);
     let addr = opts.local_addr.parse().unwrap();
     let mut listener = TcpListener::bind(addr).unwrap();
     poll.registry()
         .register(&mut listener, Token(LISTENER), Interest::READABLE)
         .unwrap();
-    let mut server = TlsServer::new(listener, config);
+    let mut server = TlsServer::new(listener, config, opts);
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
@@ -82,15 +83,15 @@ pub fn run(opts: &mut Opts) {
         for event in &events {
             match event.token() {
                 Token(LISTENER) => {
-                    server.accept(&poll, opts);
+                    server.accept(&poll);
                 }
                 Token(RESOLVER) => {
-                    resolver.consume(|(token, ip)| {
-                        server.do_conn_resolve(token, &poll, opts, ip, &resolver);
+                    resolver.consume(|token, ip| {
+                        server.do_conn_resolve(token, &poll, ip);
                     });
                 }
                 _ => {
-                    server.do_conn_event(&poll, &event, opts, &resolver);
+                    server.do_conn_event(&poll, &event, &mut resolver);
                 }
             }
         }

@@ -16,14 +16,15 @@ fn main() {
 
     config::setup_logger(&opts.log_file, opts.log_level);
     opts.setup();
+    let gopts: &'static Opts = unsafe { std::mem::transmute(&opts) };
     match opts.mode {
         Mode::Proxy(_) => {
             log::warn!("trojan started in proxy mode");
-            proxy::run(&mut opts);
+            proxy::run(gopts);
         }
         Mode::Server(_) => {
             log::warn!("trojan started in server mode");
-            server::run(&mut opts);
+            server::run(gopts);
         }
     }
 }

@@ -103,7 +103,7 @@ pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
     Some(socket)
 }
 
-pub fn run(opts: &mut Opts) {
+pub fn run(opts: &'static Opts) {
     let addr: SocketAddr = opts.local_addr.parse().unwrap();
     let mut tcp_listener = TcpListener::from_std(new_socket(addr, false).unwrap().into());
     let mut udp_listener = UdpSocket::from_std(new_socket(addr, true).unwrap().into());
@@ -113,7 +113,7 @@ pub fn run(opts: &mut Opts) {
     }
     let mut udp_cache = UdpSvrCache::new();
     let mut poll = Poll::new().unwrap();
-    let resolver = DnsResolver::new(&poll, Token(RESOLVER));
+    let mut resolver = DnsResolver::new(&poll, Token(RESOLVER));
     poll.registry()
         .register(&mut tcp_listener, Token(TCP_LISTENER), Interest::READABLE)
         .unwrap();
@@ -130,8 +130,8 @@ pub fn run(opts: &mut Opts) {
         .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     let config = Arc::new(config);
 
-    let mut tcp_server = TcpServer::new(tcp_listener);
-    let mut udp_server = UdpServer::new(udp_listener);
+    let mut tcp_server = TcpServer::new(tcp_listener, opts);
+    let mut udp_server = UdpServer::new(udp_listener, opts);
 
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
@@ -146,13 +146,13 @@ pub fn run(opts: &mut Opts) {
             log::trace!("dispatch token:{}", event.token().0);
             match event.token() {
                 Token(TCP_LISTENER) => {
-                    tcp_server.accept(&event, opts, &poll, &mut pool, &resolver);
+                    tcp_server.accept(&event, &poll, &mut pool, &resolver);
                 }
                 Token(UDP_LISTENER) => {
-                    udp_server.accept(&event, opts, &poll, &mut pool, &mut udp_cache, &resolver);
+                    udp_server.accept(&event, &poll, &mut pool, &mut udp_cache, &resolver);
                 }
                 Token(RESOLVER) => {
-                    resolver.consume(|(_, ip)| {
+                    resolver.consume(|_, ip| {
                         pool.resolve(ip);
                     });
                 }
@@ -160,7 +160,7 @@ pub fn run(opts: &mut Opts) {
                     pool.ready(&event, &poll);
                 }
                 Token(i) if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.ready(&event, opts, &poll, &mut udp_cache);
+                    udp_server.ready(&event, &poll, &mut udp_cache);
                 }
                 _ => {
                     tcp_server.ready(&event, &poll);

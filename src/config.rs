@@ -1,18 +1,12 @@
 use std::{
-    collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     thread::sleep,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use clap::Clap;
 use crypto::{digest::Digest, sha2::Sha224};
 use trust_dns_resolver::Resolver;
-
-pub struct DnsEntry {
-    pub address: IpAddr,
-    pub expired_time: Instant,
-}
 
 #[derive(Clap)]
 #[clap(
@@ -56,16 +50,13 @@ pub struct Opts {
         about = "time in seconds before closing an inactive tcp connection"
     )]
     pub tcp_idle_timeout: u64,
-    #[clap(skip)]
-    dns_cache_duration: Duration,
+
     #[clap(skip)]
     sha_pass: String,
     #[clap(skip)]
     pub pass_len: usize,
     #[clap(skip)]
     pub back_addr: Option<SocketAddr>,
-    #[clap(skip)]
-    pub dns_cache: HashMap<String, DnsEntry>,
     #[clap(skip)]
     pub udp_header_len: usize,
     #[clap(skip)]
@@ -126,7 +117,7 @@ pub struct ServerArgs {
         default_value = "300",
         about = "time in seconds for dns query cache"
     )]
-    dns_cache_time: u64,
+    pub dns_cache_time: u64,
     #[clap(short = 'n', long, about = "alpn protocol supported")]
     pub alpn: Vec<String>,
 }
@@ -151,7 +142,6 @@ impl Opts {
             Mode::Server(ref args) => {
                 let back_addr: SocketAddr = args.remote_addr.parse().unwrap();
                 self.back_addr = Some(back_addr);
-                self.dns_cache_duration = Duration::new(args.dns_cache_time, 0);
             }
             Mode::Proxy(ref args) => {
                 let mut hostname = args.hostname.clone();
@@ -219,31 +209,6 @@ impl Opts {
 
     pub fn get_pass(&self) -> &String {
         &self.sha_pass
-    }
-
-    pub fn update_dns(&mut self, domain: String, address: IpAddr) {
-        log::trace!("update dns cache, {} = {}", domain, address);
-        let expired_time = Instant::now() + self.dns_cache_duration;
-        self.dns_cache.insert(
-            domain,
-            DnsEntry {
-                address,
-                expired_time,
-            },
-        );
-    }
-
-    pub fn query_dns(&mut self, domain: &str) -> Option<IpAddr> {
-        if let Some(entry) = self.dns_cache.get(domain) {
-            log::debug!("found {} = {} in dns cache", domain, entry.address);
-            if entry.expired_time > Instant::now() {
-                return Some(entry.address);
-            } else {
-                log::info!("domain {} expired, remove from cache", domain);
-                let _ = self.dns_cache.remove(domain);
-            }
-        }
-        None
     }
 }
 

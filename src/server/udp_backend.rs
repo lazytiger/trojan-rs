@@ -27,7 +27,7 @@ pub struct UdpBackend {
 }
 
 impl UdpBackend {
-    pub fn new(socket: UdpSocket, index: usize, token: Token, timeout: Duration) -> UdpBackend {
+    pub fn new(socket: UdpSocket, index: usize, token: Token, opts: &'static Opts) -> UdpBackend {
         let remote_addr = socket.local_addr().unwrap();
         UdpBackend {
             socket,
@@ -38,16 +38,16 @@ impl UdpBackend {
             token,
             status: ConnStatus::Established,
             interest: Interest::READABLE,
-            timeout,
+            timeout: opts.udp_idle_duration,
             bytes_read: 0,
             bytes_sent: 0,
             remote_addr,
         }
     }
 
-    fn do_send(&mut self, mut buffer: &[u8], opts: &mut Opts) {
+    fn do_send(&mut self, mut buffer: &[u8]) {
         loop {
-            match UdpAssociate::parse(buffer, opts) {
+            match UdpAssociate::parse(buffer) {
                 UdpParseResult::Packet(packet) => {
                     match self
                         .socket
@@ -163,22 +163,22 @@ impl UdpBackend {
 }
 
 impl Backend for UdpBackend {
-    fn ready(&mut self, event: &Event, opts: &mut Opts, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>) {
         if event.is_readable() {
             self.do_read(conn);
         }
         if event.is_writable() {
-            self.dispatch(&[], opts);
+            self.dispatch(&[]);
         }
     }
 
-    fn dispatch(&mut self, buffer: &[u8], opts: &mut Opts) {
+    fn dispatch(&mut self, buffer: &[u8]) {
         if self.send_buffer.is_empty() {
-            self.do_send(buffer, opts);
+            self.do_send(buffer);
         } else {
             self.send_buffer.extend_from_slice(buffer);
             let buffer = self.send_buffer.split();
-            self.do_send(buffer.as_ref(), opts);
+            self.do_send(buffer.as_ref());
         }
     }
 

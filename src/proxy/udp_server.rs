@@ -25,6 +25,7 @@ pub struct UdpServer {
     src_map: HashMap<SocketAddr, usize>,
     next_id: usize,
     recv_buffer: Vec<u8>,
+    opts: &'static Opts,
 }
 
 struct Connection {
@@ -39,23 +40,24 @@ struct Connection {
     dst_addr: SocketAddr,
     bytes_read: usize,
     bytes_sent: usize,
+    opts: &'static Opts,
 }
 
 impl UdpServer {
-    pub fn new(udp_listener: UdpSocket) -> UdpServer {
+    pub fn new(udp_listener: UdpSocket, opts: &'static Opts) -> UdpServer {
         UdpServer {
             udp_listener,
             conns: HashMap::new(),
             src_map: HashMap::new(),
             next_id: MIN_INDEX,
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
+            opts,
         }
     }
 
     pub fn accept(
         &mut self,
         event: &Event,
-        opts: &mut Opts,
         poll: &Poll,
         pool: &mut IdlePool,
         udp_cache: &mut UdpSvrCache,
@@ -85,7 +87,7 @@ impl UdpServer {
                             log::debug!(
                                 "address:{} not found, connecting to {}",
                                 src_addr,
-                                opts.back_addr.as_ref().unwrap()
+                                self.opts.back_addr.as_ref().unwrap()
                             );
                             if let Some(mut conn) = pool.get(poll, resolver) {
                                 if let Some(socket) = udp_cache.get_socket(dst_addr) {
@@ -94,8 +96,9 @@ impl UdpServer {
                                         index,
                                         Token(index * CHANNEL_CNT + CHANNEL_UDP),
                                     );
-                                    let mut conn = Connection::new(index, conn, src_addr, socket);
-                                    if conn.setup(opts, poll) {
+                                    let mut conn =
+                                        Connection::new(index, conn, src_addr, socket, self.opts);
+                                    if conn.setup(poll) {
                                         let _ = self.conns.insert(index, conn);
                                         self.src_map.insert(src_addr, index);
                                         log::debug!("connection:{} is ready", index);
@@ -133,16 +136,10 @@ impl UdpServer {
         }
     }
 
-    pub fn ready(
-        &mut self,
-        event: &Event,
-        opts: &mut Opts,
-        poll: &Poll,
-        udp_cache: &mut UdpSvrCache,
-    ) {
+    pub fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {
         let index = Connection::token2index(event.token());
         if let Some(conn) = self.conns.get_mut(&index) {
-            conn.ready(event, opts, poll, udp_cache);
+            conn.ready(event, poll, udp_cache);
             if conn.destroyed() {
                 let src_addr = conn.src_addr;
                 self.conns.remove(&index);
@@ -159,6 +156,7 @@ impl Connection {
         server_conn: TlsConn<ClientSession>,
         src_addr: SocketAddr,
         socket: Rc<UdpSocket>,
+        opts: &'static Opts,
     ) -> Connection {
         let dst_addr = socket.local_addr().unwrap();
         Connection {
@@ -173,6 +171,7 @@ impl Connection {
             client_time: Instant::now(),
             bytes_read: 0,
             bytes_sent: 0,
+            opts,
         }
     }
 
@@ -180,14 +179,14 @@ impl Connection {
         token.0 / CHANNEL_CNT
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+    fn setup(&mut self, poll: &Poll) -> bool {
         self.server_conn.setup(poll);
         self.recv_buffer.clear();
         TrojanRequest::generate(
             &mut self.recv_buffer,
             UDP_ASSOCIATE,
-            opts.empty_addr.as_ref().unwrap(),
-            opts,
+            self.opts.empty_addr.as_ref().unwrap(),
+            self.opts,
         );
         self.server_conn.write_session(self.recv_buffer.as_ref())
     }
@@ -233,9 +232,9 @@ impl Connection {
         self.status = ConnStatus::Shutdown;
     }
 
-    fn ready(&mut self, event: &Event, opts: &mut Opts, poll: &Poll, udp_cache: &mut UdpSvrCache) {
+    fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {
         if event.is_readable() {
-            self.try_read_server(opts, udp_cache);
+            self.try_read_server(udp_cache);
         }
         if event.is_writable() {
             self.try_send_server();
@@ -281,19 +280,19 @@ impl Connection {
         self.server_conn.do_send();
     }
 
-    fn try_read_server(&mut self, opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
+    fn try_read_server(&mut self, udp_cache: &mut UdpSvrCache) {
         if let Some(buffer) = self.server_conn.do_read() {
-            self.try_send_client(buffer.as_slice(), opts, udp_cache);
+            self.try_send_client(buffer.as_slice(), udp_cache);
         }
     }
 
-    pub fn try_send_client(&mut self, buffer: &[u8], opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
+    pub fn try_send_client(&mut self, buffer: &[u8], udp_cache: &mut UdpSvrCache) {
         if self.send_buffer.is_empty() {
-            self.do_send_client(buffer, opts, udp_cache);
+            self.do_send_client(buffer, udp_cache);
         } else {
             self.send_buffer.extend_from_slice(buffer);
             let buffer = self.send_buffer.split();
-            self.do_send_client(buffer.as_ref(), opts, udp_cache);
+            self.do_send_client(buffer.as_ref(), udp_cache);
         }
     }
 
@@ -335,9 +334,9 @@ impl Connection {
         }
     }
 
-    fn do_send_client(&mut self, mut buffer: &[u8], opts: &mut Opts, udp_cache: &mut UdpSvrCache) {
+    fn do_send_client(&mut self, mut buffer: &[u8], udp_cache: &mut UdpSvrCache) {
         loop {
-            match UdpAssociate::parse(buffer, opts) {
+            match UdpAssociate::parse(buffer) {
                 UdpParseResult::Continued => {
                     self.send_buffer.extend_from_slice(buffer);
                     break;

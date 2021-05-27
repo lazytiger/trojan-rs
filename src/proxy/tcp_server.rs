@@ -26,6 +26,7 @@ pub struct TcpServer {
     tcp_listener: TcpListener,
     conns: HashMap<usize, Connection>,
     next_id: usize,
+    opts: &'static Opts,
 }
 
 struct Connection {
@@ -38,21 +39,22 @@ struct Connection {
     status: ConnStatus,
     client_time: Instant,
     server_conn: TlsConn<ClientSession>,
+    opts: &'static Opts,
 }
 
 impl TcpServer {
-    pub fn new(tcp_listener: TcpListener) -> TcpServer {
+    pub fn new(tcp_listener: TcpListener, opts: &'static Opts) -> TcpServer {
         TcpServer {
             tcp_listener,
             conns: HashMap::new(),
             next_id: MIN_INDEX,
+            opts,
         }
     }
 
     pub fn accept(
         &mut self,
         _event: &Event,
-        opts: &mut Opts,
         poll: &Poll,
         pool: &mut IdlePool,
         resolver: &DnsResolver,
@@ -60,7 +62,7 @@ impl TcpServer {
         loop {
             match self.tcp_listener.accept() {
                 Ok((client, src_addr)) => {
-                    if let Err(err) = sys::set_mark(&client, opts.marker) {
+                    if let Err(err) = sys::set_mark(&client, self.opts.marker) {
                         log::error!("set mark failed:{}", err);
                         continue;
                     } else if let Err(err) = client.set_nodelay(true) {
@@ -73,8 +75,9 @@ impl TcpServer {
                             if let Some(mut conn) = pool.get(poll, resolver) {
                                 let index = next_index(&mut self.next_id);
                                 conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP));
-                                let mut conn = Connection::new(index, conn, dst_addr, client);
-                                if conn.setup(opts, poll) {
+                                let mut conn =
+                                    Connection::new(index, conn, dst_addr, client, self.opts);
+                                if conn.setup(poll) {
                                     self.conns.insert(conn.index(), conn);
                                 } else {
                                     conn.shutdown(poll);
@@ -119,6 +122,7 @@ impl Connection {
         server_conn: TlsConn<ClientSession>,
         dst_addr: SocketAddr,
         client: TcpStream,
+        opts: &'static Opts,
     ) -> Connection {
         Connection {
             index,
@@ -130,6 +134,7 @@ impl Connection {
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             client_time: Instant::now(),
+            opts,
         }
     }
 
@@ -141,11 +146,11 @@ impl Connection {
         matches!(self.status, ConnStatus::Closed)
     }
 
-    fn setup(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+    fn setup(&mut self, poll: &Poll) -> bool {
         self.server_conn.setup(poll);
         let mut request = BytesMut::new();
         self.client_interest = Interest::READABLE;
-        TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, opts);
+        TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, self.opts);
         let token = self.client_token();
         if !self.server_conn.write_session(request.as_ref()) {
             false

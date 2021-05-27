@@ -38,10 +38,11 @@ pub struct Connection {
     closing: bool,
     target_addr: Option<SocketAddr>,
     data: Vec<u8>,
+    opts: &'static Opts,
 }
 
 impl Connection {
-    pub fn new(index: usize, proxy: TlsConn<ServerSession>) -> Connection {
+    pub fn new(index: usize, proxy: TlsConn<ServerSession>, opts: &'static Opts) -> Connection {
         Connection {
             index,
             proxy,
@@ -53,6 +54,7 @@ impl Connection {
             closing: false,
             target_addr: None,
             data: Vec::new(),
+            opts,
         }
     }
 
@@ -75,12 +77,12 @@ impl Connection {
         token.0 % CHANNEL_CNT == CHANNEL_PROXY
     }
 
-    pub fn ready(&mut self, poll: &Poll, event: &Event, opts: &mut Opts, resolver: &DnsResolver) {
+    pub fn ready(&mut self, poll: &Poll, event: &Event, resolver: &mut DnsResolver) {
         self.last_active_time = Instant::now();
 
         if self.proxy_token(event.token()) {
             if event.is_readable() {
-                self.try_read_proxy(opts, poll, resolver);
+                self.try_read_proxy(poll, resolver);
             }
             if event.is_writable() {
                 self.try_send_proxy();
@@ -89,7 +91,7 @@ impl Connection {
             match self.status {
                 Status::UDPForward | Status::TCPForward => {
                     if let Some(backend) = self.backend.as_mut() {
-                        backend.ready(event, opts, &mut self.proxy);
+                        backend.ready(event, &mut self.proxy);
                     } else {
                         log::error!("connection:{} has invalid status", self.index);
                     }
@@ -127,13 +129,7 @@ impl Connection {
         }
     }
 
-    pub fn try_resolve(
-        &mut self,
-        poll: &Poll,
-        opts: &mut Opts,
-        ip: Option<IpAddr>,
-        resolver: &DnsResolver,
-    ) {
+    pub fn try_resolve(&mut self, poll: &Poll, ip: Option<IpAddr>) {
         if let Status::DnsWait = self.status {
             if let Sock5Address::Domain(domain, port) = &self.sock5_addr {
                 if let Some(address) = ip {
@@ -143,10 +139,9 @@ impl Connection {
                         domain,
                         address
                     );
-                    opts.update_dns(domain.clone(), address);
                     let addr = SocketAddr::new(address, *port);
                     self.target_addr.replace(addr);
-                    self.dispatch(&[], opts, poll, resolver);
+                    self.dispatch(&[], poll, None);
                 } else {
                     log::error!("connection:{} resolve host:{} failed", self.index, domain);
                     self.closing = true;
@@ -166,23 +161,18 @@ impl Connection {
         self.proxy.do_send();
     }
 
-    fn try_read_proxy(&mut self, opts: &mut Opts, poll: &Poll, resolver: &DnsResolver) {
+    fn try_read_proxy(&mut self, poll: &Poll, resolver: &mut DnsResolver) {
         if let Some(buffer) = self.proxy.do_read() {
-            self.dispatch(buffer.as_slice(), opts, poll, resolver);
+            self.dispatch(buffer.as_slice(), poll, Some(resolver));
         }
     }
 
-    pub fn setup(&mut self, poll: &Poll, _: &Opts) -> bool {
+    pub fn setup(&mut self, poll: &Poll) -> bool {
         self.proxy.register(poll)
     }
 
-    fn try_handshake(
-        &mut self,
-        buffer: &mut &[u8],
-        opts: &mut Opts,
-        resolver: &DnsResolver,
-    ) -> bool {
-        if let Some(request) = TrojanRequest::parse(buffer, opts) {
+    fn try_handshake(&mut self, buffer: &mut &[u8], resolver: &mut &mut DnsResolver) -> bool {
+        if let Some(request) = TrojanRequest::parse(buffer, self.opts) {
             self.command = request.command;
             self.sock5_addr = request.address;
             *buffer = request.payload;
@@ -195,13 +185,17 @@ impl Connection {
             self.sock5_addr = Sock5Address::None;
         }
         match &self.sock5_addr {
-            Sock5Address::Domain(domain, _) => {
+            Sock5Address::Domain(domain, port) => {
                 if self.command != CONNECT {
                     //udp associate bind at 0.0.0.0:0, ignore all domain
                     return true;
                 }
                 log::debug!("connection:{} has to resolve {}", self.index, domain);
-                resolver.resolve(domain.clone(), self.target_token());
+                if let Some(ip) = (*resolver).query_dns(domain.as_str()) {
+                    self.target_addr.replace(SocketAddr::new(ip, *port));
+                } else {
+                    resolver.resolve(domain.clone(), self.target_token());
+                }
             }
             Sock5Address::Socket(address) => {
                 log::debug!(
@@ -215,21 +209,15 @@ impl Connection {
                 log::debug!(
                     "connection:{} got default target address:{}",
                     self.index,
-                    opts.back_addr.as_ref().unwrap()
+                    self.opts.back_addr.as_ref().unwrap()
                 );
-                self.target_addr = opts.back_addr;
+                self.target_addr = self.opts.back_addr;
             }
         }
         true
     }
 
-    fn dispatch(
-        &mut self,
-        mut buffer: &[u8],
-        opts: &mut Opts,
-        poll: &Poll,
-        resolver: &DnsResolver,
-    ) {
+    fn dispatch(&mut self, mut buffer: &[u8], poll: &Poll, mut resolver: Option<&mut DnsResolver>) {
         log::debug!(
             "connection:{} dispatch {} bytes request data",
             self.index,
@@ -238,7 +226,7 @@ impl Connection {
         loop {
             match self.status {
                 Status::HandShake => {
-                    if self.try_handshake(&mut buffer, opts, resolver) {
+                    if self.try_handshake(&mut buffer, resolver.as_mut().unwrap()) {
                         self.status = Status::DnsWait;
                     } else {
                         return;
@@ -258,11 +246,11 @@ impl Connection {
                             return;
                         }
 
-                        if self.try_setup_tcp_target(opts, poll) {
+                        if self.try_setup_tcp_target(poll) {
                             self.status = Status::TCPForward;
                         }
                         return;
-                    } else if self.try_setup_udp_target(opts, poll) {
+                    } else if self.try_setup_udp_target(poll) {
                         self.status = Status::UDPForward;
                     } else {
                         return;
@@ -270,7 +258,7 @@ impl Connection {
                 }
                 _ => {
                     if let Some(backend) = self.backend.as_mut() {
-                        backend.dispatch(buffer, opts);
+                        backend.dispatch(buffer);
                     } else {
                         log::error!("connection:{} has no backend yet", self.index);
                     }
@@ -280,7 +268,7 @@ impl Connection {
         }
     }
 
-    fn try_setup_tcp_target(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+    fn try_setup_tcp_target(&mut self, poll: &Poll) -> bool {
         log::debug!(
             "connection:{} make a target connection to {}",
             self.index,
@@ -288,7 +276,7 @@ impl Connection {
         );
         match TcpStream::connect(self.target_addr.clone().unwrap()) {
             Ok(mut tcp_target) => {
-                if let Err(err) = sys::set_mark(&tcp_target, opts.marker) {
+                if let Err(err) = sys::set_mark(&tcp_target, self.opts.marker) {
                     log::error!("connection:{} set mark failed:{}", self.index, err);
                     self.closing = true;
                     return false;
@@ -305,14 +293,10 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let mut backend = TcpBackend::new(
-                    tcp_target,
-                    self.index,
-                    self.target_token(),
-                    opts.tcp_idle_duration,
-                );
+                let mut backend =
+                    TcpBackend::new(tcp_target, self.index, self.target_token(), self.opts);
                 if !self.data.is_empty() {
-                    backend.dispatch(self.data.as_slice(), opts);
+                    backend.dispatch(self.data.as_slice());
                     self.data.clear();
                     self.data.shrink_to_fit();
                 }
@@ -327,16 +311,16 @@ impl Connection {
         true
     }
 
-    fn try_setup_udp_target(&mut self, opts: &mut Opts, poll: &Poll) -> bool {
+    fn try_setup_udp_target(&mut self, poll: &Poll) -> bool {
         log::debug!("connection:{} got udp connection", self.index);
-        match UdpSocket::bind(opts.empty_addr.clone().unwrap()) {
+        match UdpSocket::bind(self.opts.empty_addr.clone().unwrap()) {
             Err(err) => {
                 log::error!("connection:{} bind udp socket failed:{}", self.index, err);
                 self.closing = true;
                 return false;
             }
             Ok(mut udp_target) => {
-                if let Err(err) = sys::set_mark(&udp_target, opts.marker) {
+                if let Err(err) = sys::set_mark(&udp_target, self.opts.marker) {
                     log::error!("connection:{} set mark failed:{}", self.index, err);
                     self.closing = true;
                     return false;
@@ -354,12 +338,8 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let backend = UdpBackend::new(
-                    udp_target,
-                    self.index,
-                    self.target_token(),
-                    opts.udp_idle_duration,
-                );
+                let backend =
+                    UdpBackend::new(udp_target, self.index, self.target_token(), self.opts);
                 self.backend.replace(Box::new(backend));
             }
         }
