@@ -1,12 +1,11 @@
-use std::{net::IpAddr, sync::Arc};
-
-use mio::{Poll, Token, Waker};
 use std::{
     collections::HashMap,
     sync::mpsc::{channel, Receiver, Sender},
     time::{Duration, Instant},
 };
-use trust_dns_resolver::Resolver;
+use std::{net::IpAddr, sync::Arc};
+
+use mio::{Poll, Token, Waker};
 
 pub struct DnsEntry {
     pub address: IpAddr,
@@ -60,34 +59,33 @@ impl DnsResolver {
                 let _ = self.dns_cache.remove(domain);
             }
         }
+        log::info!("domain {} not found in cache", domain);
         None
     }
 
-    pub fn resolve(&self, mut domain: String, token: Token) {
-        let old = domain.clone();
-        if !domain.ends_with('.') {
-            domain.push('.');
-        }
+    pub fn resolve(&self, domain: String, token: Token) {
+        log::info!("resolve domain:{} with token:{}", domain, token.0);
         let sender = self.sender.clone();
         let waker = self.waker.clone();
         rayon::spawn(move || {
+            log::info!("thread resolve domain:{} with token:{}", domain, token.0);
             let mut address = None;
-            if let Ok(resolver) = Resolver::from_system_conf() {
-                if let Ok(response) = resolver.lookup_ip(domain.as_str()) {
-                    for addr in response.iter() {
-                        if address.is_none() || addr.is_ipv4() {
-                            address.replace(addr);
-                        }
-                        if address.as_ref().unwrap().is_ipv4() {
-                            break;
-                        }
+            if let Ok(ips) = dns_lookup::lookup_host(domain.as_str()) {
+                for addr in ips {
+                    if address.is_none() || addr.is_ipv4() {
+                        address.replace(addr);
+                    }
+                    if address.as_ref().unwrap().is_ipv4() {
+                        break;
                     }
                 }
             }
-            if let Err(err) = sender.send((token, old, address)) {
+            if let Err(err) = sender.send((token, domain.clone(), address)) {
                 log::error!("send resolver result failed:{:?}", err);
             } else if let Err(err) = waker.wake() {
                 log::error!("wake failed {}", err);
+            } else {
+                log::info!("domain:{} resolved and wake poll", domain);
             }
         });
     }

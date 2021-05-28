@@ -1,6 +1,6 @@
 [package]
 name = "trojan"
-version = "0.7.1"
+version = "0.7.2"
 authors = ["Hoping White <baihaoping@gmail.com>"]
 edition = "2018"
 
@@ -15,7 +15,7 @@ libc = "0.2"
 rustls = "0.19"
 rust-crypto = "0.2"
 bytes = "1.0"
-trust-dns-resolver = "0.20"
+dns-lookup = "1.0"
 cfg-if = "1.0"
 webpki-roots = "0.21"
 webpki = {version = "0.21"}

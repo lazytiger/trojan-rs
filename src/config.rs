@@ -6,11 +6,10 @@ use std::{
 
 use clap::Clap;
 use crypto::{digest::Digest, sha2::Sha224};
-use trust_dns_resolver::Resolver;
 
 #[derive(Clap)]
 #[clap(
-    version = "0.7.1",
+    version = "0.7.2",
     author = "Hoping White",
     about = "A trojan implementation using rust"
 )]
@@ -144,14 +143,9 @@ impl Opts {
                 self.back_addr = Some(back_addr);
             }
             Mode::Proxy(ref args) => {
-                let mut hostname = args.hostname.clone();
-                if !hostname.ends_with('.') {
-                    hostname.push('.');
-                }
-                let resolver = Resolver::from_system_conf().unwrap();
                 for i in 0..10 {
-                    if let Ok(response) = resolver.lookup_ip(hostname.as_str()) {
-                        for ip in response.iter() {
+                    if let Ok(response) = dns_lookup::lookup_host(args.hostname.as_str()) {
+                        for ip in response {
                             if ip.is_ipv4() {
                                 self.back_addr.replace(SocketAddr::new(ip, args.port));
                                 break;
@@ -167,7 +161,7 @@ impl Opts {
                     }
                 }
                 if self.back_addr.is_none() {
-                    panic!("resolve host {} failed", hostname);
+                    panic!("resolve host {} failed", args.hostname);
                 }
 
                 log::info!("server address is {}", self.back_addr.as_ref().unwrap());
