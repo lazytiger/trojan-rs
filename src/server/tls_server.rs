@@ -128,7 +128,12 @@ impl TlsServer {
         token.0 / CHANNEL_CNT
     }
 
-    pub fn do_conn_event(&mut self, poll: &Poll, event: PollEvent, resolver: &mut DnsResolver) {
+    pub fn do_conn_event(
+        &mut self,
+        poll: &Poll,
+        event: PollEvent,
+        resolver: Option<&mut DnsResolver>,
+    ) {
         let index = self.token2index(event.token());
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();

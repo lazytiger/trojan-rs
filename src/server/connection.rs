@@ -1,7 +1,6 @@
 use std::{io::Write, net::SocketAddr, time::Instant};
 
 use mio::{
-    event::Event,
     net::{TcpStream, UdpSocket},
     Interest, Poll, Token,
 };
@@ -79,7 +78,7 @@ impl Connection {
         token.0 % CHANNEL_CNT == CHANNEL_PROXY
     }
 
-    pub fn ready(&mut self, poll: &Poll, event: PollEvent, resolver: &mut DnsResolver) {
+    pub fn ready(&mut self, poll: &Poll, event: PollEvent, resolver: Option<&mut DnsResolver>) {
         self.last_active_time = Instant::now();
 
         match event {
@@ -168,9 +167,9 @@ impl Connection {
         self.proxy.do_send();
     }
 
-    fn try_read_proxy(&mut self, poll: &Poll, resolver: &mut DnsResolver) {
+    fn try_read_proxy(&mut self, poll: &Poll, resolver: Option<&mut DnsResolver>) {
         if let Some(buffer) = self.proxy.do_read() {
-            self.dispatch(buffer.as_slice(), poll, Some(resolver));
+            self.dispatch(buffer.as_slice(), poll, resolver);
         }
     }
 

@@ -13,7 +13,7 @@ use rustls::{
 
 pub use tls_server::TlsServer;
 
-use crate::{config::Opts, resolver::DnsResolver};
+use crate::{config::Opts, resolver::DnsResolver, server::tls_server::PollEvent};
 
 mod connection;
 mod tcp_backend;
@@ -87,11 +87,11 @@ pub fn run(opts: &'static Opts) {
                 }
                 Token(RESOLVER) => {
                     resolver.consume(|token, ip| {
-                        server.do_conn_resolve(token, &poll, ip);
+                        server.do_conn_event(&poll, PollEvent::Dns((token, ip)), None);
                     });
                 }
                 _ => {
-                    server.do_conn_event(&poll, &event, &mut resolver);
+                    server.do_conn_event(&poll, PollEvent::Network(&event), Some(&mut resolver));
                 }
             }
         }
