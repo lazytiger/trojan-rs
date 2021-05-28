@@ -30,7 +30,7 @@ mod udp_server;
 /// minimal index used in `IdlePool`, `TcpServer` and `UdpServer`
 const MIN_INDEX: usize = 2;
 /// maximum index used in `IdlePool`, `TcpServer` and `UdpServer`
-const MAX_INDEX: usize = std::usize::MAX / CHANNEL_CNT;
+const MAX_INDEX: usize = usize::MAX / CHANNEL_CNT;
 /// Token used for TcpListener
 const TCP_LISTENER: usize = 1;
 /// Token used for main Udp Socket
