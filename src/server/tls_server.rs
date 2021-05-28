@@ -16,6 +16,20 @@ use crate::{
 };
 use std::net::IpAddr;
 
+pub enum PollEvent<'a> {
+    Network(&'a Event),
+    Dns((Token, Option<IpAddr>)),
+}
+
+impl<'a> PollEvent<'a> {
+    fn token(&self) -> Token {
+        match self {
+            PollEvent::Network(event) => event.token(),
+            PollEvent::Dns((token, _)) => *token,
+        }
+    }
+}
+
 pub struct TlsServer {
     listener: TcpListener,
     config: Arc<ServerConfig>,
@@ -114,7 +128,7 @@ impl TlsServer {
         token.0 / CHANNEL_CNT
     }
 
-    pub fn do_conn_event(&mut self, poll: &Poll, event: &Event, resolver: &mut DnsResolver) {
+    pub fn do_conn_event(&mut self, poll: &Poll, event: PollEvent, resolver: &mut DnsResolver) {
         let index = self.token2index(event.token());
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();
@@ -125,20 +139,6 @@ impl TlsServer {
             }
         } else {
             log::error!("connection:{} not found to do event", index);
-        }
-    }
-
-    pub fn do_conn_resolve(&mut self, token: Token, poll: &Poll, ip: Option<IpAddr>) {
-        let index = self.token2index(token);
-        if self.conns.contains_key(&index) {
-            let conn = self.conns.get_mut(&index).unwrap();
-            conn.try_resolve(poll, ip);
-            if conn.destroyed() {
-                self.conns.remove(&index);
-                log::debug!("connection:{} closed, remove from pool", index);
-            }
-        } else {
-            log::error!("connection:{} not found to do resolve", index);
         }
     }
 

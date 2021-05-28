@@ -1,9 +1,12 @@
 use std::{
     collections::HashMap,
-    sync::mpsc::{channel, Receiver, Sender},
+    net::IpAddr,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
     time::{Duration, Instant},
 };
-use std::{net::IpAddr, sync::Arc};
 
 use mio::{Poll, Token, Waker};
 

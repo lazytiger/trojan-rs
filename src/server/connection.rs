@@ -12,8 +12,10 @@ use crate::{
     proto::{Sock5Address, TrojanRequest, CONNECT},
     resolver::DnsResolver,
     server::{
-        tcp_backend::TcpBackend, tls_server::Backend, udp_backend::UdpBackend, CHANNEL_BACKEND,
-        CHANNEL_CNT, CHANNEL_PROXY,
+        tcp_backend::TcpBackend,
+        tls_server::{Backend, PollEvent},
+        udp_backend::UdpBackend,
+        CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY,
     },
     sys,
     tls_conn::TlsConn,
@@ -77,27 +79,32 @@ impl Connection {
         token.0 % CHANNEL_CNT == CHANNEL_PROXY
     }
 
-    pub fn ready(&mut self, poll: &Poll, event: &Event, resolver: &mut DnsResolver) {
+    pub fn ready(&mut self, poll: &Poll, event: PollEvent, resolver: &mut DnsResolver) {
         self.last_active_time = Instant::now();
 
-        if self.proxy_token(event.token()) {
-            if event.is_readable() {
-                self.try_read_proxy(poll, resolver);
-            }
-            if event.is_writable() {
-                self.try_send_proxy();
-            }
-        } else {
-            match self.status {
-                Status::UDPForward | Status::TCPForward => {
-                    if let Some(backend) = self.backend.as_mut() {
-                        backend.ready(event, &mut self.proxy);
-                    } else {
-                        log::error!("connection:{} has invalid status", self.index);
+        match event {
+            PollEvent::Network(event) => {
+                if self.proxy_token(event.token()) {
+                    if event.is_readable() {
+                        self.try_read_proxy(poll, resolver);
+                    }
+                    if event.is_writable() {
+                        self.try_send_proxy();
+                    }
+                } else {
+                    match self.status {
+                        Status::UDPForward | Status::TCPForward => {
+                            if let Some(backend) = self.backend.as_mut() {
+                                backend.ready(event, &mut self.proxy);
+                            } else {
+                                log::error!("connection:{} has invalid status", self.index);
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
+            PollEvent::Dns((_, ip)) => self.try_resolve(poll, ip),
         }
 
         // handshake failed, no dns query on the way, close now.
