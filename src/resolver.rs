@@ -17,7 +17,7 @@ pub struct DnsEntry {
 
 pub struct DnsResolver {
     waker: Arc<Waker>,
-    receiver: Receiver<(Token, String, Option<IpAddr>)>,
+    receiver: Option<Receiver<(Token, String, Option<IpAddr>)>>,
     sender: Sender<(Token, String, Option<IpAddr>)>,
     dns_cache: HashMap<String, DnsEntry>,
     dns_cache_duration: Duration,
@@ -29,7 +29,7 @@ impl DnsResolver {
         let waker = Arc::new(Waker::new(poll.registry(), token).unwrap());
         Self {
             waker,
-            receiver,
+            receiver: Some(receiver),
             sender,
             dns_cache: HashMap::new(),
             dns_cache_duration: Duration::new(10, 0),
@@ -94,12 +94,13 @@ impl DnsResolver {
     }
 
     pub fn consume<F: FnMut(Token, Option<IpAddr>)>(&mut self, mut f: F) {
-        let received: Vec<(Token, String, Option<IpAddr>)> = self.receiver.try_iter().collect();
-        received.into_iter().for_each(|(token, domain, ip)| {
+        let receiver = self.receiver.take().unwrap();
+        receiver.try_iter().for_each(|(token, domain, ip)| {
             if let Some(ip) = ip {
                 self.update_dns(domain, ip);
             }
             f(token, ip);
         });
+        self.receiver.replace(receiver);
     }
 }
