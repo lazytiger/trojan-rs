@@ -40,6 +40,7 @@ struct Connection {
     client_time: Instant,
     server_conn: TlsConn<ClientSession>,
     opts: &'static Opts,
+    last_active_time: Instant,
 }
 
 impl TcpServer {
@@ -114,6 +115,14 @@ impl TcpServer {
             }
         }
     }
+
+    pub fn check_timeout(&mut self, poll: &Poll, now: Instant) {
+        for (_, conn) in &mut self.conns {
+            if conn.timeout(now) {
+                conn.shutdown(poll)
+            }
+        }
+    }
 }
 
 impl Connection {
@@ -134,8 +143,13 @@ impl Connection {
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             client_time: Instant::now(),
+            last_active_time: Instant::now(),
             opts,
         }
+    }
+
+    fn timeout(&self, now: Instant) -> bool {
+        return now - self.last_active_time > self.opts.tcp_idle_duration;
     }
 
     fn destroyed(&self) -> bool {
@@ -174,6 +188,7 @@ impl Connection {
     }
 
     fn ready(&mut self, event: &Event, poll: &Poll) {
+        self.last_active_time = Instant::now();
         match event.token().0 % CHANNEL_CNT {
             CHANNEL_CLIENT => {
                 if event.is_readable() {

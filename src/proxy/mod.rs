@@ -134,7 +134,8 @@ pub fn run(opts: &'static Opts) {
     let mut udp_server = UdpServer::new(udp_listener, opts);
 
     let mut events = Events::with_capacity(1024);
-    let mut last_check_time = Instant::now();
+    let mut last_udp_check_time = Instant::now();
+    let mut last_tcp_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
 
     let mut pool = IdlePool::new(opts, config, hostname);
@@ -146,10 +147,10 @@ pub fn run(opts: &'static Opts) {
             log::trace!("dispatch token:{}", event.token().0);
             match event.token() {
                 Token(TCP_LISTENER) => {
-                    tcp_server.accept(&event, &poll, &mut pool, &resolver);
+                    tcp_server.accept(event, &poll, &mut pool, &resolver);
                 }
                 Token(UDP_LISTENER) => {
-                    udp_server.accept(&event, &poll, &mut pool, &mut udp_cache, &resolver);
+                    udp_server.accept(event, &poll, &mut pool, &mut udp_cache, &resolver);
                 }
                 Token(RESOLVER) => {
                     resolver.consume(|_, ip| {
@@ -157,20 +158,24 @@ pub fn run(opts: &'static Opts) {
                     });
                 }
                 Token(i) if i % CHANNEL_CNT == CHANNEL_IDLE => {
-                    pool.ready(&event, &poll);
+                    pool.ready(event, &poll);
                 }
                 Token(i) if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.ready(&event, &poll, &mut udp_cache);
+                    udp_server.ready(event, &poll, &mut udp_cache);
                 }
                 _ => {
-                    tcp_server.ready(&event, &poll);
+                    tcp_server.ready(event, &poll);
                 }
             }
         }
         let now = Instant::now();
-        if now - last_check_time > opts.udp_idle_duration {
+        if now - last_tcp_check_time > Duration::from_secs(1) {
+            tcp_server.check_timeout(&poll, now);
+            last_tcp_check_time = now;
+        }
+        if now - last_udp_check_time > opts.udp_idle_duration {
             udp_cache.check_timeout();
-            last_check_time = now;
+            last_udp_check_time = now;
         }
     }
 }
