@@ -119,7 +119,8 @@ impl TcpServer {
     pub fn check_timeout(&mut self, poll: &Poll, now: Instant) {
         for (_, conn) in &mut self.conns {
             if conn.timeout(now) {
-                conn.shutdown(poll)
+                conn.shutdown(poll);
+                conn.server_conn.shutdown(poll);
             }
         }
     }
