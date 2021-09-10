@@ -1,4 +1,7 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use mio::{event::Event, net::TcpStream, Poll, Token};
 use rustls::{ClientConfig, ClientSession};
@@ -11,7 +14,6 @@ use crate::{
     sys,
     tls_conn::TlsConn,
 };
-use std::net::IpAddr;
 
 pub struct IdlePool {
     pool: Vec<TlsConn<ClientSession>>,
@@ -56,7 +58,7 @@ impl IdlePool {
         for _ in size..self.size {
             let conn = self.new_conn();
             if let Some(mut conn) = conn {
-                if conn.register(poll) {
+                if conn.setup(poll) {
                     self.pool.push(conn);
                 }
             } else {

@@ -236,19 +236,6 @@ impl<T: Session> TlsConn<T> {
         }
     }
 
-    pub fn register(&mut self, poll: &Poll) -> bool {
-        if let Err(err) = poll
-            .registry()
-            .register(&mut self.stream, self.token, self.interest)
-        {
-            log::warn!("connection:{} register server failed:{}", self.index(), err);
-            self.status = ConnStatus::Closing;
-            false
-        } else {
-            true
-        }
-    }
-
     pub fn closed(&self) -> bool {
         matches!(self.status, ConnStatus::Closed)
     }

@@ -1,4 +1,8 @@
-use std::{io::Write, net::SocketAddr, time::Instant};
+use std::{
+    io::Write,
+    net::{IpAddr, SocketAddr},
+    time::Instant,
+};
 
 use mio::{
     net::{TcpStream, UdpSocket},
@@ -19,7 +23,6 @@ use crate::{
     sys,
     tls_conn::TlsConn,
 };
-use std::net::IpAddr;
 
 enum Status {
     HandShake,
@@ -174,7 +177,7 @@ impl Connection {
     }
 
     pub fn setup(&mut self, poll: &Poll) -> bool {
-        self.proxy.register(poll)
+        self.proxy.setup(poll)
     }
 
     fn try_handshake(&mut self, buffer: &mut &[u8], resolver: &mut &mut DnsResolver) -> bool {
