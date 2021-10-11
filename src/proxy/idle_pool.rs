@@ -4,7 +4,7 @@ use std::{
 };
 
 use mio::{event::Event, net::TcpStream, Poll, Token};
-use rustls::{ClientConfig, ClientSession};
+use rustls::{ClientConfig, ClientConnection, ClientSession, ServerName};
 use webpki::DNSName;
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub struct IdlePool {
-    pool: Vec<TlsConn<ClientSession>>,
+    pool: Vec<TlsConn<ClientConnection>>,
     next_index: usize,
     size: usize,
     addr: SocketAddr,
@@ -24,11 +24,11 @@ pub struct IdlePool {
     port: u16,
     marker: u8,
     config: Arc<ClientConfig>,
-    hostname: DNSName,
+    hostname: ServerName,
 }
 
 impl IdlePool {
-    pub fn new(opts: &Opts, config: Arc<ClientConfig>, hostname: DNSName) -> IdlePool {
+    pub fn new(opts: &Opts, config: Arc<ClientConfig>, hostname: ServerName) -> IdlePool {
         IdlePool {
             size: opts.proxy_args().pool_size + 1,
             addr: opts.back_addr.unwrap(),
@@ -86,15 +86,22 @@ impl IdlePool {
             }
         };
         if let Some(server) = server {
-            let session = ClientSession::new(&self.config, self.hostname.as_ref());
-            let index = next_index(&mut self.next_index);
-            let conn = TlsConn::new(
-                index,
-                Token(index * CHANNEL_CNT + CHANNEL_IDLE),
-                session,
-                server,
-            );
-            Some(conn)
+            match ClientConnection::new(self.config.clone(), self.hostname.clone()) {
+                Ok(session) => {
+                    let index = next_index(&mut self.next_index);
+                    let conn = TlsConn::<ClientConnection>::new(
+                        index,
+                        Token(index * CHANNEL_CNT + CHANNEL_IDLE),
+                        session,
+                        server,
+                    );
+                    Some(conn)
+                }
+                Err(err) => {
+                    log::error!("create client connection failed:{}", err);
+                    None
+                }
+            }
         } else {
             None
         }

@@ -2,7 +2,7 @@ use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, time::In
 
 use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Poll, Token};
-use rustls::ClientSession;
+use rustls::ClientConnection;
 
 use crate::{
     config::Opts,
@@ -33,7 +33,7 @@ struct Connection {
     src_addr: SocketAddr,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
-    server_conn: TlsConn<ClientSession>,
+    server_conn: TlsConn<ClientConnection>,
     status: ConnStatus,
     client_time: Instant,
     socket: Rc<UdpSocket>,
@@ -153,7 +153,7 @@ impl UdpServer {
 impl Connection {
     fn new(
         index: usize,
-        server_conn: TlsConn<ClientSession>,
+        server_conn: TlsConn<ClientConnection>,
         src_addr: SocketAddr,
         socket: Rc<UdpSocket>,
         opts: &'static Opts,

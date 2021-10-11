@@ -11,7 +11,7 @@ use mio::{
     net::{TcpListener, TcpStream},
     Interest, Poll, Token,
 };
-use rustls::ClientSession;
+use rustls::ClientConnection;
 
 use crate::{
     config::Opts,
@@ -38,7 +38,7 @@ struct Connection {
     client_interest: Interest,
     status: ConnStatus,
     client_time: Instant,
-    server_conn: TlsConn<ClientSession>,
+    server_conn: TlsConn<ClientConnection>,
     opts: &'static Opts,
     last_active_time: Instant,
 }
@@ -129,7 +129,7 @@ impl TcpServer {
 impl Connection {
     fn new(
         index: usize,
-        server_conn: TlsConn<ClientSession>,
+        server_conn: TlsConn<ClientConnection>,
         dst_addr: SocketAddr,
         client: TcpStream,
         opts: &'static Opts,
@@ -324,7 +324,7 @@ impl Connection {
     }
 
     fn try_read_client(&mut self) {
-        if !tcp_util::tcp_read(
+        if !tcp_util::tcp_read_client(
             self.index,
             &self.client,
             &mut self.recv_buffer,

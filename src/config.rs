@@ -97,12 +97,14 @@ pub struct ServerArgs {
         about = "certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA"
     )]
     pub cert: String,
+
     #[clap(
         short,
         long,
         about = "private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format."
     )]
     pub key: String,
+
     #[clap(
         short,
         long,
@@ -110,6 +112,7 @@ pub struct ServerArgs {
         about = "http backend server address"
     )]
     pub remote_addr: String,
+
     #[clap(
         short,
         long,
@@ -117,6 +120,10 @@ pub struct ServerArgs {
         about = "time in seconds for dns query cache"
     )]
     pub dns_cache_time: u64,
+
+    #[clap(short, long, about = "check client auth")]
+    pub check_auth: bool,
+
     #[clap(short = 'n', long, about = "alpn protocol supported")]
     pub alpn: Vec<String>,
 }

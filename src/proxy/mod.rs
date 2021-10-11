@@ -1,5 +1,6 @@
 //! This module provides functions used in proxy mod.
 use std::{
+    convert::TryInto,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
@@ -9,9 +10,9 @@ use mio::{
     net::{TcpListener, UdpSocket},
     Events, Interest, Poll, Token,
 };
-use rustls::ClientConfig;
+use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use webpki::DNSNameRef;
+use webpki::{DNSNameRef, DnsNameRef};
 
 use crate::{
     config::Opts,
@@ -121,13 +122,23 @@ pub fn run(opts: &'static Opts) {
         .register(&mut udp_listener, Token(UDP_LISTENER), Interest::READABLE)
         .unwrap();
 
-    let hostname = DNSNameRef::try_from_ascii(opts.proxy_args().hostname.as_bytes())
+    let hostname = opts.proxy_args().hostname.as_str().try_into().unwrap();
+
+    let mut root_store = RootCertStore::empty();
+    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+        OwnedTrustAnchor::from_subject_spki_name_constraints(
+            ta.subject,
+            ta.spki,
+            ta.name_constraints,
+        )
+    }));
+    let mut config = ClientConfig::builder()
+        .with_safe_default_cipher_suites()
+        .with_safe_default_kx_groups()
+        .with_safe_default_protocol_versions()
         .unwrap()
-        .to_owned();
-    let mut config = ClientConfig::new();
-    config
-        .root_store
-        .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
     let config = Arc::new(config);
 
     let mut tcp_server = TcpServer::new(tcp_listener, opts);

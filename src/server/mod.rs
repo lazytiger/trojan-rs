@@ -7,13 +7,18 @@ use std::{
 
 use mio::{net::TcpListener, Events, Interest, Poll, Token};
 use rustls::{
-    internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys},
-    KeyLogFile, NoClientAuth, ServerConfig,
+    server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth},
+    KeyLogFile, RootCertStore, ServerConfig,
 };
+use rustls_pemfile::{certs, pkcs8_private_keys, read_one, rsa_private_keys, Item};
 
 pub use tls_server::TlsServer;
 
-use crate::{config::Opts, resolver::DnsResolver, server::tls_server::PollEvent};
+use crate::{
+    config::{Mode::Server, Opts},
+    resolver::DnsResolver,
+    server::tls_server::PollEvent,
+};
 
 mod connection;
 mod tcp_backend;
@@ -28,38 +33,64 @@ const CHANNEL_BACKEND: usize = 1;
 const RESOLVER: usize = 2;
 const LISTENER: usize = 1;
 
-fn init_config(opts: &Opts) -> Arc<ServerConfig> {
-    let mut config = ServerConfig::new(NoClientAuth::new());
-    config.key_log = Arc::new(KeyLogFile::new());
-    let cert_file = File::open(opts.server_args().cert.clone()).unwrap();
+fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
+    let cert_file = File::open(filename).unwrap();
     let mut buff_reader = BufReader::new(cert_file);
-    let cert_chain = certs(&mut buff_reader).unwrap();
-    let key_der = {
-        let key_file = File::open(opts.server_args().key.clone()).unwrap();
-        let mut buff_reader = BufReader::new(key_file);
-        let keys = pkcs8_private_keys(&mut buff_reader).unwrap();
-        if let Some(key) = keys.get(0) {
-            log::info!("pkcs8 private key found");
-            key.clone()
-        } else {
-            let key_file = File::open(opts.server_args().key.clone()).unwrap();
-            let mut buff_reader = BufReader::new(key_file);
-            let keys = rsa_private_keys(&mut buff_reader).unwrap();
-            if let Some(key) = keys.get(0) {
-                log::info!("rsa private key found");
-                key.clone()
-            } else {
-                panic!("no private key found");
-            }
+    certs(&mut buff_reader)
+        .unwrap()
+        .iter()
+        .map(|v| rustls::Certificate(v.clone()))
+        .collect()
+}
+
+fn load_private_key(filename: &str) -> rustls::PrivateKey {
+    let key_file = File::open(filename).unwrap();
+    let mut buff_reader = BufReader::new(key_file);
+    loop {
+        match read_one(&mut buff_reader).unwrap() {
+            Some(Item::RSAKey(key)) => return rustls::PrivateKey(key),
+            Some(Item::PKCS8Key(key)) => return rustls::PrivateKey(key),
+            None => break,
+            _ => {}
         }
+    }
+    panic!(
+        "no keys found in {:?} (encrypted keys not supported)",
+        filename
+    )
+}
+
+fn init_config(opts: &Opts) -> Arc<ServerConfig> {
+    let client_auth = if opts.server_args().check_auth {
+        let roots = load_certs(opts.server_args().cert.as_str());
+        let mut client_auth_roots = RootCertStore::empty();
+        for root in roots {
+            client_auth_roots.add(&root).unwrap();
+        }
+        AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots)
+    } else {
+        NoClientAuth::new()
     };
-    config.set_single_cert(cert_chain, key_der).unwrap();
+
+    let suits = rustls::ALL_CIPHER_SUITES.to_vec();
+    let certs = load_certs(opts.server_args().cert.as_str());
+    let private_key = load_private_key(opts.server_args().key.as_str());
+    let mut config = ServerConfig::builder()
+        .with_cipher_suites(&suits)
+        .with_safe_default_kx_groups()
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_client_cert_verifier(client_auth)
+        .with_single_cert_with_ocsp_and_sct(certs, private_key, vec![], vec![])
+        .unwrap();
+    config.key_log = Arc::new(KeyLogFile::new());
+
     let mut protocols: Vec<Vec<u8>> = Vec::new();
     for protocol in &opts.server_args().alpn {
         protocols.push(protocol.as_str().into());
     }
     if !protocols.is_empty() {
-        config.set_protocols(&protocols);
+        config.alpn_protocols = protocols;
     }
     Arc::new(config)
 }

@@ -2,7 +2,7 @@ use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::TcpStream, Interest, Poll, Token};
-use rustls::ServerSession;
+use rustls::{ServerConnection, ServerSession};
 
 use crate::{
     config::Opts,
@@ -36,8 +36,8 @@ impl TcpBackend {
             token,
         }
     }
-    fn do_read(&mut self, conn: &mut TlsConn<ServerSession>) {
-        if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
+    fn do_read(&mut self, conn: &mut TlsConn<ServerConnection>) {
+        if !tcp_util::tcp_read_server(self.index, &self.conn, &mut self.recv_buffer, conn) {
             self.status = ConnStatus::Closing;
         }
 

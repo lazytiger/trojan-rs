@@ -1,11 +1,12 @@
 use std::{
     collections::HashMap,
+    net::IpAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use mio::{event::Event, net::TcpListener, Poll, Token};
-use rustls::{ServerConfig, ServerSession};
+use rustls::{Error, ServerConfig, ServerConnection, ServerSession};
 
 use crate::{
     config::Opts,
@@ -14,7 +15,6 @@ use crate::{
     sys,
     tls_conn::{ConnStatus, TlsConn},
 };
-use std::net::IpAddr;
 
 pub enum PollEvent<'a> {
     Network(&'a Event),
@@ -85,11 +85,17 @@ impl TlsServer {
                         log::error!("set nodelay failed:{}", err);
                         continue;
                     }
-                    let session = ServerSession::new(&self.config);
+                    let session = match ServerConnection::new(self.config.clone()) {
+                        Ok(session) => session,
+                        Err(err) => {
+                            log::error!("create server connection failed:{}", err);
+                            continue;
+                        }
+                    };
                     let index = self.next_index();
                     let mut conn = Connection::new(
                         index,
-                        TlsConn::new(
+                        TlsConn::<ServerConnection>::new(
                             index,
                             Token(index * CHANNEL_CNT + CHANNEL_PROXY),
                             session,

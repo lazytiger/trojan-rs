@@ -12,16 +12,17 @@ mio = { version = "0.7", features = ["net", "os-poll"] }
 log = "0.4"
 chrono = "0.4"
 libc = "0.2"
-rustls = "0.19"
+rustls = "0.20"
 rust-crypto = "0.2"
-bytes = "1.0"
+bytes = "1.1"
 dns-lookup = "1.0"
 cfg-if = "1.0"
-webpki-roots = "0.21"
-webpki = { version = "0.21" }
+webpki-roots = "0.22"
+webpki = "0.22"
 mio-extras = "2.0"
 socket2 = "0.4"
 rayon = "1.5"
+rustls-pemfile = "0.2"
 
 [dependencies.fern]
 version = "0.6"
