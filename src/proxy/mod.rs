@@ -12,7 +12,6 @@ use mio::{
 };
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use webpki::{DNSNameRef, DnsNameRef};
 
 use crate::{
     config::Opts,
@@ -132,7 +131,7 @@ pub fn run(opts: &'static Opts) {
             ta.name_constraints,
         )
     }));
-    let mut config = ClientConfig::builder()
+    let config = ClientConfig::builder()
         .with_safe_default_cipher_suites()
         .with_safe_default_kx_groups()
         .with_safe_default_protocol_versions()

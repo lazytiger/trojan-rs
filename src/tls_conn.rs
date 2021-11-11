@@ -40,6 +40,7 @@ impl Session for ClientConnection {
 
 macro_rules! impl_tls {
     ($conn:ty) => {
+        #[allow(dead_code)]
         impl TlsConn<$conn> {
             pub fn new(
                 index: usize,

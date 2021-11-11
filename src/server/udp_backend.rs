@@ -2,7 +2,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
-use rustls::ServerSession;
+use rustls::ServerConnection;
 
 use crate::{
     config::Opts,
@@ -110,7 +110,7 @@ impl UdpBackend {
         }
     }
 
-    fn do_read(&mut self, conn: &mut TlsConn<ServerSession>) {
+    fn do_read(&mut self, conn: &mut TlsConn<ServerConnection>) {
         loop {
             match self.socket.recv_from(self.recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
@@ -163,7 +163,7 @@ impl UdpBackend {
 }
 
 impl Backend for UdpBackend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerConnection>) {
         if event.is_readable() {
             self.do_read(conn);
         }

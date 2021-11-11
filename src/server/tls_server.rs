@@ -6,7 +6,7 @@ use std::{
 };
 
 use mio::{event::Event, net::TcpListener, Poll, Token};
-use rustls::{Error, ServerConfig, ServerConnection, ServerSession};
+use rustls::{ServerConfig, ServerConnection};
 
 use crate::{
     config::Opts,
@@ -39,7 +39,7 @@ pub struct TlsServer {
 }
 
 pub trait Backend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>);
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerConnection>);
     fn dispatch(&mut self, data: &[u8]);
     fn reregister(&mut self, poll: &Poll, readable: bool);
     fn check_close(&mut self, poll: &Poll);

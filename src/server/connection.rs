@@ -8,7 +8,7 @@ use mio::{
     net::{TcpStream, UdpSocket},
     Interest, Poll, Token,
 };
-use rustls::ServerSession;
+use rustls::ServerConnection;
 
 use crate::{
     config::Opts,
@@ -33,7 +33,7 @@ enum Status {
 
 pub struct Connection {
     index: usize,
-    proxy: TlsConn<ServerSession>,
+    proxy: TlsConn<ServerConnection>,
     status: Status,
     sock5_addr: Sock5Address,
     command: u8,
@@ -46,7 +46,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(index: usize, proxy: TlsConn<ServerSession>, opts: &'static Opts) -> Connection {
+    pub fn new(index: usize, proxy: TlsConn<ServerConnection>, opts: &'static Opts) -> Connection {
         Connection {
             index,
             proxy,

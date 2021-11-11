@@ -10,15 +10,11 @@ use rustls::{
     server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth},
     KeyLogFile, RootCertStore, ServerConfig,
 };
-use rustls_pemfile::{certs, pkcs8_private_keys, read_one, rsa_private_keys, Item};
+use rustls_pemfile::{certs, read_one, Item};
 
 pub use tls_server::TlsServer;
 
-use crate::{
-    config::{Mode::Server, Opts},
-    resolver::DnsResolver,
-    server::tls_server::PollEvent,
-};
+use crate::{config::Opts, resolver::DnsResolver, server::tls_server::PollEvent};
 
 mod connection;
 mod tcp_backend;

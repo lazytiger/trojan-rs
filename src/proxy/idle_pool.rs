@@ -4,8 +4,7 @@ use std::{
 };
 
 use mio::{event::Event, net::TcpStream, Poll, Token};
-use rustls::{ClientConfig, ClientConnection, ClientSession, ServerName};
-use webpki::DNSName;
+use rustls::{ClientConfig, ClientConnection, ServerName};
 
 use crate::{
     config::Opts,
@@ -48,7 +47,11 @@ impl IdlePool {
         }
     }
 
-    pub fn get(&mut self, poll: &Poll, resolver: &DnsResolver) -> Option<TlsConn<ClientSession>> {
+    pub fn get(
+        &mut self,
+        poll: &Poll,
+        resolver: &DnsResolver,
+    ) -> Option<TlsConn<ClientConnection>> {
         self.alloc(poll, resolver);
         self.pool.pop()
     }
@@ -67,7 +70,7 @@ impl IdlePool {
         }
     }
 
-    fn new_conn(&mut self) -> Option<TlsConn<ClientSession>> {
+    fn new_conn(&mut self) -> Option<TlsConn<ClientConnection>> {
         let server = match TcpStream::connect(self.addr) {
             Ok(server) => {
                 if let Err(err) = sys::set_mark(&server, self.marker) {
