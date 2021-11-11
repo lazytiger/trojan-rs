@@ -1,6 +1,5 @@
-use clap::Clap;
-
 use crate::config::{Mode, Opts};
+use clap::Parser;
 
 mod config;
 mod proto;

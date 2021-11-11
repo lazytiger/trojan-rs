@@ -4,10 +4,10 @@ use std::{
     time::Duration,
 };
 
-use clap::Clap;
+use clap::Parser;
 use crypto::{digest::Digest, sha2::Sha224};
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(
     version = "0.7.3",
     author = "Hoping White",
@@ -66,7 +66,7 @@ pub struct Opts {
     pub tcp_idle_duration: Duration,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub enum Mode {
     #[clap(name = "proxy", about = "run in proxy mode")]
     Proxy(ProxyArgs),
@@ -74,7 +74,7 @@ pub enum Mode {
     Server(ServerArgs),
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct ProxyArgs {
     #[clap(short = 'H', long, about = "trojan server hostname")]
     pub hostname: String,
@@ -89,7 +89,7 @@ pub struct ProxyArgs {
     pub pool_size: usize,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct ServerArgs {
     #[clap(
         short,

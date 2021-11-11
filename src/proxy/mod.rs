@@ -46,7 +46,7 @@ const CHANNEL_UDP: usize = 1;
 /// channel index for client tcp connection
 const CHANNEL_CLIENT: usize = 2;
 /// channel index for remote tcp connection
-const CHANNEL_TCP: usize = 3;
+const CHANNEL_REMOTE: usize = 3;
 
 /// Returns next index based on the current one.
 /// If the next index overflows (larger than [`MAX_INDEX`]),

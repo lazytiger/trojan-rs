@@ -16,7 +16,9 @@ use rustls::ClientConnection;
 use crate::{
     config::Opts,
     proto::{TrojanRequest, CONNECT, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
-    proxy::{idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
+    proxy::{
+        idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_REMOTE, MIN_INDEX,
+    },
     resolver::DnsResolver,
     sys, tcp_util,
     tls_conn::{ConnStatus, TlsConn},
@@ -75,7 +77,10 @@ impl TcpServer {
                             log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
                             if let Some(mut conn) = pool.get(poll, resolver) {
                                 let index = next_index(&mut self.next_id);
-                                conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP));
+                                conn.reset_index(
+                                    index,
+                                    Token(index * CHANNEL_CNT + CHANNEL_REMOTE),
+                                );
                                 let mut conn =
                                     Connection::new(index, conn, dst_addr, client, self.opts);
                                 if conn.setup(poll) {
@@ -199,7 +204,7 @@ impl Connection {
                     self.try_send_client(&[]);
                 }
             }
-            CHANNEL_TCP => {
+            CHANNEL_REMOTE => {
                 if event.is_readable() {
                     self.try_read_server();
                 }
