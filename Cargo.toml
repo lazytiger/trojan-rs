@@ -23,6 +23,10 @@ mio-extras = "2.0"
 socket2 = "0.4"
 rayon = "1.5"
 rustls-pemfile = "0.2"
+async-std = { version = "1.10", features = ["attributes"] }
+async-std-resolver = "0.20"
+lazy_static = "1.4"
+derive_more = "0.99"
 
 [dependencies.fern]
 version = "0.6"

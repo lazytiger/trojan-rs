@@ -50,6 +50,14 @@ pub struct Opts {
     )]
     pub tcp_idle_timeout: u64,
 
+    #[clap(
+        short = 'b',
+        long,
+        default_value = "1024",
+        about = "max buffer size for channel"
+    )]
+    pub max_channel_buffer: usize,
+
     #[clap(skip)]
     sha_pass: String,
     #[clap(skip)]
@@ -247,4 +255,12 @@ pub fn setup_logger(logfile: &Option<String>, level: u8) {
         builder = builder.chain(std::io::stdout());
     }
     builder.apply().unwrap();
+}
+
+lazy_static::lazy_static! {
+    pub static ref OPTIONS:Opts = {
+        let mut opts = Opts::parse();
+        opts.setup();
+        opts
+    };
 }

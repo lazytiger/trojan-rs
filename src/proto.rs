@@ -13,11 +13,11 @@ pub const MAX_PACKET_SIZE: usize = 1450;
 /// buffer size for connections
 pub const MAX_BUFFER_SIZE: usize = 1024 * 1024;
 /// protocol code for IPV4 type
-const IPV4: u8 = 0x01;
+pub const IPV4: u8 = 0x01;
 /// protocol code for DOMAIN type
-const DOMAIN: u8 = 0x03;
+pub const DOMAIN: u8 = 0x03;
 /// protocol code for IPV6 type
-const IPV6: u8 = 0x04;
+pub const IPV6: u8 = 0x04;
 
 /// Trojan Socks5 address enum
 pub enum Sock5Address {
@@ -228,7 +228,7 @@ impl<'a> UdpAssociate<'a> {
     }
 }
 
-fn to_u16(buffer: &[u8]) -> u16 {
+pub(crate) fn to_u16(buffer: &[u8]) -> u16 {
     (buffer[0] as u16) << 8 | buffer[1] as u16
 }
 
