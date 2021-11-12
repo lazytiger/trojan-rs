@@ -225,13 +225,9 @@ impl TlsConn {
     pub fn setup(&mut self, poll: &Poll) -> bool {
         if let Err(err) = poll
             .registry()
-            .reregister(&mut self.stream, self.token, self.interest)
+            .register(&mut self.stream, self.token, self.interest)
         {
-            log::warn!(
-                "connection:{} reregister server failed:{}",
-                self.index(),
-                err
-            );
+            log::warn!("connection:{} register server failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;
             false
         } else {
