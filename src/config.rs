@@ -248,3 +248,11 @@ pub fn setup_logger(logfile: &Option<String>, level: u8) {
     }
     builder.apply().unwrap();
 }
+
+lazy_static::lazy_static! {
+    pub static ref OPTIONS:Opts = {
+        let mut opts = Opts::parse();
+        opts.setup();
+        opts
+    };
+}
