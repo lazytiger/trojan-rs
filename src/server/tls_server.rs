@@ -5,10 +5,10 @@ use std::{
 };
 
 use mio::{event::Event, net::TcpListener, Poll, Token};
-use rustls::{ServerConfig, ServerSession};
+use rustls::{ServerConfig, ServerConnection};
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     resolver::DnsResolver,
     server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
     sys,
@@ -35,11 +35,10 @@ pub struct TlsServer {
     config: Arc<ServerConfig>,
     next_id: usize,
     conns: HashMap<usize, Connection>,
-    opts: &'static Opts,
 }
 
 pub trait Backend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>);
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn);
     fn dispatch(&mut self, data: &[u8]);
     fn reregister(&mut self, poll: &Poll, readable: bool);
     fn check_close(&mut self, poll: &Poll);
@@ -59,13 +58,12 @@ pub trait Backend {
 }
 
 impl TlsServer {
-    pub fn new(listener: TcpListener, config: Arc<ServerConfig>, opts: &'static Opts) -> TlsServer {
+    pub fn new(listener: TcpListener, config: Arc<ServerConfig>) -> TlsServer {
         TlsServer {
             listener,
             config,
             next_id: MIN_INDEX,
             conns: HashMap::new(),
-            opts,
         }
     }
 
@@ -78,24 +76,23 @@ impl TlsServer {
                         self.next_id,
                         addr
                     );
-                    if let Err(err) = sys::set_mark(&stream, self.opts.marker) {
+                    if let Err(err) = sys::set_mark(&stream, OPTIONS.marker) {
                         log::error!("set mark failed:{}", err);
                         continue;
                     } else if let Err(err) = stream.set_nodelay(true) {
                         log::error!("set nodelay failed:{}", err);
                         continue;
                     }
-                    let session = ServerSession::new(&self.config);
+                    let session = ServerConnection::new(self.config.clone()).unwrap();
                     let index = self.next_index();
                     let mut conn = Connection::new(
                         index,
                         TlsConn::new(
                             index,
                             Token(index * CHANNEL_CNT + CHANNEL_PROXY),
-                            session,
+                            rustls::Connection::Server(session),
                             stream,
                         ),
-                        self.opts,
                     );
                     if conn.setup(poll) {
                         self.conns.insert(index, conn);

@@ -8,10 +8,9 @@ use mio::{
     net::{TcpStream, UdpSocket},
     Interest, Poll, Token,
 };
-use rustls::ServerSession;
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proto::{Sock5Address, TrojanRequest, CONNECT},
     resolver::DnsResolver,
     server::{
@@ -33,7 +32,7 @@ enum Status {
 
 pub struct Connection {
     index: usize,
-    proxy: TlsConn<ServerSession>,
+    proxy: TlsConn,
     status: Status,
     sock5_addr: Sock5Address,
     command: u8,
@@ -42,11 +41,10 @@ pub struct Connection {
     closing: bool,
     target_addr: Option<SocketAddr>,
     data: Vec<u8>,
-    opts: &'static Opts,
 }
 
 impl Connection {
-    pub fn new(index: usize, proxy: TlsConn<ServerSession>, opts: &'static Opts) -> Connection {
+    pub fn new(index: usize, proxy: TlsConn) -> Connection {
         Connection {
             index,
             proxy,
@@ -58,7 +56,6 @@ impl Connection {
             closing: false,
             target_addr: None,
             data: Vec::new(),
-            opts,
         }
     }
 
@@ -181,7 +178,7 @@ impl Connection {
     }
 
     fn try_handshake(&mut self, buffer: &mut &[u8], resolver: &mut &mut DnsResolver) -> bool {
-        if let Some(request) = TrojanRequest::parse(buffer, self.opts) {
+        if let Some(request) = TrojanRequest::parse(buffer) {
             self.command = request.command;
             self.sock5_addr = request.address;
             *buffer = request.payload;
@@ -218,9 +215,9 @@ impl Connection {
                 log::debug!(
                     "connection:{} got default target address:{}",
                     self.index,
-                    self.opts.back_addr.as_ref().unwrap()
+                    OPTIONS.back_addr.as_ref().unwrap()
                 );
-                self.target_addr = self.opts.back_addr;
+                self.target_addr = OPTIONS.back_addr;
             }
         }
         true
@@ -285,7 +282,7 @@ impl Connection {
         );
         match TcpStream::connect(self.target_addr.clone().unwrap()) {
             Ok(mut tcp_target) => {
-                if let Err(err) = sys::set_mark(&tcp_target, self.opts.marker) {
+                if let Err(err) = sys::set_mark(&tcp_target, OPTIONS.marker) {
                     log::error!("connection:{} set mark failed:{}", self.index, err);
                     self.closing = true;
                     return false;
@@ -302,8 +299,7 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let mut backend =
-                    TcpBackend::new(tcp_target, self.index, self.target_token(), self.opts);
+                let mut backend = TcpBackend::new(tcp_target, self.index, self.target_token());
                 if !self.data.is_empty() {
                     backend.dispatch(self.data.as_slice());
                     self.data.clear();
@@ -322,14 +318,14 @@ impl Connection {
 
     fn try_setup_udp_target(&mut self, poll: &Poll) -> bool {
         log::debug!("connection:{} got udp connection", self.index);
-        match UdpSocket::bind(self.opts.empty_addr.clone().unwrap()) {
+        match UdpSocket::bind(OPTIONS.empty_addr.clone().unwrap()) {
             Err(err) => {
                 log::error!("connection:{} bind udp socket failed:{}", self.index, err);
                 self.closing = true;
                 return false;
             }
             Ok(mut udp_target) => {
-                if let Err(err) = sys::set_mark(&udp_target, self.opts.marker) {
+                if let Err(err) = sys::set_mark(&udp_target, OPTIONS.marker) {
                     log::error!("connection:{} set mark failed:{}", self.index, err);
                     self.closing = true;
                     return false;
@@ -347,8 +343,7 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let backend =
-                    UdpBackend::new(udp_target, self.index, self.target_token(), self.opts);
+                let backend = UdpBackend::new(udp_target, self.index, self.target_token());
                 self.backend.replace(Box::new(backend));
             }
         }

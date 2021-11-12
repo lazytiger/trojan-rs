@@ -2,10 +2,9 @@ use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::TcpStream, Interest, Poll, Token};
-use rustls::ServerSession;
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
     server::tls_server::Backend,
     tcp_util,
@@ -24,10 +23,10 @@ pub struct TcpBackend {
 }
 
 impl TcpBackend {
-    pub fn new(conn: TcpStream, index: usize, token: Token, opts: &'static Opts) -> TcpBackend {
+    pub fn new(conn: TcpStream, index: usize, token: Token) -> TcpBackend {
         TcpBackend {
             conn,
-            timeout: opts.tcp_idle_duration,
+            timeout: OPTIONS.tcp_idle_duration,
             status: ConnStatus::Established,
             interest: Interest::READABLE,
             send_buffer: BytesMut::new(),
@@ -36,7 +35,7 @@ impl TcpBackend {
             token,
         }
     }
-    fn do_read(&mut self, conn: &mut TlsConn<ServerSession>) {
+    fn do_read(&mut self, conn: &mut TlsConn) {
         if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
             self.status = ConnStatus::Closing;
         }
@@ -74,7 +73,7 @@ impl TcpBackend {
 }
 
 impl Backend for TcpBackend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn) {
         if event.is_readable() {
             self.do_read(conn);
         }

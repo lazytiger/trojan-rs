@@ -2,15 +2,14 @@ use std::io::{Read, Write};
 
 use bytes::BytesMut;
 use mio::net::TcpStream;
-use rustls::Session;
 
 use crate::tls_conn::TlsConn;
 
-pub fn tcp_read<T: Session>(
+pub fn tcp_read(
     index: usize,
     mut conn: &TcpStream,
     recv_buf: &mut Vec<u8>,
-    server_conn: &mut TlsConn<T>,
+    server_conn: &mut TlsConn,
 ) -> bool {
     loop {
         match conn.read(recv_buf.as_mut_slice()) {

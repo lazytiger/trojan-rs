@@ -2,10 +2,9 @@ use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, time::In
 
 use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Poll, Token};
-use rustls::ClientSession;
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proto::{
         TrojanRequest, UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE,
         UDP_ASSOCIATE,
@@ -25,7 +24,6 @@ pub struct UdpServer {
     src_map: HashMap<SocketAddr, usize>,
     next_id: usize,
     recv_buffer: Vec<u8>,
-    opts: &'static Opts,
 }
 
 struct Connection {
@@ -33,25 +31,23 @@ struct Connection {
     src_addr: SocketAddr,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
-    server_conn: TlsConn<ClientSession>,
+    server_conn: TlsConn,
     status: ConnStatus,
     client_time: Instant,
     socket: Rc<UdpSocket>,
     dst_addr: SocketAddr,
     bytes_read: usize,
     bytes_sent: usize,
-    opts: &'static Opts,
 }
 
 impl UdpServer {
-    pub fn new(udp_listener: UdpSocket, opts: &'static Opts) -> UdpServer {
+    pub fn new(udp_listener: UdpSocket) -> UdpServer {
         UdpServer {
             udp_listener,
             conns: HashMap::new(),
             src_map: HashMap::new(),
             next_id: MIN_INDEX,
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
-            opts,
         }
     }
 
@@ -87,7 +83,7 @@ impl UdpServer {
                             log::debug!(
                                 "address:{} not found, connecting to {}",
                                 src_addr,
-                                self.opts.back_addr.as_ref().unwrap()
+                                OPTIONS.back_addr.as_ref().unwrap()
                             );
                             if let Some(mut conn) = pool.get(poll, resolver) {
                                 if let Some(socket) = udp_cache.get_socket(dst_addr) {
@@ -96,8 +92,7 @@ impl UdpServer {
                                         index,
                                         Token(index * CHANNEL_CNT + CHANNEL_UDP),
                                     );
-                                    let mut conn =
-                                        Connection::new(index, conn, src_addr, socket, self.opts);
+                                    let mut conn = Connection::new(index, conn, src_addr, socket);
                                     if conn.setup(poll) {
                                         let _ = self.conns.insert(index, conn);
                                         self.src_map.insert(src_addr, index);
@@ -153,10 +148,9 @@ impl UdpServer {
 impl Connection {
     fn new(
         index: usize,
-        server_conn: TlsConn<ClientSession>,
+        server_conn: TlsConn,
         src_addr: SocketAddr,
         socket: Rc<UdpSocket>,
-        opts: &'static Opts,
     ) -> Connection {
         let dst_addr = socket.local_addr().unwrap();
         Connection {
@@ -171,7 +165,6 @@ impl Connection {
             client_time: Instant::now(),
             bytes_read: 0,
             bytes_sent: 0,
-            opts,
         }
     }
 
@@ -185,8 +178,7 @@ impl Connection {
         TrojanRequest::generate(
             &mut self.recv_buffer,
             UDP_ASSOCIATE,
-            self.opts.empty_addr.as_ref().unwrap(),
-            self.opts,
+            OPTIONS.empty_addr.as_ref().unwrap(),
         );
         self.server_conn.write_session(self.recv_buffer.as_ref())
     }

@@ -1,7 +1,10 @@
-use std::{io::ErrorKind, net::Shutdown};
+use std::{
+    io::{ErrorKind, Read, Write},
+    net::Shutdown,
+};
 
 use mio::{net::TcpStream, Interest, Poll, Token};
-use rustls::{internal::msgs::fragmenter::MAX_FRAGMENT_LEN, Session};
+use rustls::{internal::msgs::fragmenter::MAX_FRAGMENT_LEN, Connection};
 
 use crate::proto::MAX_BUFFER_SIZE;
 
@@ -13,8 +16,8 @@ pub enum ConnStatus {
     Closed,
 }
 
-pub struct TlsConn<T: Session> {
-    session: T,
+pub struct TlsConn {
+    session: Connection,
     stream: TcpStream,
     interest: Interest,
     index: usize,
@@ -23,8 +26,8 @@ pub struct TlsConn<T: Session> {
     buffer_len: usize,
 }
 
-impl<T: Session> TlsConn<T> {
-    pub fn new(index: usize, token: Token, session: T, stream: TcpStream) -> TlsConn<T> {
+impl TlsConn {
+    pub fn new(index: usize, token: Token, session: Connection, stream: TcpStream) -> TlsConn {
         TlsConn {
             index,
             token,
@@ -119,7 +122,7 @@ impl<T: Session> TlsConn<T> {
         }
 
         let mut buffer = Vec::new();
-        if let Err(err) = self.session.read_to_end(&mut buffer) {
+        if let Err(err) = self.session.reader().read_to_end(&mut buffer) {
             log::warn!(
                 "connection:{} read from session failed:{}",
                 self.index(),
@@ -164,7 +167,7 @@ impl<T: Session> TlsConn<T> {
     }
 
     pub fn write_session(&mut self, data: &[u8]) -> bool {
-        if let Err(err) = self.session.write_all(data) {
+        if let Err(err) = self.session.writer().write_all(data) {
             self.status = ConnStatus::Closing;
             log::warn!(
                 "connection:{} write data to server session failed:{}",

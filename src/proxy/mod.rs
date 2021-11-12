@@ -1,5 +1,6 @@
 //! This module provides functions used in proxy mod.
 use std::{
+    convert::TryInto,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
@@ -9,12 +10,11 @@ use mio::{
     net::{TcpListener, UdpSocket},
     Events, Interest, Poll, Token,
 };
-use rustls::ClientConfig;
+use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use webpki::DNSNameRef;
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proxy::{
         idle_pool::IdlePool, tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer,
     },
@@ -103,11 +103,11 @@ pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
     Some(socket)
 }
 
-pub fn run(opts: &'static Opts) {
-    let addr: SocketAddr = opts.local_addr.parse().unwrap();
+pub fn run() {
+    let addr: SocketAddr = OPTIONS.local_addr.parse().unwrap();
     let mut tcp_listener = TcpListener::from_std(new_socket(addr, false).unwrap().into());
     let mut udp_listener = UdpSocket::from_std(new_socket(addr, true).unwrap().into());
-    if let Err(err) = sys::set_mark(&udp_listener, opts.marker) {
+    if let Err(err) = sys::set_mark(&udp_listener, OPTIONS.marker) {
         log::error!("udp socket set mark failed:{}", err);
         return;
     }
@@ -121,24 +121,34 @@ pub fn run(opts: &'static Opts) {
         .register(&mut udp_listener, Token(UDP_LISTENER), Interest::READABLE)
         .unwrap();
 
-    let hostname = DNSNameRef::try_from_ascii(opts.proxy_args().hostname.as_bytes())
+    let hostname = OPTIONS.proxy_args().hostname.as_str().try_into().unwrap();
+
+    let mut root_store = RootCertStore::empty();
+    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+        OwnedTrustAnchor::from_subject_spki_name_constraints(
+            ta.subject,
+            ta.spki,
+            ta.name_constraints,
+        )
+    }));
+    let config = ClientConfig::builder()
+        .with_safe_default_cipher_suites()
+        .with_safe_default_kx_groups()
+        .with_safe_default_protocol_versions()
         .unwrap()
-        .to_owned();
-    let mut config = ClientConfig::new();
-    config
-        .root_store
-        .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
     let config = Arc::new(config);
 
-    let mut tcp_server = TcpServer::new(tcp_listener, opts);
-    let mut udp_server = UdpServer::new(udp_listener, opts);
+    let mut tcp_server = TcpServer::new(tcp_listener);
+    let mut udp_server = UdpServer::new(udp_listener);
 
     let mut events = Events::with_capacity(1024);
     let mut last_udp_check_time = Instant::now();
     let mut last_tcp_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
 
-    let mut pool = IdlePool::new(opts, config, hostname);
+    let mut pool = IdlePool::new(config, hostname);
     pool.init(&poll, &resolver);
 
     loop {
@@ -173,7 +183,7 @@ pub fn run(opts: &'static Opts) {
             tcp_server.check_timeout(&poll, now);
             last_tcp_check_time = now;
         }
-        if now - last_udp_check_time > opts.udp_idle_duration {
+        if now - last_udp_check_time > OPTIONS.udp_idle_duration {
             udp_cache.check_timeout();
             last_udp_check_time = now;
         }

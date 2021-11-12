@@ -2,10 +2,9 @@ use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
-use rustls::ServerSession;
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proto::{UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
     server::tls_server::Backend,
     tls_conn::{ConnStatus, TlsConn},
@@ -27,7 +26,7 @@ pub struct UdpBackend {
 }
 
 impl UdpBackend {
-    pub fn new(socket: UdpSocket, index: usize, token: Token, opts: &'static Opts) -> UdpBackend {
+    pub fn new(socket: UdpSocket, index: usize, token: Token) -> UdpBackend {
         let remote_addr = socket.local_addr().unwrap();
         UdpBackend {
             socket,
@@ -38,7 +37,7 @@ impl UdpBackend {
             token,
             status: ConnStatus::Established,
             interest: Interest::READABLE,
-            timeout: opts.udp_idle_duration,
+            timeout: OPTIONS.udp_idle_duration,
             bytes_read: 0,
             bytes_sent: 0,
             remote_addr,
@@ -110,7 +109,7 @@ impl UdpBackend {
         }
     }
 
-    fn do_read(&mut self, conn: &mut TlsConn<ServerSession>) {
+    fn do_read(&mut self, conn: &mut TlsConn) {
         loop {
             match self.socket.recv_from(self.recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
@@ -163,7 +162,7 @@ impl UdpBackend {
 }
 
 impl Backend for UdpBackend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerSession>) {
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn) {
         if event.is_readable() {
             self.do_read(conn);
         }

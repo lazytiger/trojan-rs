@@ -11,10 +11,9 @@ use mio::{
     net::{TcpListener, TcpStream},
     Interest, Poll, Token,
 };
-use rustls::ClientSession;
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proto::{TrojanRequest, CONNECT, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
     proxy::{idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
     resolver::DnsResolver,
@@ -26,7 +25,6 @@ pub struct TcpServer {
     tcp_listener: TcpListener,
     conns: HashMap<usize, Connection>,
     next_id: usize,
-    opts: &'static Opts,
 }
 
 struct Connection {
@@ -38,18 +36,16 @@ struct Connection {
     client_interest: Interest,
     status: ConnStatus,
     client_time: Instant,
-    server_conn: TlsConn<ClientSession>,
-    opts: &'static Opts,
+    server_conn: TlsConn,
     last_active_time: Instant,
 }
 
 impl TcpServer {
-    pub fn new(tcp_listener: TcpListener, opts: &'static Opts) -> TcpServer {
+    pub fn new(tcp_listener: TcpListener) -> TcpServer {
         TcpServer {
             tcp_listener,
             conns: HashMap::new(),
             next_id: MIN_INDEX,
-            opts,
         }
     }
 
@@ -63,7 +59,7 @@ impl TcpServer {
         loop {
             match self.tcp_listener.accept() {
                 Ok((client, src_addr)) => {
-                    if let Err(err) = sys::set_mark(&client, self.opts.marker) {
+                    if let Err(err) = sys::set_mark(&client, OPTIONS.marker) {
                         log::error!("set mark failed:{}", err);
                         continue;
                     } else if let Err(err) = client.set_nodelay(true) {
@@ -76,8 +72,7 @@ impl TcpServer {
                             if let Some(mut conn) = pool.get(poll, resolver) {
                                 let index = next_index(&mut self.next_id);
                                 conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP));
-                                let mut conn =
-                                    Connection::new(index, conn, dst_addr, client, self.opts);
+                                let mut conn = Connection::new(index, conn, dst_addr, client);
                                 if conn.setup(poll) {
                                     self.conns.insert(conn.index(), conn);
                                 } else {
@@ -129,10 +124,9 @@ impl TcpServer {
 impl Connection {
     fn new(
         index: usize,
-        server_conn: TlsConn<ClientSession>,
+        server_conn: TlsConn,
         dst_addr: SocketAddr,
         client: TcpStream,
-        opts: &'static Opts,
     ) -> Connection {
         Connection {
             index,
@@ -145,12 +139,11 @@ impl Connection {
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             client_time: Instant::now(),
             last_active_time: Instant::now(),
-            opts,
         }
     }
 
     fn timeout(&self, now: Instant) -> bool {
-        return now - self.last_active_time > self.opts.tcp_idle_duration;
+        return now - self.last_active_time > OPTIONS.tcp_idle_duration;
     }
 
     fn destroyed(&self) -> bool {
@@ -165,7 +158,7 @@ impl Connection {
         self.server_conn.setup(poll);
         let mut request = BytesMut::new();
         self.client_interest = Interest::READABLE;
-        TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr, self.opts);
+        TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr);
         let token = self.client_token();
         if !self.server_conn.write_session(request.as_ref()) {
             false
