@@ -225,6 +225,19 @@ impl TlsConn {
     pub fn setup(&mut self, poll: &Poll) -> bool {
         if let Err(err) = poll
             .registry()
+            .reregister(&mut self.stream, self.token, self.interest)
+        {
+            log::warn!("connection:{} register server failed:{}", self.index(), err);
+            self.status = ConnStatus::Closing;
+            false
+        } else {
+            true
+        }
+    }
+
+    pub fn register(&mut self, poll: &Poll) -> bool {
+        if let Err(err) = poll
+            .registry()
             .register(&mut self.stream, self.token, self.interest)
         {
             log::warn!("connection:{} register server failed:{}", self.index(), err);

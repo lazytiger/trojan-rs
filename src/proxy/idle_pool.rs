@@ -57,7 +57,7 @@ impl IdlePool {
         for _ in size..self.size {
             let conn = self.new_conn();
             if let Some(mut conn) = conn {
-                if conn.setup(poll) {
+                if conn.register(poll) {
                     self.pool.push(conn);
                 }
             } else {
