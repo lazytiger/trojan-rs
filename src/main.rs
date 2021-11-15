@@ -8,6 +8,7 @@ mod server;
 mod sys;
 mod tcp_util;
 mod tls_conn;
+mod types;
 
 fn main() {
     config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);
