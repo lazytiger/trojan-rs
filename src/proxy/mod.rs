@@ -20,6 +20,7 @@ use crate::{
     },
     resolver::DnsResolver,
     sys,
+    types::Result,
 };
 
 mod idle_pool;
@@ -60,7 +61,7 @@ fn next_index(index: &mut usize) -> usize {
     current
 }
 
-pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
+pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Result<Socket> {
     let domain = if addr.is_ipv4() {
         Domain::IPV4
     } else {
@@ -71,36 +72,15 @@ pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Option<Socket> {
     } else {
         (Type::STREAM, Protocol::TCP)
     };
-    let socket = match Socket::new(domain, typ, Some(protocol)) {
-        Ok(socket) => socket,
-        Err(err) => {
-            log::error!("new socket address:{} udp:{} failed:{}", addr, is_udp, err);
-            return None;
-        }
-    };
-    if let Err(err) = sys::set_socket_opts(addr.is_ipv4(), is_udp, &socket) {
-        log::error!("set_socket_opts failed:{}", err);
-        return None;
-    }
-    if let Err(err) = socket.set_nonblocking(true) {
-        log::error!("set_nonblocking failed:{}", err);
-        return None;
-    }
-    if let Err(err) = socket.set_reuse_address(true) {
-        log::error!("set_reuse_address failed:{}", err);
-        return None;
-    }
-    if let Err(err) = socket.bind(&SockAddr::from(addr)) {
-        log::error!("bind address:{} failed:{}", addr, err);
-        return None;
-    }
+    let socket = Socket::new(domain, typ, Some(protocol))?;
+    sys::set_socket_opts(addr.is_ipv4(), is_udp, &socket)?;
+    socket.set_nonblocking(true)?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&SockAddr::from(addr))?;
     if !is_udp {
-        if let Err(err) = socket.listen(1024) {
-            log::error!("socket listen failed:{}", err);
-            return None;
-        }
+        socket.listen(1024)?;
     }
-    Some(socket)
+    Ok(socket)
 }
 
 pub fn run(opts: &'static Opts) {

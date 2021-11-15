@@ -9,6 +9,7 @@ mod server;
 mod sys;
 mod tcp_util;
 mod tls_conn;
+mod types;
 
 fn main() {
     let mut opts: Opts = Opts::parse();

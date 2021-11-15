@@ -20,13 +20,17 @@ impl UdpSvrCache {
             Some(socket.clone())
         } else {
             log::debug!("socket:{} not found, create a new one", addr);
-            if let Some(socket) = new_socket(addr, true) {
-                let socket = UdpSocket::from_std(socket.into());
-                let socket = Rc::new(socket);
-                self.conns.insert(addr, socket.clone());
-                Some(socket)
-            } else {
-                None
+            match new_socket(addr, true) {
+                Ok(socket) => {
+                    let socket = UdpSocket::from_std(socket.into());
+                    let socket = Rc::new(socket);
+                    self.conns.insert(addr, socket.clone());
+                    Some(socket)
+                }
+                Err(err) => {
+                    log::error!("new socket failed:{}", err);
+                    None
+                }
             }
         }
     }
