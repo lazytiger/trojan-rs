@@ -16,6 +16,7 @@ use crate::{
     resolver::DnsResolver,
     sys,
     tls_conn::{ConnStatus, TlsConn},
+    types::{Result, TrojanError},
 };
 
 pub struct UdpServer {
@@ -53,82 +54,81 @@ impl UdpServer {
 
     pub fn accept(
         &mut self,
-        event: &Event,
         poll: &Poll,
         pool: &mut IdlePool,
         udp_cache: &mut UdpSvrCache,
         resolver: &DnsResolver,
     ) {
-        if event.is_readable() {
-            loop {
-                match sys::recv_from_with_destination(
-                    &self.udp_listener,
-                    self.recv_buffer.as_mut_slice(),
-                ) {
-                    Ok((size, src_addr, dst_addr)) => {
-                        log::debug!(
-                            "udp received {} byte from {} to {}",
-                            size,
-                            src_addr,
-                            dst_addr
-                        );
-                        let index = if let Some(index) = self.src_map.get(&src_addr) {
-                            log::debug!(
-                                "connection:{} already exists for address{}",
-                                index,
-                                src_addr
-                            );
-                            *index
-                        } else {
-                            log::debug!(
-                                "address:{} not found, connecting to {}",
-                                src_addr,
-                                OPTIONS.back_addr.as_ref().unwrap()
-                            );
-                            if let Some(mut conn) = pool.get(poll, resolver) {
-                                if let Some(socket) = udp_cache.get_socket(dst_addr) {
-                                    let index = next_index(&mut self.next_id);
-                                    conn.reset_index(
-                                        index,
-                                        Token(index * CHANNEL_CNT + CHANNEL_UDP),
-                                    );
-                                    let mut conn = Connection::new(index, conn, src_addr, socket);
-                                    if conn.setup(poll) {
-                                        let _ = self.conns.insert(index, conn);
-                                        self.src_map.insert(src_addr, index);
-                                        log::debug!("connection:{} is ready", index);
-                                        index
-                                    } else {
-                                        conn.shutdown(poll);
-                                        continue;
-                                    }
-                                } else {
-                                    conn.shutdown(poll);
-                                    continue;
-                                }
-                            } else {
-                                log::error!("allocate connection failed");
-                                continue;
-                            }
-                        };
-                        if let Some(conn) = self.conns.get_mut(&index) {
-                            let payload = &self.recv_buffer.as_slice()[..size];
-                            conn.send_request(payload, &dst_addr);
-                        } else {
-                            log::error!("impossible, connection should be found now");
-                        }
-                    }
-                    Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                        log::debug!("udp server got no more data");
-                        break;
-                    }
-                    Err(err) => {
-                        log::error!("recv from udp listener failed:{}", err);
+        loop {
+            if let Err(err) = self.accept_once(poll, pool, udp_cache, resolver) {
+                if let TrojanError::StdIoError(err) = &err {
+                    if err.kind() == ErrorKind::WouldBlock {
                         break;
                     }
                 }
+                log::error!("accept udp data failed:{}", err);
             }
         }
+    }
+
+    fn accept_once(
+        &mut self,
+        poll: &Poll,
+        pool: &mut IdlePool,
+        udp_cache: &mut UdpSvrCache,
+        resolver: &DnsResolver,
+    ) -> Result<()> {
+        let (size, src_addr, dst_addr) =
+            sys::recv_from_with_destination(&self.udp_listener, self.recv_buffer.as_mut_slice())?;
+        log::debug!(
+            "udp received {} byte from {} to {}",
+            size,
+            src_addr,
+            dst_addr
+        );
+        let index = if let Some(index) = self.src_map.get(&src_addr) {
+            log::debug!(
+                "connection:{} already exists for address{}",
+                index,
+                src_addr
+            );
+            *index
+        } else {
+            log::debug!(
+                "address:{} not found, connecting to {}",
+                src_addr,
+                OPTIONS.back_addr.as_ref().unwrap()
+            );
+            if let Some(mut conn) = pool.get(poll, resolver) {
+                if let Some(socket) = udp_cache.get_socket(dst_addr) {
+                    let index = next_index(&mut self.next_id);
+                    conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
+                    let mut conn = Connection::new(index, conn, src_addr, socket);
+                    if conn.setup(poll) {
+                        let _ = self.conns.insert(index, conn);
+                        self.src_map.insert(src_addr, index);
+                        log::debug!("connection:{} is ready", index);
+                        index
+                    } else {
+                        conn.shutdown(poll);
+                        return Ok(());
+                    }
+                } else {
+                    conn.shutdown(poll);
+                    return Ok(());
+                }
+            } else {
+                log::error!("allocate connection failed");
+                return Ok(());
+            }
+        };
+        if let Some(conn) = self.conns.get_mut(&index) {
+            let payload = &self.recv_buffer.as_slice()[..size];
+            conn.send_request(payload, &dst_addr);
+        } else {
+            log::error!("impossible, connection should be found now");
+        }
+        Ok(())
     }
 
     pub fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {

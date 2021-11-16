@@ -19,6 +19,7 @@ use crate::{
     resolver::DnsResolver,
     sys, tcp_util,
     tls_conn::{ConnStatus, TlsConn},
+    types::{Result, TrojanError},
 };
 
 pub struct TcpServer {
@@ -49,55 +50,43 @@ impl TcpServer {
         }
     }
 
-    pub fn accept(
+    pub fn accept(&mut self, poll: &Poll, pool: &mut IdlePool, resolver: &DnsResolver) {
+        loop {
+            if let Err(err) = self.accept_once(poll, pool, resolver) {
+                if let TrojanError::StdIoError(err) = &err {
+                    if err.kind() == ErrorKind::WouldBlock {
+                        break;
+                    }
+                }
+                log::error!("tcp server accept failed:{}", err);
+            }
+        }
+    }
+
+    fn accept_once(
         &mut self,
-        _event: &Event,
         poll: &Poll,
         pool: &mut IdlePool,
         resolver: &DnsResolver,
-    ) {
-        loop {
-            match self.tcp_listener.accept() {
-                Ok((client, src_addr)) => {
-                    if let Err(err) = sys::set_mark(&client, OPTIONS.marker) {
-                        log::error!("set mark failed:{}", err);
-                        continue;
-                    } else if let Err(err) = client.set_nodelay(true) {
-                        log::error!("set nodelay failed:{}", err);
-                        continue;
-                    }
-                    match sys::get_oridst_addr(&client) {
-                        Ok(dst_addr) => {
-                            log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
-                            if let Some(mut conn) = pool.get(poll, resolver) {
-                                let index = next_index(&mut self.next_id);
-                                conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP));
-                                let mut conn = Connection::new(index, conn, dst_addr, client);
-                                if conn.setup(poll) {
-                                    self.conns.insert(conn.index(), conn);
-                                } else {
-                                    conn.shutdown(poll);
-                                    continue;
-                                }
-                            } else {
-                                log::error!("alloc new connection failed")
-                            }
-                        }
-                        Err(err) => {
-                            log::error!("get original destination address failed:{}", err);
-                            continue;
-                        }
-                    }
-                }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    break;
-                }
-                Err(err) => {
-                    log::error!("accept failed:{}", err);
-                    continue;
-                }
+    ) -> Result<()> {
+        let (client, src_addr) = self.tcp_listener.accept()?;
+        sys::set_mark(&client, OPTIONS.marker)?;
+        client.set_nodelay(true)?;
+        let dst_addr = sys::get_oridst_addr(&client)?;
+        log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
+        if let Some(mut conn) = pool.get(poll, resolver) {
+            let index = next_index(&mut self.next_id);
+            conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP));
+            let mut conn = Connection::new(index, conn, dst_addr, client);
+            if conn.setup(poll) {
+                self.conns.insert(conn.index(), conn);
+            } else {
+                conn.shutdown(poll);
             }
+        } else {
+            log::error!("alloc new connection failed")
         }
+        Ok(())
     }
 
     pub fn ready(&mut self, event: &Event, poll: &Poll) {
