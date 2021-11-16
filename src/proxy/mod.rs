@@ -137,10 +137,10 @@ pub fn run(opts: &'static Opts) {
             log::trace!("dispatch token:{}", event.token().0);
             match event.token() {
                 Token(TCP_LISTENER) => {
-                    tcp_server.accept(event, &poll, &mut pool, &resolver);
+                    tcp_server.accept(&poll, &mut pool, &resolver);
                 }
                 Token(UDP_LISTENER) => {
-                    udp_server.accept(event, &poll, &mut pool, &mut udp_cache, &resolver);
+                    udp_server.accept(&poll, &mut pool, &mut udp_cache, &resolver);
                 }
                 Token(RESOLVER) => {
                     resolver.consume(|_, ip| {
