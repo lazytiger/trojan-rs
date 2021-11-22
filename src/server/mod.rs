@@ -110,7 +110,7 @@ pub fn run() {
         for event in &events {
             match event.token() {
                 Token(LISTENER) => {
-                    server.accept(&poll);
+                    server.accept();
                 }
                 Token(RESOLVER) => {
                     resolver.consume(|token, ip| {

@@ -14,7 +14,7 @@ use mio::{
 
 use crate::{
     config::OPTIONS,
-    proto::{TrojanRequest, CONNECT, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
+    proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
     proxy::{idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
     resolver::DnsResolver,
     sys, tcp_util,
@@ -144,7 +144,6 @@ impl Connection {
     }
 
     fn setup(&mut self, poll: &Poll) -> bool {
-        self.server_conn.setup(poll);
         let mut request = BytesMut::new();
         self.client_interest = Interest::READABLE;
         TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr);
@@ -198,17 +197,12 @@ impl Connection {
 
         self.reregister(poll);
         self.check_close(poll);
-        self.server_conn.reregister(poll, self.readable());
         self.server_conn.check_close(poll);
         if self.closed() && !self.server_conn.closed() {
             self.server_conn.shutdown(poll);
         } else if !self.closed() && self.server_conn.closed() {
             self.shutdown(poll);
         }
-    }
-
-    fn readable(&self) -> bool {
-        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 
     fn shutdown(&mut self, poll: &Poll) {

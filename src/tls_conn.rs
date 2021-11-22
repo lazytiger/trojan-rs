@@ -19,7 +19,6 @@ pub enum ConnStatus {
 pub struct TlsConn {
     session: Connection,
     stream: TcpStream,
-    interest: Interest,
     index: usize,
     token: Token,
     status: ConnStatus,
@@ -33,7 +32,6 @@ impl TlsConn {
             token,
             session,
             stream,
-            interest: Interest::READABLE | Interest::WRITABLE,
             status: ConnStatus::Established,
             buffer_len: 0,
         }
@@ -57,9 +55,7 @@ impl TlsConn {
             self.check_close(poll);
             return;
         }
-        self.interest = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
-        self.setup(poll);
     }
 
     pub fn close_now(&mut self, poll: &Poll) {
@@ -184,62 +180,12 @@ impl TlsConn {
         }
     }
 
-    pub fn reregister(&mut self, poll: &Poll, readable: bool) {
-        match self.status {
-            ConnStatus::Closing => {
-                let _ = poll.registry().deregister(&mut self.stream);
-            }
-            ConnStatus::Closed => {}
-            _ => {
-                let mut changed = false;
-                if self.session.wants_write() && !self.interest.is_writable() {
-                    self.interest |= Interest::WRITABLE;
-                    changed = true;
-                }
-                if !self.session.wants_write() && self.interest.is_writable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::WRITABLE)
-                        .unwrap_or(Interest::READABLE);
-                    changed = true;
-                }
-                if readable && !self.interest.is_readable() {
-                    self.interest |= Interest::READABLE;
-                    changed = true;
-                }
-
-                if !readable && self.interest.is_readable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::READABLE)
-                        .unwrap_or(Interest::WRITABLE);
-                    changed = true;
-                }
-                if changed {
-                    self.setup(poll);
-                }
-            }
-        }
-    }
-
-    pub fn setup(&mut self, poll: &Poll) -> bool {
-        if let Err(err) = poll
-            .registry()
-            .reregister(&mut self.stream, self.token, self.interest)
-        {
-            log::warn!("connection:{} register server failed:{}", self.index(), err);
-            self.status = ConnStatus::Closing;
-            false
-        } else {
-            true
-        }
-    }
-
     pub fn register(&mut self, poll: &Poll) -> bool {
-        if let Err(err) = poll
-            .registry()
-            .register(&mut self.stream, self.token, self.interest)
-        {
+        if let Err(err) = poll.registry().register(
+            &mut self.stream,
+            self.token,
+            Interest::READABLE | Interest::WRITABLE,
+        ) {
             log::warn!("connection:{} register server failed:{}", self.index(), err);
             self.status = ConnStatus::Closing;
             false

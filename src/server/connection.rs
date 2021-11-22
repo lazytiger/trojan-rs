@@ -112,7 +112,6 @@ impl Connection {
             return;
         }
 
-        self.proxy.reregister(poll, self.proxy_readable());
         self.proxy.check_close(poll);
         if let Some(backend) = &mut self.backend {
             backend.reregister(poll, self.proxy.writable());
@@ -124,14 +123,6 @@ impl Connection {
                 //backend is closing, proxy is ok, register proxy with write only
                 self.proxy.shutdown(poll);
             }
-        }
-    }
-
-    fn proxy_readable(&self) -> bool {
-        if let Some(backend) = &self.backend {
-            backend.writable()
-        } else {
-            true
         }
     }
 
@@ -171,10 +162,6 @@ impl Connection {
         if let Some(buffer) = self.proxy.do_read() {
             self.dispatch(buffer.as_slice(), poll, resolver);
         }
-    }
-
-    pub fn setup(&mut self, poll: &Poll) -> bool {
-        self.proxy.setup(poll)
     }
 
     fn try_handshake(&mut self, buffer: &mut &[u8], resolver: &mut &mut DnsResolver) -> bool {

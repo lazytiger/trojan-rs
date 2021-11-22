@@ -67,7 +67,7 @@ impl TlsServer {
         }
     }
 
-    pub fn accept(&mut self, poll: &Poll) {
+    pub fn accept(&mut self) {
         loop {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
@@ -85,7 +85,7 @@ impl TlsServer {
                     }
                     let session = ServerConnection::new(self.config.clone()).unwrap();
                     let index = self.next_index();
-                    let mut conn = Connection::new(
+                    let conn = Connection::new(
                         index,
                         TlsConn::new(
                             index,
@@ -94,11 +94,7 @@ impl TlsServer {
                             stream,
                         ),
                     );
-                    if conn.setup(poll) {
-                        self.conns.insert(index, conn);
-                    } else {
-                        conn.close_now(poll);
-                    }
+                    self.conns.insert(index, conn);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     log::debug!("no more connection to be accepted");

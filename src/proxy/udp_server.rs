@@ -5,10 +5,7 @@ use mio::{event::Event, net::UdpSocket, Poll, Token};
 
 use crate::{
     config::OPTIONS,
-    proto::{
-        TrojanRequest, UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE,
-        UDP_ASSOCIATE,
-    },
+    proto::{TrojanRequest, UdpAssociate, UdpParseResult, MAX_PACKET_SIZE, UDP_ASSOCIATE},
     proxy::{
         idle_pool::IdlePool, next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP,
         MIN_INDEX,
@@ -104,7 +101,7 @@ impl UdpServer {
                     let index = next_index(&mut self.next_id);
                     conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
                     let mut conn = Connection::new(index, conn, src_addr, socket);
-                    if conn.setup(poll) {
+                    if conn.setup() {
                         let _ = self.conns.insert(index, conn);
                         self.src_map.insert(src_addr, index);
                         log::debug!("connection:{} is ready", index);
@@ -172,8 +169,7 @@ impl Connection {
         token.0 / CHANNEL_CNT
     }
 
-    fn setup(&mut self, poll: &Poll) -> bool {
-        self.server_conn.setup(poll);
+    fn setup(&mut self) -> bool {
         self.recv_buffer.clear();
         TrojanRequest::generate(
             &mut self.recv_buffer,
@@ -228,23 +224,16 @@ impl Connection {
         if event.is_readable() {
             self.try_read_server(udp_cache);
         }
-        if event.is_writable() {
-            self.try_send_server();
-        }
 
-        self.reregister(poll);
+        self.try_send_server();
+
         self.check_close(poll);
-        self.server_conn.reregister(poll, self.readable());
         self.server_conn.check_close(poll);
         if self.closed() && !self.server_conn.closed() {
             self.server_conn.shutdown(poll);
         } else if !self.closed() && self.server_conn.closed() {
             self.shutdown(poll);
         }
-    }
-
-    fn readable(&self) -> bool {
-        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 
     fn check_close(&mut self, poll: &Poll) {
@@ -265,8 +254,6 @@ impl Connection {
             self.bytes_sent
         );
     }
-
-    fn reregister(&mut self, _: &Poll) {}
 
     fn try_send_server(&mut self) {
         self.server_conn.do_send();
