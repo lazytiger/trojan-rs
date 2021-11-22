@@ -1,7 +1,7 @@
 use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
-use mio::{event::Event, net::TcpStream, Interest, Poll, Token};
+use mio::{event::Event, net::TcpStream, Poll};
 
 use crate::{
     config::OPTIONS,
@@ -14,25 +14,21 @@ use crate::{
 pub struct TcpBackend {
     conn: TcpStream,
     status: ConnStatus,
-    interest: Interest,
     index: usize,
-    token: Token,
     timeout: Duration,
     send_buffer: BytesMut,
     recv_buffer: Vec<u8>,
 }
 
 impl TcpBackend {
-    pub fn new(conn: TcpStream, index: usize, token: Token) -> TcpBackend {
+    pub fn new(conn: TcpStream, index: usize) -> TcpBackend {
         TcpBackend {
             conn,
             timeout: OPTIONS.tcp_idle_duration,
             status: ConnStatus::Established,
-            interest: Interest::READABLE,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             index,
-            token,
         }
     }
     fn do_read(&mut self, conn: &mut TlsConn) {
@@ -56,20 +52,6 @@ impl TcpBackend {
             }
         }
     }
-
-    fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll
-            .registry()
-            .reregister(&mut self.conn, self.token, self.interest)
-        {
-            log::error!(
-                "connection:{} reregister tcp target failed:{}",
-                self.index,
-                err
-            );
-            self.status = ConnStatus::Closing;
-        }
-    }
 }
 
 impl Backend for TcpBackend {
@@ -90,48 +72,6 @@ impl Backend for TcpBackend {
             self.send_buffer.extend_from_slice(buffer);
             let buffer = self.send_buffer.split();
             self.do_send(buffer.as_ref());
-        }
-    }
-
-    fn reregister(&mut self, poll: &Poll, readable: bool) {
-        match self.status {
-            ConnStatus::Closing => {
-                let _ = poll.registry().deregister(&mut self.conn);
-            }
-            ConnStatus::Closed => {}
-            _ => {
-                let mut changed = false;
-                if !self.send_buffer.is_empty() && !self.interest.is_writable() {
-                    self.interest |= Interest::WRITABLE;
-                    changed = true;
-                    log::debug!("connection:{} add writable to tcp target", self.index);
-                }
-                if self.send_buffer.is_empty() && self.interest.is_writable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::WRITABLE)
-                        .unwrap_or(Interest::READABLE);
-                    changed = true;
-                    log::debug!("connection:{} remove writable from tcp target", self.index);
-                }
-                if readable && !self.interest.is_readable() {
-                    self.interest |= Interest::READABLE;
-                    log::debug!("connection:{} add readable to tcp target", self.index);
-                    changed = true;
-                }
-                if !readable && self.interest.is_readable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::READABLE)
-                        .unwrap_or(Interest::WRITABLE);
-                    log::debug!("connection:{} remove readable from tcp target", self.index);
-                    changed = true;
-                }
-
-                if changed {
-                    self.setup(poll);
-                }
-            }
         }
     }
 
@@ -158,10 +98,7 @@ impl Backend for TcpBackend {
             return;
         }
 
-        self.interest = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
-        self.setup(poll);
-        self.check_close(poll);
     }
 
     fn writable(&self) -> bool {

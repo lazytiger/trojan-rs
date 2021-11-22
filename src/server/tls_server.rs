@@ -40,7 +40,6 @@ pub struct TlsServer {
 pub trait Backend {
     fn ready(&mut self, event: &Event, conn: &mut TlsConn);
     fn dispatch(&mut self, data: &[u8]);
-    fn reregister(&mut self, poll: &Poll, readable: bool);
     fn check_close(&mut self, poll: &Poll);
     fn closing(&self) -> bool {
         matches!(self.status(), ConnStatus::Closing)
@@ -67,7 +66,7 @@ impl TlsServer {
         }
     }
 
-    pub fn accept(&mut self) {
+    pub fn accept(&mut self, poll: &Poll) {
         loop {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
@@ -85,16 +84,18 @@ impl TlsServer {
                     }
                     let session = ServerConnection::new(self.config.clone()).unwrap();
                     let index = self.next_index();
-                    let conn = Connection::new(
+                    let mut tls_conn = TlsConn::new(
                         index,
-                        TlsConn::new(
-                            index,
-                            Token(index * CHANNEL_CNT + CHANNEL_PROXY),
-                            rustls::Connection::Server(session),
-                            stream,
-                        ),
+                        Token(index * CHANNEL_CNT + CHANNEL_PROXY),
+                        rustls::Connection::Server(session),
+                        stream,
                     );
-                    self.conns.insert(index, conn);
+                    if tls_conn.register(poll) {
+                        let conn = Connection::new(index, tls_conn);
+                        self.conns.insert(index, conn);
+                    } else {
+                        tls_conn.close_now(poll);
+                    }
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     log::debug!("no more connection to be accepted");

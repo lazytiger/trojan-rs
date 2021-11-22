@@ -114,7 +114,6 @@ impl Connection {
 
         self.proxy.check_close(poll);
         if let Some(backend) = &mut self.backend {
-            backend.reregister(poll, self.proxy.writable());
             backend.check_close(poll);
             if self.proxy.closed() && !backend.closed() {
                 //proxy is closing, backend is ok, register backend with write only
@@ -267,7 +266,7 @@ impl Connection {
             self.index,
             self.target_addr.unwrap()
         );
-        match TcpStream::connect(self.target_addr.clone().unwrap()) {
+        match TcpStream::connect(self.target_addr.unwrap()) {
             Ok(mut tcp_target) => {
                 if let Err(err) = sys::set_mark(&tcp_target, OPTIONS.marker) {
                     log::error!("connection:{} set mark failed:{}", self.index, err);
@@ -276,7 +275,7 @@ impl Connection {
                 } else if let Err(err) = poll.registry().register(
                     &mut tcp_target,
                     self.target_token(),
-                    Interest::READABLE,
+                    Interest::READABLE | Interest::WRITABLE,
                 ) {
                     log::error!("connection:{} register target failed:{}", self.index, err);
                     self.closing = true;
@@ -286,7 +285,7 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let mut backend = TcpBackend::new(tcp_target, self.index, self.target_token());
+                let mut backend = TcpBackend::new(tcp_target, self.index);
                 if !self.data.is_empty() {
                     backend.dispatch(self.data.as_slice());
                     self.data.clear();
@@ -305,7 +304,7 @@ impl Connection {
 
     fn try_setup_udp_target(&mut self, poll: &Poll) -> bool {
         log::debug!("connection:{} got udp connection", self.index);
-        match UdpSocket::bind(OPTIONS.empty_addr.clone().unwrap()) {
+        match UdpSocket::bind(OPTIONS.empty_addr.unwrap()) {
             Err(err) => {
                 log::error!("connection:{} bind udp socket failed:{}", self.index, err);
                 self.closing = true;
@@ -320,7 +319,7 @@ impl Connection {
                 if let Err(err) = poll.registry().register(
                     &mut udp_target,
                     self.target_token(),
-                    Interest::READABLE,
+                    Interest::READABLE | Interest::WRITABLE,
                 ) {
                     log::error!(
                         "connection:{} register udp target failed:{}",
@@ -330,7 +329,7 @@ impl Connection {
                     self.closing = true;
                     return false;
                 }
-                let backend = UdpBackend::new(udp_target, self.index, self.target_token());
+                let backend = UdpBackend::new(udp_target, self.index);
                 self.backend.replace(Box::new(backend));
             }
         }

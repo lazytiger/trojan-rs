@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
-use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
+use mio::{event::Event, net::UdpSocket, Poll};
 
 use crate::{
     config::OPTIONS,
@@ -16,9 +16,7 @@ pub struct UdpBackend {
     recv_body: Vec<u8>,
     recv_head: BytesMut,
     index: usize,
-    token: Token,
     status: ConnStatus,
-    interest: Interest,
     timeout: Duration,
     bytes_read: usize,
     bytes_sent: usize,
@@ -26,21 +24,19 @@ pub struct UdpBackend {
 }
 
 impl UdpBackend {
-    pub fn new(socket: UdpSocket, index: usize, token: Token) -> UdpBackend {
+    pub fn new(socket: UdpSocket, index: usize) -> UdpBackend {
         let remote_addr = socket.local_addr().unwrap();
         UdpBackend {
             socket,
+            index,
+            remote_addr,
             send_buffer: Default::default(),
             recv_body: vec![0u8; MAX_PACKET_SIZE],
             recv_head: Default::default(),
-            index,
-            token,
             status: ConnStatus::Established,
-            interest: Interest::READABLE,
             timeout: OPTIONS.udp_idle_duration,
             bytes_read: 0,
             bytes_sent: 0,
-            remote_addr,
         }
     }
 
@@ -145,20 +141,6 @@ impl UdpBackend {
         }
         conn.do_send();
     }
-
-    fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll
-            .registry()
-            .reregister(&mut self.socket, self.token, self.interest)
-        {
-            log::error!(
-                "connection:{} reregister udp target failed:{}",
-                self.index,
-                err
-            );
-            self.status = ConnStatus::Closing;
-        }
-    }
 }
 
 impl Backend for UdpBackend {
@@ -178,48 +160,6 @@ impl Backend for UdpBackend {
             self.send_buffer.extend_from_slice(buffer);
             let buffer = self.send_buffer.split();
             self.do_send(buffer.as_ref());
-        }
-    }
-
-    fn reregister(&mut self, poll: &Poll, readable: bool) {
-        match self.status {
-            ConnStatus::Closing => {
-                let _ = poll.registry().deregister(&mut self.socket);
-            }
-            ConnStatus::Closed => {}
-            _ => {
-                let mut changed = false;
-                if !self.send_buffer.is_empty() && !self.interest.is_writable() {
-                    self.interest |= Interest::WRITABLE;
-                    changed = true;
-                    log::debug!("connection:{} add writable to udp target", self.index);
-                }
-                if self.send_buffer.is_empty() && self.interest.is_writable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::WRITABLE)
-                        .unwrap_or(Interest::READABLE);
-                    changed = true;
-                    log::debug!("connection:{} remove writable from udp target", self.index);
-                }
-                if readable && !self.interest.is_readable() {
-                    self.interest |= Interest::READABLE;
-                    log::debug!("connection:{} add readable to udp target", self.index);
-                    changed = true;
-                }
-                if !readable && self.interest.is_readable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::READABLE)
-                        .unwrap_or(Interest::WRITABLE);
-                    log::debug!("connection:{} remove readable to udp target", self.index);
-                    changed = true;
-                }
-
-                if changed {
-                    self.setup(poll);
-                }
-            }
         }
     }
 
@@ -251,10 +191,7 @@ impl Backend for UdpBackend {
             self.check_close(poll);
             return;
         }
-        self.interest = Interest::WRITABLE;
         self.status = ConnStatus::Shutdown;
-        self.setup(poll);
-        self.check_close(poll);
     }
 
     fn writable(&self) -> bool {

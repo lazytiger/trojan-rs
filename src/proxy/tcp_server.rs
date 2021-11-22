@@ -80,7 +80,7 @@ impl TcpServer {
             if conn.setup(poll) {
                 self.conns.insert(conn.index(), conn);
             } else {
-                conn.shutdown(poll);
+                conn.close_now(poll);
             }
         } else {
             log::error!("alloc new connection failed")
@@ -219,6 +219,7 @@ impl Connection {
     }
 
     fn close_now(&mut self, poll: &Poll) {
+        self.server_conn.close_now(poll);
         let _ = self.client.shutdown(Shutdown::Both);
         let _ = poll.registry().deregister(&mut self.client);
         self.status = ConnStatus::Closed;
