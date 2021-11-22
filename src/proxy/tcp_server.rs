@@ -34,7 +34,6 @@ struct Connection {
     client: TcpStream,
     recv_buffer: Vec<u8>,
     send_buffer: BytesMut,
-    client_interest: Interest,
     status: ConnStatus,
     client_time: Instant,
     server_conn: TlsConn,
@@ -122,7 +121,6 @@ impl Connection {
             dst_addr,
             client,
             server_conn,
-            client_interest: Interest::READABLE,
             status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
@@ -132,7 +130,7 @@ impl Connection {
     }
 
     fn timeout(&self, now: Instant) -> bool {
-        return now - self.last_active_time > OPTIONS.tcp_idle_duration;
+        now - self.last_active_time > OPTIONS.tcp_idle_duration
     }
 
     fn destroyed(&self) -> bool {
@@ -145,15 +143,15 @@ impl Connection {
 
     fn setup(&mut self, poll: &Poll) -> bool {
         let mut request = BytesMut::new();
-        self.client_interest = Interest::READABLE;
         TrojanRequest::generate(&mut request, CONNECT, &self.dst_addr);
         let token = self.client_token();
         if !self.server_conn.write_session(request.as_ref()) {
             false
-        } else if let Err(err) =
-            poll.registry()
-                .register(&mut self.client, token, self.client_interest)
-        {
+        } else if let Err(err) = poll.registry().register(
+            &mut self.client,
+            token,
+            Interest::READABLE | Interest::WRITABLE,
+        ) {
             log::warn!("connection:{} register client failed:{}", self.index(), err);
             false
         } else {
@@ -176,17 +174,15 @@ impl Connection {
                 if event.is_readable() {
                     self.try_read_client();
                 }
-                if event.is_writable() {
-                    self.try_send_client(&[]);
-                }
+
+                self.try_send_client(&[]);
             }
             CHANNEL_TCP => {
                 if event.is_readable() {
                     self.try_read_server();
                 }
-                if event.is_writable() {
-                    self.try_send_server();
-                }
+
+                self.try_send_server();
             }
             _ => {
                 log::error!("invalid token found in tcp listener");
@@ -195,7 +191,6 @@ impl Connection {
             }
         }
 
-        self.reregister(poll);
         self.check_close(poll);
         self.server_conn.check_close(poll);
         if self.closed() && !self.server_conn.closed() {
@@ -212,18 +207,7 @@ impl Connection {
             return;
         }
 
-        self.client_interest = Interest::WRITABLE;
-        let token = self.client_token();
-        if let Err(err) = poll
-            .registry()
-            .reregister(&mut self.client, token, self.client_interest)
-        {
-            log::warn!("connection:{} register client failed:{}", self.index(), err);
-            self.status = ConnStatus::Closing;
-            self.check_close(poll);
-        } else {
-            self.status = ConnStatus::Shutdown;
-        }
+        self.status = ConnStatus::Shutdown;
     }
 
     fn check_close(&mut self, poll: &Poll) {
@@ -243,56 +227,6 @@ impl Connection {
             self.dst_addr,
             secs
         );
-    }
-
-    fn reregister(&mut self, poll: &Poll) {
-        match self.status {
-            ConnStatus::Closing => {
-                let _ = poll.registry().deregister(&mut self.client);
-            }
-            ConnStatus::Closed => {}
-            _ => {
-                let mut changed = false;
-                if !self.send_buffer.is_empty() && !self.client_interest.is_writable() {
-                    self.client_interest |= Interest::WRITABLE;
-                    changed = true;
-                }
-                if self.send_buffer.is_empty() && self.client_interest.is_writable() {
-                    self.client_interest = self
-                        .client_interest
-                        .remove(Interest::WRITABLE)
-                        .unwrap_or(Interest::READABLE);
-                    changed = true;
-                }
-                if self.server_conn.writable() && !self.client_interest.is_readable() {
-                    self.client_interest |= Interest::READABLE;
-                    changed = true;
-                }
-                if !self.server_conn.writable() && self.client_interest.is_readable() {
-                    self.client_interest = self
-                        .client_interest
-                        .remove(Interest::READABLE)
-                        .unwrap_or(Interest::WRITABLE);
-                    changed = true;
-                }
-
-                if changed {
-                    let token = self.client_token();
-                    if let Err(err) =
-                        poll.registry()
-                            .reregister(&mut self.client, token, self.client_interest)
-                    {
-                        log::error!(
-                            "connection:{} reregister client failed:{}",
-                            self.index(),
-                            err
-                        );
-                        self.status = ConnStatus::Closing;
-                        return;
-                    }
-                }
-            }
-        }
     }
 
     fn client_token(&self) -> Token {
