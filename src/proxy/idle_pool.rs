@@ -132,10 +132,7 @@ impl IdlePool {
                 if event.is_readable() && conn.do_read().is_some() {
                     log::error!("found data in https handshake phase");
                 }
-                if event.is_writable() {
-                    conn.do_send();
-                }
-                conn.reregister(poll, true);
+                conn.do_send();
                 conn.check_close(poll);
                 if conn.closed() {
                     self.pool.remove(i);
