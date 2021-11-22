@@ -174,15 +174,17 @@ impl Connection {
                 if event.is_readable() {
                     self.try_read_client();
                 }
-
-                self.try_send_client(&[]);
+                if event.is_writable() {
+                    self.try_send_client(&[]);
+                }
             }
             CHANNEL_TCP => {
                 if event.is_readable() {
                     self.try_read_server();
                 }
-
-                self.try_send_server();
+                if event.is_writable() {
+                    self.try_send_server();
+                }
             }
             _ => {
                 log::error!("invalid token found in tcp listener");

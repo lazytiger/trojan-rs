@@ -224,8 +224,9 @@ impl Connection {
         if event.is_readable() {
             self.try_read_server(udp_cache);
         }
-
-        self.try_send_server();
+        if event.is_writable() {
+            self.try_send_server();
+        }
 
         self.check_close(poll);
         self.server_conn.check_close(poll);
