@@ -119,12 +119,14 @@ impl TlsConn {
 
         let mut buffer = Vec::new();
         if let Err(err) = self.session.reader().read_to_end(&mut buffer) {
-            log::warn!(
-                "connection:{} read from session failed:{}",
-                self.index(),
-                err
-            );
-            self.status = ConnStatus::Closing;
+            if err.kind() != ErrorKind::WouldBlock {
+                log::warn!(
+                    "connection:{} read from session failed:{}",
+                    self.index(),
+                    err
+                );
+                self.status = ConnStatus::Closing;
+            }
         }
         if buffer.is_empty() {
             None
