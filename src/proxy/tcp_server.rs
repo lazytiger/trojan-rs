@@ -75,12 +75,15 @@ impl TcpServer {
         log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
         if let Some(mut conn) = pool.get(poll, resolver) {
             let index = next_index(&mut self.next_id);
-            conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP));
-            let mut conn = Connection::new(index, conn, dst_addr, client);
-            if conn.setup(poll) {
-                self.conns.insert(conn.index(), conn);
-            } else {
+            if !conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP), poll) {
                 conn.close_now(poll);
+            } else {
+                let mut conn = Connection::new(index, conn, dst_addr, client);
+                if conn.setup(poll) {
+                    self.conns.insert(conn.index(), conn);
+                } else {
+                    conn.close_now(poll);
+                }
             }
         } else {
             log::error!("alloc new connection failed")

@@ -37,9 +37,29 @@ impl TlsConn {
         }
     }
 
-    pub fn reset_index(&mut self, index: usize, token: Token) {
+    pub fn reset_index(&mut self, index: usize, token: Token, poll: &Poll) -> bool {
         self.index = index;
         self.token = token;
+        if let Err(err) = poll.registry().reregister(
+            &mut self.stream,
+            token,
+            Interest::READABLE | Interest::WRITABLE,
+        ) {
+            log::warn!(
+                "connection:{} reregister server failed:{}",
+                self.index(),
+                err
+            );
+            self.status = ConnStatus::Closing;
+            false
+        } else {
+            log::trace!(
+                "connection:{} reregistered token:{}",
+                self.index(),
+                self.token.0
+            );
+            true
+        }
     }
 
     pub fn check_close(&mut self, poll: &Poll) {
@@ -192,6 +212,11 @@ impl TlsConn {
             self.status = ConnStatus::Closing;
             false
         } else {
+            log::trace!(
+                "connection:{} token:{} registered",
+                self.index(),
+                self.token.0
+            );
             true
         }
     }

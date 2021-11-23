@@ -99,7 +99,10 @@ impl UdpServer {
             if let Some(mut conn) = pool.get(poll, resolver) {
                 if let Some(socket) = udp_cache.get_socket(dst_addr) {
                     let index = next_index(&mut self.next_id);
-                    conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP));
+                    if !conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP), poll) {
+                        conn.close_now(poll);
+                        return Ok(());
+                    }
                     let mut conn = Connection::new(index, conn, src_addr, socket);
                     if conn.setup() {
                         let _ = self.conns.insert(index, conn);
