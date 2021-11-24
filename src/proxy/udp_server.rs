@@ -261,7 +261,7 @@ impl Connection {
         }
     }
 
-    fn close_now(&mut self, _: &Poll) {
+    fn close_now(&mut self, poll: &Poll) {
         self.status = ConnStatus::Closed;
         let secs = self.client_time.elapsed().as_secs();
         log::info!(
@@ -272,6 +272,7 @@ impl Connection {
             self.bytes_read,
             self.bytes_sent
         );
+        self.server_conn.shutdown(poll);
     }
 
     fn reregister(&mut self, _: &Poll) {}
