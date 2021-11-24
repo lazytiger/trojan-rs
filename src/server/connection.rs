@@ -6,7 +6,7 @@ use std::{
 
 use mio::{
     net::{TcpStream, UdpSocket},
-    Interest, Poll, Token,
+    Poll, Token,
 };
 
 use crate::{
@@ -20,7 +20,6 @@ use crate::{
         CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY,
     },
     status::StatusProvider,
-    sys,
     tls_conn::TlsConn,
 };
 
@@ -263,31 +262,21 @@ impl Connection {
             self.target_addr.unwrap()
         );
         match TcpStream::connect(self.target_addr.unwrap()) {
-            Ok(mut tcp_target) => {
-                if let Err(err) = sys::set_mark(&tcp_target, OPTIONS.marker) {
-                    log::error!("connection:{} set mark failed:{}", self.index, err);
-                    self.proxy.shutdown();
-                    return false;
-                } else if let Err(err) = poll.registry().register(
-                    &mut tcp_target,
-                    self.target_token(),
-                    Interest::READABLE | Interest::WRITABLE,
-                ) {
-                    log::error!("connection:{} register target failed:{}", self.index, err);
-                    self.proxy.shutdown();
-                    return false;
-                } else if let Err(err) = tcp_target.set_nodelay(true) {
-                    log::error!("connection:{} set nodelay failed:{}", self.index, err);
-                    self.proxy.shutdown();
-                    return false;
+            Ok(tcp_target) => {
+                match TcpBackend::new(tcp_target, self.index, self.target_token(), poll) {
+                    Ok(mut backend) => {
+                        if !self.data.is_empty() {
+                            backend.dispatch(self.data.as_slice());
+                            self.data.clear();
+                            self.data.shrink_to_fit();
+                        }
+                        self.backend.replace(Box::new(backend));
+                    }
+                    Err(err) => {
+                        log::error!("connection:{} setup backend failed:{}", self.index, err);
+                        self.proxy.shutdown();
+                    }
                 }
-                let mut backend = TcpBackend::new(tcp_target, self.index);
-                if !self.data.is_empty() {
-                    backend.dispatch(self.data.as_slice());
-                    self.data.clear();
-                    self.data.shrink_to_fit();
-                }
-                self.backend.replace(Box::new(backend));
             }
             Err(err) => {
                 log::warn!("connection:{} connect to target failed:{}", self.index, err);
@@ -306,27 +295,16 @@ impl Connection {
                 self.proxy.shutdown();
                 return false;
             }
-            Ok(mut udp_target) => {
-                if let Err(err) = sys::set_mark(&udp_target, OPTIONS.marker) {
-                    log::error!("connection:{} set mark failed:{}", self.index, err);
-                    self.proxy.shutdown();
-                    return false;
+            Ok(udp_target) => {
+                match UdpBackend::new(udp_target, self.index, self.target_token(), poll) {
+                    Ok(backend) => {
+                        self.backend.replace(Box::new(backend));
+                    }
+                    Err(err) => {
+                        log::error!("connection:{} setup backend failed:{}", self.index, err);
+                        self.proxy.shutdown();
+                    }
                 }
-                if let Err(err) = poll.registry().register(
-                    &mut udp_target,
-                    self.target_token(),
-                    Interest::READABLE | Interest::WRITABLE,
-                ) {
-                    log::error!(
-                        "connection:{} register udp target failed:{}",
-                        self.index,
-                        err
-                    );
-                    self.proxy.shutdown();
-                    return false;
-                }
-                let backend = UdpBackend::new(udp_target, self.index);
-                self.backend.replace(Box::new(backend));
             }
         }
         true

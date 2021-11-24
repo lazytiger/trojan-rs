@@ -1,14 +1,16 @@
 use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
-use mio::{event::Event, net::UdpSocket, Poll};
+use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 
 use crate::{
     config::OPTIONS,
     proto::{UdpAssociate, UdpParseResult, MAX_PACKET_SIZE},
     server::tls_server::Backend,
     status::{ConnStatus, StatusProvider},
+    sys,
     tls_conn::TlsConn,
+    types::Result,
 };
 
 pub struct UdpBackend {
@@ -25,9 +27,17 @@ pub struct UdpBackend {
 }
 
 impl UdpBackend {
-    pub fn new(socket: UdpSocket, index: usize) -> UdpBackend {
+    pub fn new(
+        mut socket: UdpSocket,
+        index: usize,
+        token: Token,
+        poll: &Poll,
+    ) -> Result<UdpBackend> {
+        sys::set_mark(&socket, OPTIONS.marker)?;
+        poll.registry()
+            .register(&mut socket, token, Interest::READABLE | Interest::WRITABLE)?;
         let remote_addr = socket.local_addr().unwrap();
-        UdpBackend {
+        Ok(UdpBackend {
             socket,
             index,
             remote_addr,
@@ -38,7 +48,7 @@ impl UdpBackend {
             timeout: OPTIONS.udp_idle_duration,
             bytes_read: 0,
             bytes_sent: 0,
-        }
+        })
     }
 
     fn do_send(&mut self, mut buffer: &[u8]) {

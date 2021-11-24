@@ -1,15 +1,16 @@
 use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
-use mio::{event::Event, net::TcpStream, Poll};
+use mio::{event::Event, net::TcpStream, Interest, Poll, Token};
 
 use crate::{
     config::OPTIONS,
     proto::MAX_PACKET_SIZE,
     server::tls_server::Backend,
     status::{ConnStatus, StatusProvider},
-    tcp_util,
+    sys, tcp_util,
     tls_conn::TlsConn,
+    types::Result,
 };
 
 pub struct TcpBackend {
@@ -22,15 +23,19 @@ pub struct TcpBackend {
 }
 
 impl TcpBackend {
-    pub fn new(conn: TcpStream, index: usize) -> TcpBackend {
-        TcpBackend {
+    pub fn new(mut conn: TcpStream, index: usize, token: Token, poll: &Poll) -> Result<TcpBackend> {
+        sys::set_mark(&conn, OPTIONS.marker)?;
+        poll.registry()
+            .register(&mut conn, token, Interest::READABLE | Interest::WRITABLE)?;
+        conn.set_nodelay(true)?;
+        Ok(TcpBackend {
             conn,
             timeout: OPTIONS.tcp_idle_duration,
             status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             index,
-        }
+        })
     }
     fn do_read(&mut self, conn: &mut TlsConn) {
         if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
