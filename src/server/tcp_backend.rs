@@ -7,8 +7,9 @@ use crate::{
     config::OPTIONS,
     proto::MAX_PACKET_SIZE,
     server::tls_server::Backend,
+    status::{ConnStatus, StatusProvider},
     tcp_util,
-    tls_conn::{ConnStatus, TlsConn},
+    tls_conn::TlsConn,
 };
 
 pub struct TcpBackend {
@@ -70,29 +71,29 @@ impl Backend for TcpBackend {
         }
     }
 
-    fn check_status(&mut self, poll: &Poll) {
-        if let ConnStatus::Closing = self.status {
-            let _ = poll.registry().deregister(&mut self.conn);
-            let _ = self.conn.shutdown(Shutdown::Both);
-            self.status = ConnStatus::Closed;
-        }
-    }
-
     fn get_timeout(&self) -> Duration {
         self.timeout
     }
+}
 
-    fn status(&self) -> ConnStatus {
+impl StatusProvider for TcpBackend {
+    fn set_status(&mut self, status: ConnStatus) {
+        self.status = status
+    }
+
+    fn get_status(&self) -> ConnStatus {
         self.status
     }
 
-    fn shutdown(&mut self, poll: &Poll) {
-        if self.send_buffer.is_empty() {
-            self.status = ConnStatus::Closing;
-            self.check_close(poll);
-            return;
-        }
+    fn close_conn(&self) {
+        let _ = self.conn.shutdown(Shutdown::Both);
+    }
 
-        self.status = ConnStatus::Shutdown;
+    fn deregister(&mut self, poll: &Poll) {
+        let _ = poll.registry().deregister(&mut self.conn);
+    }
+
+    fn finish_send(&mut self) -> bool {
+        self.send_buffer.is_empty()
     }
 }

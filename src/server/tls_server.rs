@@ -11,8 +11,9 @@ use crate::{
     config::OPTIONS,
     resolver::DnsResolver,
     server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
+    status::StatusProvider,
     sys,
-    tls_conn::{ConnStatus, TlsConn},
+    tls_conn::TlsConn,
 };
 use std::net::IpAddr;
 
@@ -37,16 +38,13 @@ pub struct TlsServer {
     conns: HashMap<usize, Connection>,
 }
 
-pub trait Backend {
+pub trait Backend: StatusProvider {
     fn ready(&mut self, event: &Event, conn: &mut TlsConn);
     fn dispatch(&mut self, data: &[u8]);
-    fn check_(&mut self, poll: &Poll);
     fn timeout(&self, t1: Instant, t2: Instant) -> bool {
         t2 - t1 > self.get_timeout()
     }
     fn get_timeout(&self) -> Duration;
-    fn status(&self) -> ConnStatus;
-    fn shutdown(&mut self, poll: &Poll);
 }
 
 impl TlsServer {
@@ -87,7 +85,8 @@ impl TlsServer {
                         let conn = Connection::new(index, tls_conn);
                         self.conns.insert(index, conn);
                     } else {
-                        tls_conn.close_now(poll);
+                        tls_conn.shutdown();
+                        tls_conn.check_status(poll);
                     }
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -140,7 +139,7 @@ impl TlsServer {
             if conn.timeout(check_active_time) {
                 list.push(*index);
                 log::warn!("connection:{} timeout, close now", index);
-                conn.close_now(poll)
+                conn.destroy(poll)
             }
         }
 

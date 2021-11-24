@@ -7,7 +7,8 @@ use crate::{
     config::OPTIONS,
     proto::{UdpAssociate, UdpParseResult, MAX_PACKET_SIZE},
     server::tls_server::Backend,
-    tls_conn::{ConnStatus, TlsConn},
+    status::{ConnStatus, StatusProvider},
+    tls_conn::TlsConn,
 };
 
 pub struct UdpBackend {
@@ -57,7 +58,7 @@ impl UdpBackend {
                                     packet.length,
                                     size
                                 );
-                                self.status = ConnStatus::Closing;
+                                self.shutdown();
                                 return;
                             }
                             log::debug!(
@@ -80,14 +81,14 @@ impl UdpBackend {
                                 packet.address,
                                 err
                             );
-                            self.status = ConnStatus::Closing;
+                            self.shutdown();
                             return;
                         }
                     }
                 }
                 UdpParseResult::InvalidProtocol => {
                     log::error!("connection:{} got invalid udp protocol", self.index);
-                    self.status = ConnStatus::Closing;
+                    self.shutdown();
                     return;
                 }
                 UdpParseResult::Continued => {
@@ -95,12 +96,6 @@ impl UdpBackend {
                     self.send_buffer.extend_from_slice(buffer);
                     break;
                 }
-            }
-        }
-        if let ConnStatus::Shutdown = self.status {
-            if self.send_buffer.is_empty() {
-                log::debug!("connection:{} is closing for no data to send", self.index);
-                self.status = ConnStatus::Closing;
             }
         }
     }
@@ -120,11 +115,9 @@ impl UdpBackend {
                     self.recv_head.clear();
                     UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
                     if !conn.write_session(self.recv_head.as_ref()) {
-                        self.status = ConnStatus::Closing;
                         break;
                     }
                     if !conn.write_session(&self.recv_body.as_slice()[..size]) {
-                        self.status = ConnStatus::Closing;
                         break;
                     }
                 }
@@ -134,7 +127,7 @@ impl UdpBackend {
                 }
                 Err(err) => {
                     log::warn!("connection:{} got udp read err:{}", self.index, err);
-                    self.status = ConnStatus::Closing;
+                    self.shutdown();
                     break;
                 }
             }
@@ -163,38 +156,27 @@ impl Backend for UdpBackend {
         }
     }
 
-    fn check_close(&mut self, poll: &Poll) {
-        if let ConnStatus::Closing = self.status {
-            let _ = poll.registry().deregister(&mut self.socket);
-            self.status = ConnStatus::Closed;
-            log::info!(
-                "connection:{} address:{} closed, read {} bytes, sent {} bytes",
-                self.index,
-                self.remote_addr,
-                self.bytes_read,
-                self.bytes_sent
-            );
-        }
-    }
-
     fn get_timeout(&self) -> Duration {
         self.timeout
     }
+}
 
-    fn status(&self) -> ConnStatus {
+impl StatusProvider for UdpBackend {
+    fn set_status(&mut self, status: ConnStatus) {
+        self.status = status;
+    }
+
+    fn get_status(&self) -> ConnStatus {
         self.status
     }
 
-    fn shutdown(&mut self, poll: &Poll) {
-        if self.send_buffer.is_empty() {
-            self.status = ConnStatus::Closing;
-            self.check_close(poll);
-            return;
-        }
-        self.status = ConnStatus::Shutdown;
+    fn close_conn(&self) {}
+
+    fn deregister(&mut self, poll: &Poll) {
+        let _ = poll.registry().deregister(&mut self.socket);
     }
 
-    fn writable(&self) -> bool {
-        self.send_buffer.len() < MAX_BUFFER_SIZE
+    fn finish_send(&mut self) -> bool {
+        self.send_buffer.is_empty()
     }
 }

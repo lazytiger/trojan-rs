@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, time::Instant};
+use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Poll, Token};
@@ -32,7 +32,6 @@ struct Connection {
     recv_buffer: BytesMut,
     server_conn: TlsConn,
     status: ConnStatus,
-    client_time: Instant,
     socket: Rc<UdpSocket>,
     dst_addr: SocketAddr,
     bytes_read: usize,
@@ -166,7 +165,6 @@ impl Connection {
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
             status: ConnStatus::Established,
-            client_time: Instant::now(),
             bytes_read: 0,
             bytes_sent: 0,
         }

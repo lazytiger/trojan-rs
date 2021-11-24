@@ -36,7 +36,6 @@ struct Connection {
     recv_buffer: Vec<u8>,
     send_buffer: BytesMut,
     status: ConnStatus,
-    client_time: Instant,
     server_conn: TlsConn,
     last_active_time: Instant,
 }
@@ -129,7 +128,6 @@ impl Connection {
             status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
-            client_time: Instant::now(),
             last_active_time: Instant::now(),
         }
     }

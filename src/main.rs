@@ -4,7 +4,7 @@ mod config;
 mod proto;
 mod proxy;
 mod resolver;
-//mod server;
+mod server;
 mod status;
 mod sys;
 mod tcp_util;
@@ -20,7 +20,7 @@ fn main() {
         }
         Mode::Server(_) => {
             log::warn!("trojan started in server mode");
-            //server::run();
+            server::run();
         }
     }
 }
