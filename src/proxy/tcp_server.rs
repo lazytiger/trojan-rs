@@ -223,7 +223,7 @@ impl Connection {
     }
 
     fn close_now(&mut self, poll: &Poll) {
-        self.server_conn.close_now(poll);
+        self.server_conn.shutdown(poll);
         let _ = self.client.shutdown(Shutdown::Both);
         let _ = poll.registry().deregister(&mut self.client);
         self.status = ConnStatus::Closed;
