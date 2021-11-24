@@ -8,7 +8,7 @@ use crate::{
     proto::MAX_PACKET_SIZE,
     server::tls_server::Backend,
     status::{ConnStatus, StatusProvider},
-    sys, tcp_util,
+    tcp_util,
     tls_conn::TlsConn,
     types::Result,
 };
@@ -24,7 +24,6 @@ pub struct TcpBackend {
 
 impl TcpBackend {
     pub fn new(mut conn: TcpStream, index: usize, token: Token, poll: &Poll) -> Result<TcpBackend> {
-        sys::set_mark(&conn, OPTIONS.marker)?;
         poll.registry()
             .register(&mut conn, token, Interest::READABLE | Interest::WRITABLE)?;
         conn.set_nodelay(true)?;
@@ -40,6 +39,7 @@ impl TcpBackend {
     fn do_read(&mut self, conn: &mut TlsConn) {
         if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
             self.shutdown();
+            return;
         }
 
         conn.do_send();
@@ -48,7 +48,6 @@ impl TcpBackend {
     fn do_send(&mut self, data: &[u8]) {
         if !tcp_util::tcp_send(self.index, &self.conn, &mut self.send_buffer, data) {
             self.shutdown();
-            return;
         }
     }
 

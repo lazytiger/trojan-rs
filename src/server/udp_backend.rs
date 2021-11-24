@@ -8,7 +8,6 @@ use crate::{
     proto::{UdpAssociate, UdpParseResult, MAX_PACKET_SIZE},
     server::tls_server::Backend,
     status::{ConnStatus, StatusProvider},
-    sys,
     tls_conn::TlsConn,
     types::Result,
 };
@@ -33,7 +32,6 @@ impl UdpBackend {
         token: Token,
         poll: &Poll,
     ) -> Result<UdpBackend> {
-        sys::set_mark(&socket, OPTIONS.marker)?;
         poll.registry()
             .register(&mut socket, token, Interest::READABLE | Interest::WRITABLE)?;
         let remote_addr = socket.local_addr().unwrap();
@@ -187,6 +185,10 @@ impl StatusProvider for UdpBackend {
     }
 
     fn finish_send(&mut self) -> bool {
-        self.send_buffer.is_empty()
+        if let UdpParseResult::Packet(_) = UdpAssociate::parse(self.send_buffer.as_ref()) {
+            false
+        } else {
+            true
+        }
     }
 }

@@ -8,11 +8,9 @@ use mio::{event::Event, net::TcpListener, Poll, Token};
 use rustls::{ServerConfig, ServerConnection};
 
 use crate::{
-    config::OPTIONS,
     resolver::DnsResolver,
     server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
     status::StatusProvider,
-    sys,
     tls_conn::TlsConn,
 };
 use std::net::IpAddr;
@@ -66,10 +64,7 @@ impl TlsServer {
                         self.next_id,
                         addr
                     );
-                    if let Err(err) = sys::set_mark(&stream, OPTIONS.marker) {
-                        log::error!("set mark failed:{}", err);
-                        continue;
-                    } else if let Err(err) = stream.set_nodelay(true) {
+                    if let Err(err) = stream.set_nodelay(true) {
                         log::error!("set nodelay failed:{}", err);
                         continue;
                     }
