@@ -99,11 +99,13 @@ impl TcpServer {
                 log::debug!("connection:{} removed from list", index);
                 self.conns.remove(&index);
             }
+        } else {
+            log::error!("tcp connection:{} not found, check deregister", index)
         }
     }
 
     pub fn check_timeout(&mut self, poll: &Poll, now: Instant) {
-        for (_, conn) in &mut self.conns {
+        for conn in self.conns.values_mut() {
             if conn.timeout(now) {
                 conn.shutdown(poll);
                 conn.server_conn.shutdown(poll);
@@ -192,7 +194,6 @@ impl Connection {
             _ => {
                 log::error!("invalid token found in tcp listener");
                 self.status = ConnStatus::Closing;
-                return;
             }
         }
 

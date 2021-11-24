@@ -60,6 +60,8 @@ impl IdlePool {
                 Ok(mut conn) => {
                     if conn.register(poll) {
                         self.pool.push(conn);
+                    } else {
+                        conn.check_close(poll);
                     }
                 }
                 Err(err) => {

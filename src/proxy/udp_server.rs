@@ -100,7 +100,7 @@ impl UdpServer {
                 if let Some(socket) = udp_cache.get_socket(dst_addr) {
                     let index = next_index(&mut self.next_id);
                     if !conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP), poll) {
-                        conn.close_now(poll);
+                        conn.check_close(poll);
                         return Ok(());
                     }
                     let mut conn = Connection::new(index, conn, src_addr, socket);
@@ -110,11 +110,11 @@ impl UdpServer {
                         log::debug!("connection:{} is ready", index);
                         index
                     } else {
-                        conn.shutdown(poll);
+                        conn.check_close(poll);
                         return Ok(());
                     }
                 } else {
-                    conn.shutdown(poll);
+                    conn.close_now(poll);
                     return Ok(());
                 }
             } else {
@@ -125,6 +125,7 @@ impl UdpServer {
         if let Some(conn) = self.conns.get_mut(&index) {
             let payload = &self.recv_buffer.as_slice()[..size];
             conn.send_request(payload, &dst_addr);
+            conn.check_close(poll);
         } else {
             log::error!("impossible, connection should be found now");
         }
@@ -141,6 +142,8 @@ impl UdpServer {
                 self.src_map.remove(&src_addr);
                 log::debug!("connection:{} removed from list", index);
             }
+        } else {
+            log::error!("udp connection:{} not found, check deregister", index);
         }
     }
 }
