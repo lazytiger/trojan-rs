@@ -351,9 +351,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "0.7.11"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf80d3e903b34e0bd7282b218398aec54e082c840d9baf8339e0080a0c542956"
+checksum = "ba272f85fa0b41fc91872be579b3bbe0f56b792aa361a380eb669469f68dafb2"
 dependencies = [
  "libc",
  "log",
@@ -789,7 +789,7 @@ dependencies = [
  "fern",
  "libc",
  "log",
- "mio 0.7.11",
+ "mio 0.8.0",
  "mio-extras",
  "rayon",
  "rust-crypto",
