@@ -17,8 +17,9 @@ use crate::{
     proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
     proxy::{idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
     resolver::DnsResolver,
+    status::{ConnStatus, StatusProvider},
     sys, tcp_util,
-    tls_conn::{ConnStatus, TlsConn},
+    tls_conn::TlsConn,
     types::{Result, TrojanError},
 };
 
@@ -76,13 +77,13 @@ impl TcpServer {
         if let Some(mut conn) = pool.get(poll, resolver) {
             let index = next_index(&mut self.next_id);
             if !conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_TCP), poll) {
-                conn.close_now(poll);
+                conn.check_status(poll);
             } else {
                 let mut conn = Connection::new(index, conn, dst_addr, client);
                 if conn.setup(poll) {
                     self.conns.insert(conn.index(), conn);
                 } else {
-                    conn.close_now(poll);
+                    conn.destroy(poll);
                 }
             }
         } else {
@@ -107,8 +108,7 @@ impl TcpServer {
     pub fn check_timeout(&mut self, poll: &Poll, now: Instant) {
         for conn in self.conns.values_mut() {
             if conn.timeout(now) {
-                conn.shutdown(poll);
-                conn.server_conn.shutdown(poll);
+                conn.destroy(poll);
             }
         }
     }
@@ -139,11 +139,14 @@ impl Connection {
     }
 
     fn destroyed(&self) -> bool {
-        self.closed() && self.server_conn.closed()
+        self.deregistered() && self.server_conn.deregistered()
     }
 
-    fn closed(&self) -> bool {
-        matches!(self.status, ConnStatus::Closed)
+    fn destroy(&mut self, poll: &Poll) {
+        self.shutdown();
+        self.server_conn.shutdown();
+        self.check_status(poll);
+        self.server_conn.check_status(poll);
     }
 
     fn setup(&mut self, poll: &Poll) -> bool {
@@ -193,47 +196,17 @@ impl Connection {
             }
             _ => {
                 log::error!("invalid token found in tcp listener");
-                self.status = ConnStatus::Closing;
+                self.shutdown();
             }
         }
-
-        self.check_close(poll);
-        self.server_conn.check_close(poll);
-        if self.closed() && !self.server_conn.closed() {
-            self.server_conn.shutdown(poll);
-        } else if !self.closed() && self.server_conn.closed() {
-            self.shutdown(poll);
+        if self.is_shutdown() {
+            self.server_conn.peer_closed();
         }
-    }
-
-    fn shutdown(&mut self, poll: &Poll) {
-        if self.send_buffer.is_empty() {
-            self.status = ConnStatus::Closing;
-            self.check_close(poll);
-            return;
+        if self.server_conn.is_shutdown() {
+            self.peer_closed();
         }
-
-        self.status = ConnStatus::Shutdown;
-    }
-
-    fn check_close(&mut self, poll: &Poll) {
-        if let ConnStatus::Closing = self.status {
-            self.close_now(poll);
-        }
-    }
-
-    fn close_now(&mut self, poll: &Poll) {
-        self.server_conn.shutdown(poll);
-        let _ = self.client.shutdown(Shutdown::Both);
-        let _ = poll.registry().deregister(&mut self.client);
-        self.status = ConnStatus::Closed;
-        let secs = self.client_time.elapsed().as_secs();
-        log::warn!(
-            "connection:{} closed, target address {:?}, {} seconds",
-            self.index(),
-            self.dst_addr,
-            secs
-        );
+        self.check_status(poll);
+        self.server_conn.check_status(poll);
     }
 
     fn client_token(&self) -> Token {
@@ -247,7 +220,7 @@ impl Connection {
             &mut self.recv_buffer,
             &mut self.server_conn,
         ) {
-            self.status = ConnStatus::Closing;
+            self.shutdown();
         }
 
         self.try_send_server();
@@ -265,12 +238,12 @@ impl Connection {
 
     fn do_send_client(&mut self, data: &[u8]) {
         if !tcp_util::tcp_send(self.index, &self.client, &mut self.send_buffer, data) {
-            self.status = ConnStatus::Closing;
+            self.shutdown();
             return;
         }
         if let ConnStatus::Shutdown = self.status {
             if self.send_buffer.is_empty() {
-                self.status = ConnStatus::Closing;
+                self.shutdown();
                 log::debug!("connection:{} is closing for no data to send", self.index());
             }
         }
@@ -284,5 +257,26 @@ impl Connection {
 
     fn try_send_server(&mut self) {
         self.server_conn.do_send();
+    }
+}
+
+impl StatusProvider for Connection {
+    fn set_status(&mut self, status: ConnStatus) {
+        self.status = status;
+    }
+    fn get_status(&self) -> ConnStatus {
+        self.status
+    }
+
+    fn close_conn(&self) {
+        let _ = self.client.shutdown(Shutdown::Both);
+    }
+
+    fn deregister(&mut self, poll: &Poll) {
+        let _ = poll.registry().deregister(&mut self.client);
+    }
+
+    fn finish_send(&mut self) -> bool {
+        self.send_buffer.is_empty()
     }
 }

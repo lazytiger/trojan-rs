@@ -11,8 +11,9 @@ use crate::{
         MIN_INDEX,
     },
     resolver::DnsResolver,
+    status::{ConnStatus, StatusProvider},
     sys,
-    tls_conn::{ConnStatus, TlsConn},
+    tls_conn::TlsConn,
     types::{Result, TrojanError},
 };
 
@@ -100,7 +101,7 @@ impl UdpServer {
                 if let Some(socket) = udp_cache.get_socket(dst_addr) {
                     let index = next_index(&mut self.next_id);
                     if !conn.reset_index(index, Token(index * CHANNEL_CNT + CHANNEL_UDP), poll) {
-                        conn.check_close(poll);
+                        conn.check_status(poll);
                         return Ok(());
                     }
                     let mut conn = Connection::new(index, conn, src_addr, socket);
@@ -110,11 +111,11 @@ impl UdpServer {
                         log::debug!("connection:{} is ready", index);
                         index
                     } else {
-                        conn.check_close(poll);
+                        conn.check_status(poll);
                         return Ok(());
                     }
                 } else {
-                    conn.close_now(poll);
+                    conn.shutdown();
                     return Ok(());
                 }
             } else {
@@ -125,7 +126,7 @@ impl UdpServer {
         if let Some(conn) = self.conns.get_mut(&index) {
             let payload = &self.recv_buffer.as_slice()[..size];
             conn.send_request(payload, &dst_addr);
-            conn.check_close(poll);
+            conn.check_status(poll);
         } else {
             log::error!("impossible, connection should be found now");
         }
@@ -186,11 +187,7 @@ impl Connection {
     }
 
     fn destroyed(&self) -> bool {
-        self.closed() && self.server_conn.closed()
-    }
-
-    fn closed(&self) -> bool {
-        matches!(self.status, ConnStatus::Closed)
+        self.deregistered() && self.server_conn.deregistered()
     }
 
     fn index(&self) -> usize {
@@ -198,32 +195,15 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
-        if !self.server_conn.writable() {
-            log::warn!(
-                "connection:{} too many packets, drop udp packet",
-                self.index
-            );
-            return;
-        }
         self.bytes_read += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
         if !self.server_conn.write_session(self.recv_buffer.as_ref())
             || !self.server_conn.write_session(payload)
         {
-            self.status = ConnStatus::Closing;
+            self.shutdown();
         }
         self.try_send_server();
-    }
-
-    fn shutdown(&mut self, poll: &Poll) {
-        log::debug!("connection:{} shutdown now", self.index());
-        if self.send_buffer.is_empty() {
-            self.status = ConnStatus::Closing;
-            self.check_close(poll);
-            return;
-        }
-        self.status = ConnStatus::Shutdown;
     }
 
     fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {
@@ -233,34 +213,15 @@ impl Connection {
         if event.is_writable() {
             self.try_send_server();
         }
-
-        self.check_close(poll);
-        self.server_conn.check_close(poll);
-        if self.closed() && !self.server_conn.closed() {
-            self.server_conn.shutdown(poll);
-        } else if !self.closed() && self.server_conn.closed() {
-            self.shutdown(poll);
+        if self.is_shutdown() {
+            self.server_conn.peer_closed();
         }
-    }
-
-    fn check_close(&mut self, poll: &Poll) {
-        if let ConnStatus::Closing = self.status {
-            self.close_now(poll);
+        if self.server_conn.is_shutdown() {
+            self.peer_closed();
         }
-    }
 
-    fn close_now(&mut self, poll: &Poll) {
-        self.status = ConnStatus::Closed;
-        let secs = self.client_time.elapsed().as_secs();
-        log::info!(
-            "connection:{} address:{} closed, time:{} read {} bytes, send {} bytes",
-            self.index(),
-            self.dst_addr,
-            secs,
-            self.bytes_read,
-            self.bytes_sent
-        );
-        self.server_conn.shutdown(poll);
+        self.check_status(poll);
+        self.server_conn.check_status(poll);
     }
 
     fn try_send_server(&mut self) {
@@ -335,16 +296,28 @@ impl Connection {
                 }
                 UdpParseResult::InvalidProtocol => {
                     log::error!("connection:{} got invalid protocol", self.index());
-                    self.status = ConnStatus::Closing;
+                    self.shutdown();
                     break;
                 }
             }
         }
-        if let ConnStatus::Shutdown = self.status {
-            if self.send_buffer.is_empty() {
-                self.status = ConnStatus::Closing;
-                log::debug!("connection:{} is closing for no data to send", self.index);
-            }
-        }
+    }
+}
+
+impl StatusProvider for Connection {
+    fn set_status(&mut self, status: ConnStatus) {
+        self.status = status;
+    }
+
+    fn get_status(&self) -> ConnStatus {
+        self.status
+    }
+
+    fn close_conn(&self) {}
+
+    fn deregister(&mut self, _: &Poll) {}
+
+    fn finish_send(&mut self) -> bool {
+        self.send_buffer.is_empty()
     }
 }

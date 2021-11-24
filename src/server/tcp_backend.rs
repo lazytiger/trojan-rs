@@ -5,7 +5,7 @@ use mio::{event::Event, net::TcpStream, Poll};
 
 use crate::{
     config::OPTIONS,
-    proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
+    proto::MAX_PACKET_SIZE,
     server::tls_server::Backend,
     tcp_util,
     tls_conn::{ConnStatus, TlsConn},
@@ -33,7 +33,7 @@ impl TcpBackend {
     }
     fn do_read(&mut self, conn: &mut TlsConn) {
         if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
-            self.status = ConnStatus::Closing;
+            self.shutdown();
         }
 
         conn.do_send();
@@ -41,17 +41,12 @@ impl TcpBackend {
 
     fn do_send(&mut self, data: &[u8]) {
         if !tcp_util::tcp_send(self.index, &self.conn, &mut self.send_buffer, data) {
-            self.status = ConnStatus::Closing;
+            self.shutdown();
             return;
         }
-
-        if let ConnStatus::Shutdown = self.status {
-            if self.send_buffer.is_empty() {
-                log::debug!("connection:{} is closing for no data to send", self.index);
-                self.status = ConnStatus::Closing;
-            }
-        }
     }
+
+    fn shutdown(&mut self) {}
 }
 
 impl Backend for TcpBackend {
@@ -75,7 +70,7 @@ impl Backend for TcpBackend {
         }
     }
 
-    fn check_close(&mut self, poll: &Poll) {
+    fn check_status(&mut self, poll: &Poll) {
         if let ConnStatus::Closing = self.status {
             let _ = poll.registry().deregister(&mut self.conn);
             let _ = self.conn.shutdown(Shutdown::Both);
@@ -99,9 +94,5 @@ impl Backend for TcpBackend {
         }
 
         self.status = ConnStatus::Shutdown;
-    }
-
-    fn writable(&self) -> bool {
-        self.send_buffer.len() < MAX_BUFFER_SIZE
     }
 }

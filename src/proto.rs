@@ -10,8 +10,6 @@ pub const CONNECT: u8 = 0x01;
 pub const UDP_ASSOCIATE: u8 = 0x03;
 /// max packet size for udp, MTU = 1500 minus IP head size
 pub const MAX_PACKET_SIZE: usize = 1450;
-/// buffer size for connections
-pub const MAX_BUFFER_SIZE: usize = 1024 * 1024;
 /// protocol code for IPV4 type
 const IPV4: u8 = 0x01;
 /// protocol code for DOMAIN type

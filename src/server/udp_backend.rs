@@ -5,7 +5,7 @@ use mio::{event::Event, net::UdpSocket, Poll};
 
 use crate::{
     config::OPTIONS,
-    proto::{UdpAssociate, UdpParseResult, MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
+    proto::{UdpAssociate, UdpParseResult, MAX_PACKET_SIZE},
     server::tls_server::Backend,
     tls_conn::{ConnStatus, TlsConn},
 };

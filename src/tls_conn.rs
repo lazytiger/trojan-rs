@@ -3,18 +3,9 @@ use std::{
     net::Shutdown,
 };
 
+use crate::status::{ConnStatus, StatusProvider};
 use mio::{net::TcpStream, Interest, Poll, Token};
 use rustls::{internal::msgs::fragmenter::MAX_FRAGMENT_LEN, Connection};
-
-use crate::proto::MAX_BUFFER_SIZE;
-
-#[derive(Copy, Clone)]
-pub enum ConnStatus {
-    Established,
-    Shutdown,
-    Closing,
-    Closed,
-}
 
 pub struct TlsConn {
     session: Connection,
@@ -50,7 +41,7 @@ impl TlsConn {
                 self.index(),
                 err
             );
-            self.status = ConnStatus::Closing;
+            self.shutdown();
             false
         } else {
             log::trace!(
@@ -60,29 +51,6 @@ impl TlsConn {
             );
             true
         }
-    }
-
-    pub fn check_close(&mut self, poll: &Poll) {
-        if let ConnStatus::Closing = self.status {
-            self.close_now(poll);
-        }
-    }
-
-    pub fn shutdown(&mut self, poll: &Poll) {
-        log::debug!("connection:{} shutdown now", self.index);
-        if !self.session.wants_write() {
-            self.status = ConnStatus::Closing;
-            self.check_close(poll);
-            return;
-        }
-        self.status = ConnStatus::Shutdown;
-    }
-
-    pub fn close_now(&mut self, poll: &Poll) {
-        log::info!("connection:{} closed now", self.index);
-        let _ = poll.registry().deregister(&mut self.stream);
-        let _ = self.stream.shutdown(Shutdown::Both);
-        self.status = ConnStatus::Closed
     }
 
     fn index(&self) -> usize {
@@ -102,7 +70,7 @@ impl TlsConn {
                             "connection:{} read from server failed with eof",
                             self.index()
                         );
-                        self.status = ConnStatus::Closing;
+                        self.shutdown();
                         break;
                     }
                     log::debug!(
@@ -121,7 +89,7 @@ impl TlsConn {
                         self.index(),
                         err
                     );
-                    self.status = ConnStatus::Closing;
+                    self.shutdown();
                     break;
                 }
             }
@@ -133,7 +101,7 @@ impl TlsConn {
                 self.index(),
                 err
             );
-            self.status = ConnStatus::Closing;
+            self.shutdown();
             return None;
         }
 
@@ -145,7 +113,7 @@ impl TlsConn {
                     self.index(),
                     err
                 );
-                self.status = ConnStatus::Closing;
+                self.shutdown();
             }
         }
         if buffer.is_empty() {
@@ -171,22 +139,16 @@ impl TlsConn {
                 }
                 Err(err) => {
                     log::warn!("connection:{} write to server failed:{}", self.index(), err);
-                    self.status = ConnStatus::Closing;
+                    self.shutdown();
                     return;
                 }
-            }
-        }
-        if let ConnStatus::Shutdown = self.status {
-            if !self.session.wants_write() {
-                self.status = ConnStatus::Closing;
-                log::debug!("connection:{} is closing for no data to send", self.index());
             }
         }
     }
 
     pub fn write_session(&mut self, data: &[u8]) -> bool {
         if let Err(err) = self.session.writer().write_all(data) {
-            self.status = ConnStatus::Closing;
+            self.shutdown();
             log::warn!(
                 "connection:{} write data to server session failed:{}",
                 self.index(),
@@ -209,7 +171,7 @@ impl TlsConn {
             Interest::READABLE | Interest::WRITABLE,
         ) {
             log::warn!("connection:{} register server failed:{}", self.index(), err);
-            self.status = ConnStatus::Closing;
+            self.shutdown();
             false
         } else {
             log::trace!(
@@ -221,11 +183,29 @@ impl TlsConn {
         }
     }
 
-    pub fn closed(&self) -> bool {
-        matches!(self.status, ConnStatus::Closed)
+    pub fn deregistered(&self) -> bool {
+        matches!(self.status, ConnStatus::Deregistered)
+    }
+}
+
+impl StatusProvider for TlsConn {
+    fn set_status(&mut self, status: ConnStatus) {
+        self.status = status;
     }
 
-    pub fn writable(&self) -> bool {
-        self.buffer_len < MAX_BUFFER_SIZE
+    fn get_status(&self) -> ConnStatus {
+        self.status
+    }
+
+    fn close_conn(&self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
+    }
+
+    fn deregister(&mut self, poll: &Poll) {
+        let _ = poll.registry().deregister(&mut self.stream);
+    }
+
+    fn finish_send(&mut self) -> bool {
+        !self.session.wants_write()
     }
 }

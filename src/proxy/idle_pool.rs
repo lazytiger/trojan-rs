@@ -10,6 +10,7 @@ use crate::{
     config::OPTIONS,
     proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER},
     resolver::DnsResolver,
+    status::StatusProvider,
     sys,
     tls_conn::TlsConn,
     types::Result,
@@ -61,7 +62,7 @@ impl IdlePool {
                     if conn.register(poll) {
                         self.pool.push(conn);
                     } else {
-                        conn.check_close(poll);
+                        conn.check_status(poll);
                     }
                 }
                 Err(err) => {
@@ -110,8 +111,8 @@ impl IdlePool {
                     log::error!("found data in https handshake phase");
                 }
                 conn.do_send();
-                conn.check_close(poll);
-                if conn.closed() {
+                conn.check_status(poll);
+                if conn.deregistered() {
                     self.pool.remove(i);
                 }
                 found = true;
