@@ -121,22 +121,22 @@ impl TlsConn {
         }
     }
 
-    pub fn do_send(&mut self) {
+    pub fn do_send(&mut self) -> bool {
         loop {
             if !self.session.wants_write() {
-                return;
+                return true;
             }
             match self.session.write_tls(&mut self.stream) {
                 Ok(size) => {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    break;
+                    return true;
                 }
                 Err(err) => {
                     log::warn!("connection:{} write to server failed:{}", self.index(), err);
                     self.shutdown();
-                    return;
+                    return false;
                 }
             }
         }
@@ -152,7 +152,7 @@ impl TlsConn {
             );
             false
         } else {
-            true
+            self.do_send()
         }
     }
 
