@@ -16,7 +16,8 @@ pub struct TlsConn {
 }
 
 impl TlsConn {
-    pub fn new(index: usize, token: Token, session: Connection, stream: TcpStream) -> TlsConn {
+    pub fn new(index: usize, token: Token, mut session: Connection, stream: TcpStream) -> TlsConn {
+        session.set_buffer_limit(None);
         TlsConn {
             index,
             token,
@@ -131,6 +132,7 @@ impl TlsConn {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    log::debug!("connection:{} write to server blocked", self.index());
                     return true;
                 }
                 Err(err) => {
