@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 clap = "3.0.0-beta.5"
-mio = { version = "0.7", features = ["net", "os-poll"] }
+mio = { version = "0.8", features = ["net", "os-poll"] }
 log = "0.4"
 chrono = "0.4"
 libc = "0.2"
