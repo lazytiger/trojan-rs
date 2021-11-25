@@ -215,8 +215,7 @@ impl Connection {
                 Status::HandShake => {
                     if self.try_handshake(&mut buffer, resolver.as_mut().unwrap()) {
                         self.status = Status::DnsWait;
-                    } else {
-                        return;
+                        continue;
                     }
                 }
                 Status::DnsWait => {
@@ -225,22 +224,15 @@ impl Connection {
                         if let Err(err) = self.data.write(buffer) {
                             log::warn!("connection:{} cache data failed {}", self.index, err);
                             self.proxy.shutdown();
-                            return;
-                        }
-
-                        if self.target_addr.is_none() {
+                        } else if self.target_addr.is_none() {
                             log::warn!("connection:{} dns query not done yet", self.index);
-                            return;
-                        }
-
-                        if self.try_setup_tcp_target(poll) {
+                        } else if self.try_setup_tcp_target(poll) {
                             self.status = Status::TCPForward;
+                            continue;
                         }
-                        return;
                     } else if self.try_setup_udp_target(poll) {
                         self.status = Status::UDPForward;
-                    } else {
-                        return;
+                        continue;
                     }
                 }
                 _ => {
@@ -249,9 +241,9 @@ impl Connection {
                     } else {
                         log::error!("connection:{} has no backend yet", self.index);
                     }
-                    break;
                 }
             }
+            break;
         }
     }
 
