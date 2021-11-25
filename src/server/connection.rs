@@ -224,6 +224,8 @@ impl Connection {
                         if let Err(err) = self.data.write(buffer) {
                             log::warn!("connection:{} cache data failed {}", self.index, err);
                             self.proxy.shutdown();
+                        } else if self.target_addr.is_none() {
+                            log::warn!("connection:{} dns query not done yet", self.index);
                         } else if self.try_setup_tcp_target(poll) {
                             buffer = &[];
                             self.status = Status::TCPForward;
