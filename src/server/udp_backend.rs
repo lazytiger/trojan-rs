@@ -122,23 +122,21 @@ impl UdpBackend {
                     );
                     self.recv_head.clear();
                     UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
-                    if !conn.write_session(self.recv_head.as_ref()) {
-                        break;
-                    }
-                    if !conn.write_session(&self.recv_body.as_slice()[..size]) {
-                        break;
+                    if conn.write_session(self.recv_head.as_ref())
+                        && conn.write_session(&self.recv_body.as_slice()[..size])
+                    {
+                        continue;
                     }
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     log::debug!("connection:{} write to session blocked", self.index);
-                    break;
                 }
                 Err(err) => {
                     log::warn!("connection:{} got udp read err:{}", self.index, err);
                     self.shutdown();
-                    break;
                 }
             }
+            break;
         }
         conn.do_send();
     }
@@ -185,10 +183,9 @@ impl StatusProvider for UdpBackend {
     }
 
     fn finish_send(&mut self) -> bool {
-        if let UdpParseResult::Packet(_) = UdpAssociate::parse(self.send_buffer.as_ref()) {
-            false
-        } else {
-            true
-        }
+        !matches!(
+            UdpAssociate::parse(self.send_buffer.as_ref()),
+            UdpParseResult::Packet(_)
+        )
     }
 }

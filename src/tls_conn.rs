@@ -5,7 +5,7 @@ use std::{
 
 use crate::status::{ConnStatus, StatusProvider};
 use mio::{net::TcpStream, Interest, Poll, Token};
-use rustls::{internal::msgs::fragmenter::MAX_FRAGMENT_LEN, Connection};
+use rustls::Connection;
 
 pub struct TlsConn {
     session: Connection,
@@ -13,7 +13,6 @@ pub struct TlsConn {
     index: usize,
     token: Token,
     status: ConnStatus,
-    buffer_len: usize,
 }
 
 impl TlsConn {
@@ -24,7 +23,6 @@ impl TlsConn {
             session,
             stream,
             status: ConnStatus::Established,
-            buffer_len: 0,
         }
     }
 
@@ -126,13 +124,11 @@ impl TlsConn {
     pub fn do_send(&mut self) {
         loop {
             if !self.session.wants_write() {
-                self.buffer_len = 0;
                 return;
             }
             match self.session.write_tls(&mut self.stream) {
                 Ok(size) => {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
-                    self.buffer_len = self.buffer_len.saturating_sub(size);
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     break;
@@ -156,10 +152,6 @@ impl TlsConn {
             );
             false
         } else {
-            //each fragment overhead is 40bytes, and data is fragmented by MAX_FRAGMENT_LEN
-            self.buffer_len += data.len();
-            let packets = data.len() / MAX_FRAGMENT_LEN + 1;
-            self.buffer_len += packets * 40;
             true
         }
     }

@@ -39,7 +39,6 @@ impl TcpBackend {
     fn do_read(&mut self, conn: &mut TlsConn) {
         if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
             self.shutdown();
-            return;
         }
 
         conn.do_send();
@@ -50,8 +49,6 @@ impl TcpBackend {
             self.shutdown();
         }
     }
-
-    fn shutdown(&mut self) {}
 }
 
 impl Backend for TcpBackend {
