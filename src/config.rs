@@ -9,7 +9,7 @@ use crypto::{digest::Digest, sha2::Sha224};
 
 #[derive(Parser)]
 #[clap(
-    version = "0.8.1",
+    version,
     author = "Hoping White",
     about = "A trojan implementation using rust"
 )]
@@ -68,9 +68,9 @@ pub struct Opts {
 
 #[derive(Parser)]
 pub enum Mode {
-    #[clap(name = "proxy", about = "run in proxy mode")]
+    #[clap(version, name = "proxy", about = "run in proxy mode")]
     Proxy(ProxyArgs),
-    #[clap(name = "server", about = "run in server mode")]
+    #[clap(version, name = "server", about = "run in server mode")]
     Server(ServerArgs),
 }
 
