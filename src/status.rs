@@ -24,10 +24,10 @@ pub trait StatusProvider {
             }
             ConnStatus::PeerClosed => {}
             _ => {
-                log::error!(
+                log::warn!(
                     "invalid status change from:{:?} to {:?}",
                     self.get_status(),
-                    ConnStatus::Established
+                    ConnStatus::PeerClosed
                 );
             }
         }
@@ -41,10 +41,10 @@ pub trait StatusProvider {
             }
             ConnStatus::Shutdown => {}
             _ => {
-                log::error!(
+                log::warn!(
                     "invalid status change from:{:?} to {:?}",
                     self.get_status(),
-                    ConnStatus::Established
+                    ConnStatus::Shutdown
                 );
             }
         }
