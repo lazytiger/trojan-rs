@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "trojan"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "bytes",
  "cfg-if 1.0.0",
