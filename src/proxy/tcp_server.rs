@@ -237,13 +237,6 @@ impl Connection {
     fn do_send_client(&mut self, data: &[u8]) {
         if !tcp_util::tcp_send(self.index, &self.client, &mut self.send_buffer, data) {
             self.shutdown();
-            return;
-        }
-        if let ConnStatus::Shutdown = self.status {
-            if self.send_buffer.is_empty() {
-                self.shutdown();
-                log::debug!("connection:{} is closing for no data to send", self.index());
-            }
         }
     }
 

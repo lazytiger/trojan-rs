@@ -115,6 +115,7 @@ impl UdpServer {
                     }
                 } else {
                     conn.shutdown();
+                    conn.check_status(poll);
                     return Ok(());
                 }
             } else {
@@ -124,8 +125,7 @@ impl UdpServer {
         };
         if let Some(conn) = self.conns.get_mut(&index) {
             let payload = &self.recv_buffer.as_slice()[..size];
-            conn.send_request(payload, &dst_addr);
-            conn.check_status(poll);
+            conn.send_request(payload, &dst_addr, poll);
         } else {
             log::error!("impossible, connection should be found now");
         }
@@ -192,25 +192,18 @@ impl Connection {
         self.index
     }
 
-    fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr) {
+    fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr, poll: &Poll) {
         self.bytes_read += payload.len();
         self.recv_buffer.clear();
         UdpAssociate::generate(&mut self.recv_buffer, dst_addr, payload.len() as u16);
-        if !self.server_conn.write_session(self.recv_buffer.as_ref())
-            || !self.server_conn.write_session(payload)
-        {
-            self.shutdown();
+        if self.server_conn.write_session(self.recv_buffer.as_ref()) {
+            self.server_conn.write_session(payload);
         }
         self.try_send_server();
+        self.do_status(poll);
     }
 
-    fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {
-        if event.is_readable() {
-            self.try_read_server(udp_cache);
-        }
-        if event.is_writable() {
-            self.try_send_server();
-        }
+    fn do_status(&mut self, poll: &Poll) {
         if self.is_shutdown() {
             self.server_conn.peer_closed();
         }
@@ -220,6 +213,16 @@ impl Connection {
 
         self.check_status(poll);
         self.server_conn.check_status(poll);
+    }
+
+    fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {
+        if event.is_readable() {
+            self.try_read_server(udp_cache);
+        }
+        if event.is_writable() {
+            self.try_send_server();
+        }
+        self.do_status(poll);
     }
 
     fn try_send_server(&mut self) {
@@ -294,7 +297,7 @@ impl Connection {
                 }
                 UdpParseResult::InvalidProtocol => {
                     log::error!("connection:{} got invalid protocol", self.index());
-                    self.shutdown();
+                    self.server_conn.shutdown();
                     break;
                 }
             }
