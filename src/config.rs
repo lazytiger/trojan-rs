@@ -9,7 +9,7 @@ use crypto::{digest::Digest, sha2::Sha224};
 
 #[derive(Parser)]
 #[clap(
-    version = "0.7.3",
+    version = "0.8.1",
     author = "Hoping White",
     about = "A trojan implementation using rust"
 )]
