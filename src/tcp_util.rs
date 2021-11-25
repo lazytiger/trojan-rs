@@ -18,8 +18,8 @@ pub fn tcp_read(
                 if size == 0 {
                     log::warn!("connection:{} meets end of file", index);
                     return false;
-                } else if !server_conn.write_session(&recv_buf.as_slice()[..size]) {
-                    return false;
+                } else {
+                    server_conn.write_session(&recv_buf.as_slice()[..size]);
                 }
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
