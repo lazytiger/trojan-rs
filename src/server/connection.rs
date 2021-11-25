@@ -227,6 +227,7 @@ impl Connection {
                         } else if self.target_addr.is_none() {
                             log::warn!("connection:{} dns query not done yet", self.index);
                         } else if self.try_setup_tcp_target(poll) {
+                            buffer = &[];
                             self.status = Status::TCPForward;
                             continue;
                         }
