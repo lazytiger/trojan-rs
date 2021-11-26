@@ -136,14 +136,10 @@ impl TlsConn {
             match self.session.write_tls(&mut self.stream) {
                 Ok(size) => {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
-                    self.writable = true;
                     continue;
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     log::debug!("connection:{} write to server blocked", self.index());
-                    if self.session.wants_write() {
-                        self.writable = false;
-                    }
                 }
                 Err(err) => {
                     log::warn!("connection:{} write to server failed:{}", self.index(), err);
@@ -193,7 +189,7 @@ impl TlsConn {
     }
 
     pub fn writable(&self) -> bool {
-        self.writable && self.alive()
+        !self.session.wants_write() && self.alive()
     }
 }
 
