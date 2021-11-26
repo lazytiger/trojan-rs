@@ -169,7 +169,7 @@ impl Backend for UdpBackend {
     }
 
     fn writable(&self) -> bool {
-        self.send_buffer.is_empty() && self.alive()
+        self.alive()
     }
 
     fn reregister(&mut self, poll: &Poll) {
