@@ -141,7 +141,9 @@ impl TlsConn {
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     log::debug!("connection:{} write to server blocked", self.index());
-                    self.writable = false;
+                    if self.session.wants_write() {
+                        self.writable = false;
+                    }
                 }
                 Err(err) => {
                     log::warn!("connection:{} write to server failed:{}", self.index(), err);
