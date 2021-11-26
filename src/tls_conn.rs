@@ -13,7 +13,6 @@ pub struct TlsConn {
     index: usize,
     token: Token,
     status: ConnStatus,
-    writable: bool,
 }
 
 impl TlsConn {
@@ -25,7 +24,6 @@ impl TlsConn {
             session,
             stream,
             status: ConnStatus::Established,
-            writable: true,
         }
     }
 

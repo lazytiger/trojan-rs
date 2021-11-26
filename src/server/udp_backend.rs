@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
-use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
+use mio::{net::UdpSocket, Interest, Poll, Token};
 
 use crate::{
     config::OPTIONS,
@@ -23,7 +23,6 @@ pub struct UdpBackend {
     bytes_read: usize,
     bytes_sent: usize,
     remote_addr: SocketAddr,
-    token: Token,
 }
 
 impl UdpBackend {
@@ -40,7 +39,6 @@ impl UdpBackend {
             socket,
             index,
             remote_addr,
-            token,
             send_buffer: Default::default(),
             recv_body: vec![0u8; MAX_PACKET_SIZE],
             recv_head: Default::default(),
@@ -109,6 +107,26 @@ impl UdpBackend {
             }
         }
     }
+}
+
+impl Backend for UdpBackend {
+    fn dispatch(&mut self, buffer: &[u8]) {
+        if self.send_buffer.is_empty() {
+            self.do_send(buffer);
+        } else {
+            self.send_buffer.extend_from_slice(buffer);
+            let buffer = self.send_buffer.split();
+            self.do_send(buffer.as_ref());
+        }
+    }
+
+    fn get_timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    fn writable(&self) -> bool {
+        self.alive()
+    }
 
     fn do_read(&mut self, conn: &mut TlsConn) {
         loop {
@@ -141,52 +159,6 @@ impl UdpBackend {
             break;
         }
         conn.do_send();
-    }
-}
-
-impl Backend for UdpBackend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn) {
-        if event.is_readable() {
-            self.do_read(conn);
-        }
-        if event.is_writable() {
-            self.dispatch(&[]);
-        }
-    }
-
-    fn dispatch(&mut self, buffer: &[u8]) {
-        if self.send_buffer.is_empty() {
-            self.do_send(buffer);
-        } else {
-            self.send_buffer.extend_from_slice(buffer);
-            let buffer = self.send_buffer.split();
-            self.do_send(buffer.as_ref());
-        }
-    }
-
-    fn get_timeout(&self) -> Duration {
-        self.timeout
-    }
-
-    fn writable(&self) -> bool {
-        self.alive()
-    }
-
-    fn reregister(&mut self, poll: &Poll) {
-        if let Err(err) = poll.registry().reregister(
-            &mut self.socket,
-            self.token,
-            Interest::READABLE | Interest::WRITABLE,
-        ) {
-            log::warn!("connection:{} reregister server failed:{}", self.index, err);
-            self.shutdown();
-        } else {
-            log::trace!(
-                "connection:{} reregistered token:{}",
-                self.index,
-                self.token.0
-            );
-        }
     }
 }
 

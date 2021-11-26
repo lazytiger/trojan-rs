@@ -38,8 +38,8 @@ struct Connection {
     status: ConnStatus,
     server_conn: TlsConn,
     last_active_time: Instant,
-    register_client: bool,
-    register_server: bool,
+    read_client: bool,
+    read_server: bool,
 }
 
 impl TcpServer {
@@ -131,8 +131,8 @@ impl Connection {
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             last_active_time: Instant::now(),
-            register_client: false,
-            register_server: false,
+            read_client: false,
+            read_server: false,
         }
     }
 
@@ -189,15 +189,17 @@ impl Connection {
                     if self.server_conn.writable() {
                         self.try_read_client();
                     } else {
-                        self.register_client = true;
+                        log::trace!("server connection is not writable, stop reading from client");
+                        self.read_client = true;
                     }
                 }
 
                 if event.is_writable() {
                     self.try_send_client(&[]);
-                    if self.writable() && self.register_server {
-                        self.server_conn.reregister(poll);
-                        self.register_server = false;
+                    if self.writable() && self.read_server {
+                        log::trace!("client connection is writable, restore reading from server");
+                        self.try_read_server();
+                        self.read_server = false;
                     }
                 }
             }
@@ -206,15 +208,17 @@ impl Connection {
                     if self.writable() {
                         self.try_read_server();
                     } else {
-                        self.register_server = true;
+                        self.read_server = true;
+                        log::trace!("client connection is not writable, stop reading from server")
                     }
                 }
 
                 if event.is_writable() {
                     self.try_send_server();
-                    if self.server_conn.writable() && self.register_client {
-                        self.reregister(poll);
-                        self.register_client = false;
+                    if self.server_conn.writable() && self.read_client {
+                        log::trace!("server connection is writable, restore reading from client");
+                        self.try_read_client();
+                        self.read_client = false;
                     }
                 }
             }
@@ -274,20 +278,6 @@ impl Connection {
 
     fn try_send_server(&mut self) {
         self.server_conn.do_send();
-    }
-
-    fn reregister(&mut self, poll: &Poll) {
-        let token = self.client_token();
-        if let Err(err) = poll.registry().reregister(
-            &mut self.client,
-            token,
-            Interest::READABLE | Interest::WRITABLE,
-        ) {
-            log::warn!("connection:{} reregister server failed:{}", self.index, err);
-            self.shutdown();
-        } else {
-            log::trace!("connection:{} reregistered token:{}", self.index, token.0,);
-        }
     }
 }
 

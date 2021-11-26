@@ -40,8 +40,8 @@ pub struct Connection {
     backend: Option<Box<dyn Backend>>,
     target_addr: Option<SocketAddr>,
     data: Vec<u8>,
-    register_backend: bool,
-    register_proxy: bool,
+    read_backend: bool,
+    read_proxy: bool,
 }
 
 impl Connection {
@@ -56,8 +56,8 @@ impl Connection {
             backend: None,
             target_addr: None,
             data: Vec::new(),
-            register_proxy: false,
-            register_backend: false,
+            read_proxy: false,
+            read_backend: false,
         }
     }
 
@@ -97,29 +97,43 @@ impl Connection {
                         if writable {
                             self.try_read_proxy(poll, resolver);
                         } else {
-                            self.register_proxy = true;
+                            log::trace!(
+                                "backend connection is not writable, stop reading from proxy"
+                            );
+                            self.read_proxy = true;
                         }
                     }
                     if event.is_writable() {
                         self.try_send_proxy();
-                        if self.proxy.writable() && self.register_backend {
+                        if self.proxy.writable() && self.read_backend {
                             if let Some(backend) = self.backend.as_mut() {
-                                backend.reregister(poll);
+                                backend.do_read(&mut self.proxy);
                             }
-                            self.register_backend = false;
+                            log::trace!(
+                                "proxy connection is writable, restore reading from backend"
+                            );
+                            self.read_backend = false;
                         }
                     }
                 } else {
                     match self.status {
                         Status::UDPForward | Status::TCPForward => {
                             if let Some(backend) = self.backend.as_mut() {
-                                if event.is_readable() && !self.proxy.writable() {
-                                    self.register_backend = true;
+                                if event.is_readable() {
+                                    if self.proxy.writable() {
+                                        backend.do_read(&mut self.proxy);
+                                    } else {
+                                        log::trace!("proxy connection is not writable, stop reading from backend");
+                                        self.read_backend = true;
+                                    }
                                 }
-                                backend.ready(event, &mut self.proxy);
-                                if backend.writable() && self.register_proxy {
-                                    self.proxy.reregister(poll);
-                                    self.register_proxy = false;
+                                if event.is_writable() {
+                                    backend.dispatch(&[]);
+                                    if backend.writable() && self.read_proxy {
+                                        log::trace!("backend connection is writable, restore reading from proxy");
+                                        self.try_read_proxy(poll, resolver);
+                                        self.read_proxy = false;
+                                    }
                                 }
                             } else {
                                 log::error!("connection:{} has invalid status", self.index);

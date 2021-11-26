@@ -1,7 +1,7 @@
 use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
-use mio::{event::Event, net::TcpStream, Interest, Poll, Token};
+use mio::{net::TcpStream, Interest, Poll, Token};
 
 use crate::{
     config::OPTIONS,
@@ -20,7 +20,6 @@ pub struct TcpBackend {
     timeout: Duration,
     send_buffer: BytesMut,
     recv_buffer: Vec<u8>,
-    token: Token,
 }
 
 impl TcpBackend {
@@ -31,19 +30,11 @@ impl TcpBackend {
         Ok(TcpBackend {
             conn,
             index,
-            token,
             timeout: OPTIONS.tcp_idle_duration,
             status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
         })
-    }
-    fn do_read(&mut self, conn: &mut TlsConn) {
-        if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
-            self.shutdown();
-        }
-
-        conn.do_send();
     }
 
     fn do_send(&mut self, data: &[u8]) {
@@ -54,15 +45,6 @@ impl TcpBackend {
 }
 
 impl Backend for TcpBackend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn) {
-        if event.is_readable() && conn.writable() {
-            self.do_read(conn);
-        }
-        if event.is_writable() {
-            self.dispatch(&[]);
-        }
-    }
-
     fn dispatch(&mut self, buffer: &[u8]) {
         // send immediately first
         if self.send_buffer.is_empty() {
@@ -73,7 +55,6 @@ impl Backend for TcpBackend {
             self.do_send(buffer.as_ref());
         }
     }
-
     fn get_timeout(&self) -> Duration {
         self.timeout
     }
@@ -82,21 +63,12 @@ impl Backend for TcpBackend {
         self.send_buffer.is_empty() && self.alive()
     }
 
-    fn reregister(&mut self, poll: &Poll) {
-        if let Err(err) = poll.registry().reregister(
-            &mut self.conn,
-            self.token,
-            Interest::READABLE | Interest::WRITABLE,
-        ) {
-            log::warn!("connection:{} reregister server failed:{}", self.index, err);
+    fn do_read(&mut self, conn: &mut TlsConn) {
+        if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
             self.shutdown();
-        } else {
-            log::trace!(
-                "connection:{} reregistered token:{}",
-                self.index,
-                self.token.0
-            );
         }
+
+        conn.do_send();
     }
 }
 

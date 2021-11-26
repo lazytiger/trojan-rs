@@ -37,14 +37,13 @@ pub struct TlsServer {
 }
 
 pub trait Backend: StatusProvider {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn);
     fn dispatch(&mut self, data: &[u8]);
     fn timeout(&self, t1: Instant, t2: Instant) -> bool {
         t2 - t1 > self.get_timeout()
     }
     fn get_timeout(&self) -> Duration;
     fn writable(&self) -> bool;
-    fn reregister(&mut self, poll: &Poll);
+    fn do_read(&mut self, conn: &mut TlsConn);
 }
 
 impl TlsServer {
