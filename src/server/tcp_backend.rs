@@ -2,43 +2,43 @@ use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::TcpStream, Interest, Poll, Token};
-use rustls::ServerConnection;
 
 use crate::{
-    config::Opts,
-    proto::{MAX_BUFFER_SIZE, MAX_PACKET_SIZE},
+    config::OPTIONS,
+    proto::MAX_PACKET_SIZE,
     server::tls_server::Backend,
+    status::{ConnStatus, StatusProvider},
     tcp_util,
-    tls_conn::{ConnStatus, TlsConn},
+    tls_conn::TlsConn,
+    types::Result,
 };
 
 pub struct TcpBackend {
     conn: TcpStream,
     status: ConnStatus,
-    interest: Interest,
     index: usize,
-    token: Token,
     timeout: Duration,
     send_buffer: BytesMut,
     recv_buffer: Vec<u8>,
 }
 
 impl TcpBackend {
-    pub fn new(conn: TcpStream, index: usize, token: Token, opts: &'static Opts) -> TcpBackend {
-        TcpBackend {
+    pub fn new(mut conn: TcpStream, index: usize, token: Token, poll: &Poll) -> Result<TcpBackend> {
+        poll.registry()
+            .register(&mut conn, token, Interest::READABLE | Interest::WRITABLE)?;
+        conn.set_nodelay(true)?;
+        Ok(TcpBackend {
             conn,
-            timeout: opts.tcp_idle_duration,
+            timeout: OPTIONS.tcp_idle_duration,
             status: ConnStatus::Established,
-            interest: Interest::READABLE,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             index,
-            token,
-        }
+        })
     }
-    fn do_read(&mut self, conn: &mut TlsConn<ServerConnection>) {
-        if !tcp_util::tcp_read_server(self.index, &self.conn, &mut self.recv_buffer, conn) {
-            self.status = ConnStatus::Closing;
+    fn do_read(&mut self, conn: &mut TlsConn) {
+        if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
+            self.shutdown();
         }
 
         conn.do_send();
@@ -46,35 +46,13 @@ impl TcpBackend {
 
     fn do_send(&mut self, data: &[u8]) {
         if !tcp_util::tcp_send(self.index, &self.conn, &mut self.send_buffer, data) {
-            self.status = ConnStatus::Closing;
-            return;
-        }
-
-        if let ConnStatus::Shutdown = self.status {
-            if self.send_buffer.is_empty() {
-                log::debug!("connection:{} is closing for no data to send", self.index);
-                self.status = ConnStatus::Closing;
-            }
-        }
-    }
-
-    fn setup(&mut self, poll: &Poll) {
-        if let Err(err) = poll
-            .registry()
-            .reregister(&mut self.conn, self.token, self.interest)
-        {
-            log::error!(
-                "connection:{} reregister tcp target failed:{}",
-                self.index,
-                err
-            );
-            self.status = ConnStatus::Closing;
+            self.shutdown();
         }
     }
 }
 
 impl Backend for TcpBackend {
-    fn ready(&mut self, event: &Event, conn: &mut TlsConn<ServerConnection>) {
+    fn ready(&mut self, event: &Event, conn: &mut TlsConn) {
         if event.is_readable() {
             self.do_read(conn);
         }
@@ -94,78 +72,29 @@ impl Backend for TcpBackend {
         }
     }
 
-    fn reregister(&mut self, poll: &Poll, readable: bool) {
-        match self.status {
-            ConnStatus::Closing => {
-                let _ = poll.registry().deregister(&mut self.conn);
-            }
-            ConnStatus::Closed => {}
-            _ => {
-                let mut changed = false;
-                if !self.send_buffer.is_empty() && !self.interest.is_writable() {
-                    self.interest |= Interest::WRITABLE;
-                    changed = true;
-                    log::debug!("connection:{} add writable to tcp target", self.index);
-                }
-                if self.send_buffer.is_empty() && self.interest.is_writable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::WRITABLE)
-                        .unwrap_or(Interest::READABLE);
-                    changed = true;
-                    log::debug!("connection:{} remove writable from tcp target", self.index);
-                }
-                if readable && !self.interest.is_readable() {
-                    self.interest |= Interest::READABLE;
-                    log::debug!("connection:{} add readable to tcp target", self.index);
-                    changed = true;
-                }
-                if !readable && self.interest.is_readable() {
-                    self.interest = self
-                        .interest
-                        .remove(Interest::READABLE)
-                        .unwrap_or(Interest::WRITABLE);
-                    log::debug!("connection:{} remove readable from tcp target", self.index);
-                    changed = true;
-                }
-
-                if changed {
-                    self.setup(poll);
-                }
-            }
-        }
-    }
-
-    fn check_close(&mut self, poll: &Poll) {
-        if let ConnStatus::Closing = self.status {
-            let _ = poll.registry().deregister(&mut self.conn);
-            let _ = self.conn.shutdown(Shutdown::Both);
-            self.status = ConnStatus::Closed;
-        }
-    }
-
     fn get_timeout(&self) -> Duration {
         self.timeout
     }
+}
 
-    fn status(&self) -> ConnStatus {
+impl StatusProvider for TcpBackend {
+    fn set_status(&mut self, status: ConnStatus) {
+        self.status = status
+    }
+
+    fn get_status(&self) -> ConnStatus {
         self.status
     }
 
-    fn shutdown(&mut self, poll: &Poll) {
-        if self.send_buffer.is_empty() {
-            self.status = ConnStatus::Closing;
-            self.check_close(poll);
-            return;
-        }
-
-        self.interest = Interest::WRITABLE;
-        self.status = ConnStatus::Shutdown;
-        self.setup(poll);
-        self.check_close(poll);
+    fn close_conn(&self) {
+        let _ = self.conn.shutdown(Shutdown::Both);
     }
 
-    fn writable(&self) -> bool {
-        self.send_buffer.len() < MAX_BUFFER_SIZE
+    fn deregister(&mut self, poll: &Poll) {
+        let _ = poll.registry().deregister(&mut self.conn);
+    }
+
+    fn finish_send(&mut self) -> bool {
+        self.send_buffer.is_empty()
     }
 }

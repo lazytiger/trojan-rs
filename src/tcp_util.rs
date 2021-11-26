@@ -2,46 +2,38 @@ use std::io::{Read, Write};
 
 use bytes::BytesMut;
 use mio::net::TcpStream;
-use rustls::{ClientConnection, ServerConnection};
 
 use crate::tls_conn::TlsConn;
 
-macro_rules! impl_tcp_read {
-    ($name:ident, $conn:ty) => {
-        pub fn $name(
-            index: usize,
-            mut conn: &TcpStream,
-            recv_buf: &mut Vec<u8>,
-            server_conn: &mut TlsConn<$conn>,
-        ) -> bool {
-            loop {
-                match conn.read(recv_buf.as_mut_slice()) {
-                    Ok(size) => {
-                        log::debug!("connection:{} read {} bytes from backend", index, size);
-                        if size == 0 {
-                            log::warn!("connection:{} meets end of file", index);
-                            return false;
-                        } else if !server_conn.write_session(&recv_buf.as_slice()[..size]) {
-                            return false;
-                        }
-                    }
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        log::debug!("connection:{} read from backend blocked", index);
-                        break;
-                    }
-                    Err(err) => {
-                        log::warn!("connection:{} read from backend failed:{}", index, err);
-                        return false;
-                    }
+pub fn tcp_read(
+    index: usize,
+    mut conn: &TcpStream,
+    recv_buf: &mut Vec<u8>,
+    server_conn: &mut TlsConn,
+) -> bool {
+    loop {
+        match conn.read(recv_buf.as_mut_slice()) {
+            Ok(size) => {
+                log::debug!("connection:{} read {} bytes from backend", index, size);
+                if size == 0 {
+                    log::warn!("connection:{} meets end of file", index);
+                    return false;
+                } else if !server_conn.write_session(&recv_buf.as_slice()[..size]) {
+                    break;
                 }
             }
-            true
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                log::debug!("connection:{} read from backend blocked", index);
+                break;
+            }
+            Err(err) => {
+                log::warn!("connection:{} read from backend failed:{}", index, err);
+                return false;
+            }
         }
-    };
+    }
+    true
 }
-
-impl_tcp_read!(tcp_read_server, ServerConnection);
-impl_tcp_read!(tcp_read_client, ClientConnection);
 
 pub fn tcp_send(
     index: usize,

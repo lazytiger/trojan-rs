@@ -1,5 +1,6 @@
 use std::{any::Any, io::Result, net::SocketAddr};
 
+#[allow(dead_code)]
 pub fn set_mark<T: Any>(_socket: &T, _mark: u8) -> Result<()> {
     Ok(())
 }

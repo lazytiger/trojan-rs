@@ -787,6 +787,7 @@ dependencies = [
  "derive_more",
  "dns-lookup",
  "fern",
+ "lazy_static",
  "libc",
  "log",
  "mio 0.8.0",
@@ -927,9 +928,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b533367e7546a31c15093b12a273004b79eb3b57b15359af710460f9aee94cf8"
+checksum = "c475786c6f47219345717a043a37ec04cb4bc185e28853adcc4fa0a947eba630"
 dependencies = [
  "webpki",
 ]

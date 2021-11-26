@@ -14,7 +14,7 @@ use rustls_pemfile::{certs, read_one, Item};
 
 pub use tls_server::TlsServer;
 
-use crate::{config::Opts, resolver::DnsResolver, server::tls_server::PollEvent};
+use crate::{config::OPTIONS, resolver::DnsResolver, server::tls_server::PollEvent};
 
 mod connection;
 mod tcp_backend;
@@ -56,9 +56,9 @@ fn load_private_key(filename: &str) -> rustls::PrivateKey {
     )
 }
 
-fn init_config(opts: &Opts) -> Arc<ServerConfig> {
-    let client_auth = if opts.server_args().check_auth {
-        let roots = load_certs(opts.server_args().cert.as_str());
+fn init_config() -> Arc<ServerConfig> {
+    let client_auth = if OPTIONS.server_args().check_auth {
+        let roots = load_certs(OPTIONS.server_args().cert.as_str());
         let mut client_auth_roots = RootCertStore::empty();
         for root in roots {
             client_auth_roots.add(&root).unwrap();
@@ -69,8 +69,8 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
     };
 
     let suits = rustls::ALL_CIPHER_SUITES.to_vec();
-    let certs = load_certs(opts.server_args().cert.as_str());
-    let private_key = load_private_key(opts.server_args().key.as_str());
+    let certs = load_certs(OPTIONS.server_args().cert.as_str());
+    let private_key = load_private_key(OPTIONS.server_args().key.as_str());
     let mut config = ServerConfig::builder()
         .with_cipher_suites(&suits)
         .with_safe_default_kx_groups()
@@ -82,7 +82,7 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
     config.key_log = Arc::new(KeyLogFile::new());
 
     let mut protocols: Vec<Vec<u8>> = Vec::new();
-    for protocol in &opts.server_args().alpn {
+    for protocol in &OPTIONS.server_args().alpn {
         protocols.push(protocol.as_str().into());
     }
     if !protocols.is_empty() {
@@ -91,17 +91,17 @@ fn init_config(opts: &Opts) -> Arc<ServerConfig> {
     Arc::new(config)
 }
 
-pub fn run(opts: &'static Opts) {
-    let config = init_config(opts);
+pub fn run() {
+    let config = init_config();
     let mut poll = Poll::new().unwrap();
     let mut resolver = DnsResolver::new(&poll, Token(RESOLVER));
-    resolver.set_cache_timeout(opts.server_args().dns_cache_time);
-    let addr = opts.local_addr.parse().unwrap();
+    resolver.set_cache_timeout(OPTIONS.server_args().dns_cache_time);
+    let addr = OPTIONS.local_addr.parse().unwrap();
     let mut listener = TcpListener::bind(addr).unwrap();
     poll.registry()
         .register(&mut listener, Token(LISTENER), Interest::READABLE)
         .unwrap();
-    let mut server = TlsServer::new(listener, config, opts);
+    let mut server = TlsServer::new(listener, config);
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);

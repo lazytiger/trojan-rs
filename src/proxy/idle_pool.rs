@@ -4,36 +4,35 @@ use std::{
 };
 
 use mio::{event::Event, net::TcpStream, Poll, Token};
-use rustls::{ClientConfig, ClientConnection, ServerName};
+use rustls::{ClientConfig, ClientConnection, Connection, ServerName};
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER},
     resolver::DnsResolver,
-    sys,
+    status::StatusProvider,
     tls_conn::TlsConn,
+    types::Result,
 };
 
 pub struct IdlePool {
-    pool: Vec<TlsConn<ClientConnection>>,
+    pool: Vec<TlsConn>,
     next_index: usize,
     size: usize,
     addr: SocketAddr,
     domain: String,
     port: u16,
-    marker: u8,
     config: Arc<ClientConfig>,
     hostname: ServerName,
 }
 
 impl IdlePool {
-    pub fn new(opts: &Opts, config: Arc<ClientConfig>, hostname: ServerName) -> IdlePool {
+    pub fn new(config: Arc<ClientConfig>, hostname: ServerName) -> IdlePool {
         IdlePool {
-            size: opts.proxy_args().pool_size + 1,
-            addr: opts.back_addr.unwrap(),
-            marker: opts.marker,
-            port: opts.proxy_args().port,
-            domain: opts.proxy_args().hostname.clone(),
+            size: OPTIONS.proxy_args().pool_size + 1,
+            addr: OPTIONS.back_addr.unwrap(),
+            port: OPTIONS.proxy_args().port,
+            domain: OPTIONS.proxy_args().hostname.clone(),
             pool: Vec::new(),
             next_index: MIN_INDEX,
             config,
@@ -47,11 +46,7 @@ impl IdlePool {
         }
     }
 
-    pub fn get(
-        &mut self,
-        poll: &Poll,
-        resolver: &DnsResolver,
-    ) -> Option<TlsConn<ClientConnection>> {
+    pub fn get(&mut self, poll: &Poll, resolver: &DnsResolver) -> Option<TlsConn> {
         self.alloc(poll, resolver);
         self.pool.pop()
     }
@@ -59,55 +54,35 @@ impl IdlePool {
     fn alloc(&mut self, poll: &Poll, resolver: &DnsResolver) {
         let size = self.pool.len();
         for _ in size..self.size {
-            let conn = self.new_conn();
-            if let Some(mut conn) = conn {
-                if conn.register(poll) {
-                    self.pool.push(conn);
+            match self.new_conn() {
+                Ok(mut conn) => {
+                    if conn.register(poll) {
+                        self.pool.push(conn);
+                    } else {
+                        conn.check_status(poll);
+                    }
                 }
-            } else {
-                self.update_dns(resolver);
+                Err(err) => {
+                    log::error!("new connection to remote server failed:{}", err);
+                    self.update_dns(resolver);
+                }
             }
         }
     }
 
-    fn new_conn(&mut self) -> Option<TlsConn<ClientConnection>> {
-        let server = match TcpStream::connect(self.addr) {
-            Ok(server) => {
-                if let Err(err) = sys::set_mark(&server, self.marker) {
-                    log::error!("set mark failed:{}", err);
-                    None
-                } else if let Err(err) = server.set_nodelay(true) {
-                    log::error!("set nodelay:{}", err);
-                    None
-                } else {
-                    Some(server)
-                }
-            }
-            Err(err) => {
-                log::error!("connection to server failed:{}", err);
-                None
-            }
-        };
-        if let Some(server) = server {
-            match ClientConnection::new(self.config.clone(), self.hostname.clone()) {
-                Ok(session) => {
-                    let index = next_index(&mut self.next_index);
-                    let conn = TlsConn::<ClientConnection>::new(
-                        index,
-                        Token(index * CHANNEL_CNT + CHANNEL_IDLE),
-                        session,
-                        server,
-                    );
-                    Some(conn)
-                }
-                Err(err) => {
-                    log::error!("create client connection failed:{}", err);
-                    None
-                }
-            }
-        } else {
-            None
-        }
+    fn new_conn(&mut self) -> Result<TlsConn> {
+        let server = TcpStream::connect(self.addr)?;
+        //sys::set_mark(&server, self.marker)?;
+        server.set_nodelay(true)?;
+        let session = ClientConnection::new(self.config.clone(), self.hostname.clone())?;
+        let index = next_index(&mut self.next_index);
+        let conn = TlsConn::new(
+            index,
+            Token(index * CHANNEL_CNT + CHANNEL_IDLE),
+            Connection::Client(session),
+            server,
+        );
+        Ok(conn)
     }
 
     fn update_dns(&mut self, resolver: &DnsResolver) {
@@ -133,8 +108,8 @@ impl IdlePool {
                     log::error!("found data in https handshake phase");
                 }
                 conn.do_send();
-                conn.check_close(poll);
-                if conn.closed() {
+                conn.check_status(poll);
+                if conn.deregistered() {
                     self.pool.remove(i);
                 }
                 found = true;

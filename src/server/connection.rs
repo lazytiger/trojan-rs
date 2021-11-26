@@ -6,12 +6,11 @@ use std::{
 
 use mio::{
     net::{TcpStream, UdpSocket},
-    Interest, Poll, Token,
+    Poll, Token,
 };
-use rustls::ServerConnection;
 
 use crate::{
-    config::Opts,
+    config::OPTIONS,
     proto::{Sock5Address, TrojanRequest, CONNECT},
     resolver::DnsResolver,
     server::{
@@ -20,7 +19,7 @@ use crate::{
         udp_backend::UdpBackend,
         CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY,
     },
-    sys,
+    status::StatusProvider,
     tls_conn::TlsConn,
 };
 
@@ -33,20 +32,18 @@ enum Status {
 
 pub struct Connection {
     index: usize,
-    proxy: TlsConn<ServerConnection>,
+    proxy: TlsConn,
     status: Status,
     sock5_addr: Sock5Address,
     command: u8,
     last_active_time: Instant,
     backend: Option<Box<dyn Backend>>,
-    closing: bool,
     target_addr: Option<SocketAddr>,
     data: Vec<u8>,
-    opts: &'static Opts,
 }
 
 impl Connection {
-    pub fn new(index: usize, proxy: TlsConn<ServerConnection>, opts: &'static Opts) -> Connection {
+    pub fn new(index: usize, proxy: TlsConn) -> Connection {
         Connection {
             index,
             proxy,
@@ -55,10 +52,17 @@ impl Connection {
             sock5_addr: Sock5Address::None,
             last_active_time: Instant::now(),
             backend: None,
-            closing: false,
             target_addr: None,
             data: Vec::new(),
-            opts,
+        }
+    }
+
+    pub fn destroy(&mut self, poll: &Poll) {
+        self.proxy.shutdown();
+        self.proxy.check_status(poll);
+        if let Some(backend) = &mut self.backend {
+            backend.shutdown();
+            backend.check_status(poll);
         }
     }
 
@@ -67,13 +71,6 @@ impl Connection {
             backend.timeout(self.last_active_time, recent_active_time)
         } else {
             false
-        }
-    }
-
-    pub fn close_now(&mut self, poll: &Poll) {
-        self.proxy.shutdown(poll);
-        if let Some(backend) = self.backend.as_mut() {
-            backend.shutdown(poll);
         }
     }
 
@@ -109,23 +106,17 @@ impl Connection {
             PollEvent::Dns((_, ip)) => self.try_resolve(poll, ip),
         }
 
-        // handshake failed, no dns query on the way, close now.
-        if self.closing {
-            self.proxy.shutdown(poll);
-            return;
-        }
-
-        self.proxy.check_close(poll);
         if let Some(backend) = &mut self.backend {
-            backend.reregister(poll, self.proxy.writable());
-            backend.check_close(poll);
-            if self.proxy.closed() && !backend.closed() {
-                //proxy is closing, backend is ok, register backend with write only
-                backend.shutdown(poll);
-            } else if backend.closed() && !self.proxy.closed() {
-                //backend is closing, proxy is ok, register proxy with write only
-                self.proxy.shutdown(poll);
+            if self.proxy.is_shutdown() {
+                backend.peer_closed();
             }
+            if backend.is_shutdown() {
+                self.proxy.peer_closed();
+            }
+        }
+        self.proxy.check_status(poll);
+        if let Some(backend) = &mut self.backend {
+            backend.check_status(poll);
         }
     }
 
@@ -144,7 +135,7 @@ impl Connection {
                     self.dispatch(&[], poll, None);
                 } else {
                     log::error!("connection:{} resolve host:{} failed", self.index, domain);
-                    self.closing = true;
+                    self.proxy.shutdown();
                 }
             } else {
                 log::error!("connection:{} got bug, not a resolver status", self.index);
@@ -168,7 +159,7 @@ impl Connection {
     }
 
     fn try_handshake(&mut self, buffer: &mut &[u8], resolver: &mut &mut DnsResolver) -> bool {
-        if let Some(request) = TrojanRequest::parse(buffer, self.opts) {
+        if let Some(request) = TrojanRequest::parse(buffer) {
             self.command = request.command;
             self.sock5_addr = request.address;
             *buffer = request.payload;
@@ -205,9 +196,9 @@ impl Connection {
                 log::debug!(
                     "connection:{} got default target address:{}",
                     self.index,
-                    self.opts.back_addr.as_ref().unwrap()
+                    OPTIONS.back_addr.as_ref().unwrap()
                 );
-                self.target_addr = self.opts.back_addr;
+                self.target_addr = OPTIONS.back_addr;
             }
         }
         true
@@ -224,8 +215,7 @@ impl Connection {
                 Status::HandShake => {
                     if self.try_handshake(&mut buffer, resolver.as_mut().unwrap()) {
                         self.status = Status::DnsWait;
-                    } else {
-                        return;
+                        continue;
                     }
                 }
                 Status::DnsWait => {
@@ -233,23 +223,17 @@ impl Connection {
                         //if dns query is not done, cache data now
                         if let Err(err) = self.data.write(buffer) {
                             log::warn!("connection:{} cache data failed {}", self.index, err);
-                            self.closing = true;
-                            return;
-                        }
-
-                        if self.target_addr.is_none() {
+                            self.proxy.shutdown();
+                        } else if self.target_addr.is_none() {
                             log::warn!("connection:{} dns query not done yet", self.index);
-                            return;
-                        }
-
-                        if self.try_setup_tcp_target(poll) {
+                        } else if self.try_setup_tcp_target(poll) {
+                            buffer = &[];
                             self.status = Status::TCPForward;
+                            continue;
                         }
-                        return;
                     } else if self.try_setup_udp_target(poll) {
                         self.status = Status::UDPForward;
-                    } else {
-                        return;
+                        continue;
                     }
                 }
                 _ => {
@@ -258,9 +242,9 @@ impl Connection {
                     } else {
                         log::error!("connection:{} has no backend yet", self.index);
                     }
-                    break;
                 }
             }
+            break;
         }
     }
 
@@ -270,37 +254,26 @@ impl Connection {
             self.index,
             self.target_addr.unwrap()
         );
-        match TcpStream::connect(self.target_addr.clone().unwrap()) {
-            Ok(mut tcp_target) => {
-                if let Err(err) = sys::set_mark(&tcp_target, self.opts.marker) {
-                    log::error!("connection:{} set mark failed:{}", self.index, err);
-                    self.closing = true;
-                    return false;
-                } else if let Err(err) = poll.registry().register(
-                    &mut tcp_target,
-                    self.target_token(),
-                    Interest::READABLE,
-                ) {
-                    log::error!("connection:{} register target failed:{}", self.index, err);
-                    self.closing = true;
-                    return false;
-                } else if let Err(err) = tcp_target.set_nodelay(true) {
-                    log::error!("connection:{} set nodelay failed:{}", self.index, err);
-                    self.closing = true;
-                    return false;
+        match TcpStream::connect(self.target_addr.unwrap()) {
+            Ok(tcp_target) => {
+                match TcpBackend::new(tcp_target, self.index, self.target_token(), poll) {
+                    Ok(mut backend) => {
+                        if !self.data.is_empty() {
+                            backend.dispatch(self.data.as_slice());
+                            self.data.clear();
+                            self.data.shrink_to_fit();
+                        }
+                        self.backend.replace(Box::new(backend));
+                    }
+                    Err(err) => {
+                        log::error!("connection:{} setup backend failed:{}", self.index, err);
+                        self.proxy.shutdown();
+                    }
                 }
-                let mut backend =
-                    TcpBackend::new(tcp_target, self.index, self.target_token(), self.opts);
-                if !self.data.is_empty() {
-                    backend.dispatch(self.data.as_slice());
-                    self.data.clear();
-                    self.data.shrink_to_fit();
-                }
-                self.backend.replace(Box::new(backend));
             }
             Err(err) => {
                 log::warn!("connection:{} connect to target failed:{}", self.index, err);
-                self.closing = true;
+                self.proxy.shutdown();
                 return false;
             }
         }
@@ -309,34 +282,22 @@ impl Connection {
 
     fn try_setup_udp_target(&mut self, poll: &Poll) -> bool {
         log::debug!("connection:{} got udp connection", self.index);
-        match UdpSocket::bind(self.opts.empty_addr.clone().unwrap()) {
+        match UdpSocket::bind(OPTIONS.empty_addr.unwrap()) {
             Err(err) => {
                 log::error!("connection:{} bind udp socket failed:{}", self.index, err);
-                self.closing = true;
+                self.proxy.shutdown();
                 return false;
             }
-            Ok(mut udp_target) => {
-                if let Err(err) = sys::set_mark(&udp_target, self.opts.marker) {
-                    log::error!("connection:{} set mark failed:{}", self.index, err);
-                    self.closing = true;
-                    return false;
+            Ok(udp_target) => {
+                match UdpBackend::new(udp_target, self.index, self.target_token(), poll) {
+                    Ok(backend) => {
+                        self.backend.replace(Box::new(backend));
+                    }
+                    Err(err) => {
+                        log::error!("connection:{} setup backend failed:{}", self.index, err);
+                        self.proxy.shutdown();
+                    }
                 }
-                if let Err(err) = poll.registry().register(
-                    &mut udp_target,
-                    self.target_token(),
-                    Interest::READABLE,
-                ) {
-                    log::error!(
-                        "connection:{} register udp target failed:{}",
-                        self.index,
-                        err
-                    );
-                    self.closing = true;
-                    return false;
-                }
-                let backend =
-                    UdpBackend::new(udp_target, self.index, self.target_token(), self.opts);
-                self.backend.replace(Box::new(backend));
             }
         }
         true
@@ -344,9 +305,9 @@ impl Connection {
 
     pub fn destroyed(&self) -> bool {
         if let Some(backend) = &self.backend {
-            self.proxy.closed() && backend.closed()
+            self.proxy.deregistered() && backend.deregistered()
         } else {
-            self.proxy.closed()
+            self.proxy.deregistered()
         }
     }
 
