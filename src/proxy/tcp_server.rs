@@ -185,11 +185,14 @@ impl Connection {
         self.last_active_time = Instant::now();
         match event.token().0 % CHANNEL_CNT {
             CHANNEL_CLIENT => {
-                if event.is_readable() && self.server_conn.writable() {
-                    self.try_read_client();
-                } else {
-                    self.register_client = true;
+                if event.is_readable() {
+                    if self.server_conn.writable() {
+                        self.try_read_client();
+                    } else {
+                        self.register_client = true;
+                    }
                 }
+
                 if event.is_writable() {
                     self.try_send_client(&[]);
                     if self.writable() && self.register_server {
@@ -200,10 +203,13 @@ impl Connection {
             }
             CHANNEL_TCP => {
                 if event.is_readable() && self.writable() {
-                    self.try_read_server();
-                } else {
-                    self.register_server = true;
+                    if self.writable() {
+                        self.try_read_server();
+                    } else {
+                        self.register_server = true;
+                    }
                 }
+
                 if event.is_writable() {
                     self.try_send_server();
                     if self.server_conn.writable() && self.register_client {
