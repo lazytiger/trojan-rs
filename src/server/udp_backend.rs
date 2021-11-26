@@ -23,6 +23,7 @@ pub struct UdpBackend {
     bytes_read: usize,
     bytes_sent: usize,
     remote_addr: SocketAddr,
+    token: Token,
 }
 
 impl UdpBackend {
@@ -39,6 +40,7 @@ impl UdpBackend {
             socket,
             index,
             remote_addr,
+            token,
             send_buffer: Default::default(),
             recv_body: vec![0u8; MAX_PACKET_SIZE],
             recv_head: Default::default(),
@@ -164,6 +166,27 @@ impl Backend for UdpBackend {
 
     fn get_timeout(&self) -> Duration {
         self.timeout
+    }
+
+    fn writable(&self) -> bool {
+        self.send_buffer.is_empty() && self.alive()
+    }
+
+    fn reregister(&mut self, poll: &Poll) {
+        if let Err(err) = poll.registry().reregister(
+            &mut self.socket,
+            self.token,
+            Interest::READABLE | Interest::WRITABLE,
+        ) {
+            log::warn!("connection:{} reregister server failed:{}", self.index, err);
+            self.shutdown();
+        } else {
+            log::trace!(
+                "connection:{} reregistered token:{}",
+                self.index,
+                self.token.0
+            );
+        }
     }
 }
 

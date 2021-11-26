@@ -43,6 +43,8 @@ pub trait Backend: StatusProvider {
         t2 - t1 > self.get_timeout()
     }
     fn get_timeout(&self) -> Duration;
+    fn writable(&self) -> bool;
+    fn reregister(&mut self, poll: &Poll);
 }
 
 impl TlsServer {

@@ -13,6 +13,7 @@ pub struct TlsConn {
     index: usize,
     token: Token,
     status: ConnStatus,
+    writable: bool,
 }
 
 impl TlsConn {
@@ -24,15 +25,20 @@ impl TlsConn {
             session,
             stream,
             status: ConnStatus::Established,
+            writable: true,
         }
     }
 
     pub fn reset_index(&mut self, index: usize, token: Token, poll: &Poll) -> bool {
         self.index = index;
         self.token = token;
+        self.reregister(poll)
+    }
+
+    pub fn reregister(&mut self, poll: &Poll) -> bool {
         if let Err(err) = poll.registry().reregister(
             &mut self.stream,
-            token,
+            self.token,
             Interest::READABLE | Interest::WRITABLE,
         ) {
             log::warn!(
@@ -122,39 +128,42 @@ impl TlsConn {
         }
     }
 
-    pub fn do_send(&mut self) -> bool {
+    pub fn do_send(&mut self) {
         loop {
             if !self.session.wants_write() {
-                return true;
+                break;
             }
             match self.session.write_tls(&mut self.stream) {
                 Ok(size) => {
                     log::debug!("connection:{} write {} bytes to server", self.index(), size);
+                    self.writable = true;
+                    continue;
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     log::debug!("connection:{} write to server blocked", self.index());
-                    return true;
+                    self.writable = false;
                 }
                 Err(err) => {
                     log::warn!("connection:{} write to server failed:{}", self.index(), err);
                     self.shutdown();
-                    return false;
                 }
             }
+            break;
         }
     }
 
     pub fn write_session(&mut self, data: &[u8]) -> bool {
-        if let Err(err) = self.session.writer().write_all(data) {
-            self.shutdown();
-            log::warn!(
-                "connection:{} write data to server session failed:{}",
-                self.index(),
-                err
-            );
-            false
-        } else {
-            self.do_send()
+        match self.session.writer().write_all(data) {
+            Ok(_) => true,
+            Err(err) => {
+                self.shutdown();
+                log::warn!(
+                    "connection:{} write data to server session failed:{}",
+                    self.index(),
+                    err
+                );
+                false
+            }
         }
     }
 
@@ -179,6 +188,10 @@ impl TlsConn {
 
     pub fn deregistered(&self) -> bool {
         matches!(self.status, ConnStatus::Deregistered)
+    }
+
+    pub fn writable(&self) -> bool {
+        self.writable && self.alive()
     }
 }
 

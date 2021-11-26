@@ -173,23 +173,35 @@ impl Connection {
         token.0 / CHANNEL_CNT
     }
 
+    fn writable(&self) -> bool {
+        self.send_buffer.is_empty() && self.alive()
+    }
+
     fn ready(&mut self, event: &Event, poll: &Poll) {
         self.last_active_time = Instant::now();
         match event.token().0 % CHANNEL_CNT {
             CHANNEL_CLIENT => {
-                if event.is_readable() {
+                if event.is_readable() && self.server_conn.writable() {
                     self.try_read_client();
                 }
                 if event.is_writable() {
+                    let writable = self.writable();
                     self.try_send_client(&[]);
+                    if self.writable() && !writable {
+                        self.server_conn.reregister(poll);
+                    }
                 }
             }
             CHANNEL_TCP => {
-                if event.is_readable() {
+                if event.is_readable() && self.writable() {
                     self.try_read_server();
                 }
                 if event.is_writable() {
+                    let writable = self.server_conn.writable();
                     self.try_send_server();
+                    if self.server_conn.writable() && !writable {
+                        self.reregister(poll);
+                    }
                 }
             }
             _ => {
@@ -248,6 +260,20 @@ impl Connection {
 
     fn try_send_server(&mut self) {
         self.server_conn.do_send();
+    }
+
+    fn reregister(&mut self, poll: &Poll) {
+        let token = self.client_token();
+        if let Err(err) = poll.registry().reregister(
+            &mut self.client,
+            token,
+            Interest::READABLE | Interest::WRITABLE,
+        ) {
+            log::warn!("connection:{} reregister server failed:{}", self.index, err);
+            self.shutdown();
+        } else {
+            log::trace!("connection:{} reregistered token:{}", self.index, token.0,);
+        }
     }
 }
 

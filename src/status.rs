@@ -12,6 +12,12 @@ pub trait StatusProvider {
     fn deregistered(&self) -> bool {
         matches!(self.get_status(), ConnStatus::Deregistered)
     }
+    fn alive(&self) -> bool {
+        matches!(
+            self.get_status(),
+            ConnStatus::PeerClosed | ConnStatus::Established
+        )
+    }
     fn is_shutdown(&self) -> bool {
         matches!(self.get_status(), ConnStatus::Shutdown)
     }

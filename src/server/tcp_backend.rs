@@ -20,6 +20,7 @@ pub struct TcpBackend {
     timeout: Duration,
     send_buffer: BytesMut,
     recv_buffer: Vec<u8>,
+    token: Token,
 }
 
 impl TcpBackend {
@@ -29,11 +30,12 @@ impl TcpBackend {
         conn.set_nodelay(true)?;
         Ok(TcpBackend {
             conn,
+            index,
+            token,
             timeout: OPTIONS.tcp_idle_duration,
             status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
-            index,
         })
     }
     fn do_read(&mut self, conn: &mut TlsConn) {
@@ -53,7 +55,7 @@ impl TcpBackend {
 
 impl Backend for TcpBackend {
     fn ready(&mut self, event: &Event, conn: &mut TlsConn) {
-        if event.is_readable() {
+        if event.is_readable() && conn.writable() {
             self.do_read(conn);
         }
         if event.is_writable() {
@@ -74,6 +76,27 @@ impl Backend for TcpBackend {
 
     fn get_timeout(&self) -> Duration {
         self.timeout
+    }
+
+    fn writable(&self) -> bool {
+        self.send_buffer.is_empty() && self.alive()
+    }
+
+    fn reregister(&mut self, poll: &Poll) {
+        if let Err(err) = poll.registry().reregister(
+            &mut self.conn,
+            self.token,
+            Interest::READABLE | Interest::WRITABLE,
+        ) {
+            log::warn!("connection:{} reregister server failed:{}", self.index, err);
+            self.shutdown();
+        } else {
+            log::trace!(
+                "connection:{} reregistered token:{}",
+                self.index,
+                self.token.0
+            );
+        }
     }
 }
 

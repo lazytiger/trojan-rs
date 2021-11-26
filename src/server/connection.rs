@@ -85,16 +85,33 @@ impl Connection {
             PollEvent::Network(event) => {
                 if self.proxy_token(event.token()) {
                     if event.is_readable() {
-                        self.try_read_proxy(poll, resolver);
+                        let writable = if let Some(backend) = self.backend.as_ref() {
+                            backend.writable()
+                        } else {
+                            true
+                        };
+                        if writable {
+                            self.try_read_proxy(poll, resolver);
+                        }
                     }
                     if event.is_writable() {
+                        let writable = self.proxy.writable();
                         self.try_send_proxy();
+                        if self.proxy.writable() && !writable {
+                            if let Some(backend) = self.backend.as_mut() {
+                                backend.reregister(poll);
+                            }
+                        }
                     }
                 } else {
                     match self.status {
                         Status::UDPForward | Status::TCPForward => {
                             if let Some(backend) = self.backend.as_mut() {
+                                let writable = backend.writable();
                                 backend.ready(event, &mut self.proxy);
+                                if backend.writable() && !writable {
+                                    self.proxy.reregister(poll);
+                                }
                             } else {
                                 log::error!("connection:{} has invalid status", self.index);
                             }
