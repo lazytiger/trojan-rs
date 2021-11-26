@@ -24,7 +24,7 @@ impl TlsConn {
             token,
             session,
             stream,
-            writable: false,
+            writable: true,
             status: ConnStatus::Established,
         }
     }
