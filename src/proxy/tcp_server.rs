@@ -189,7 +189,10 @@ impl Connection {
                     if self.server_conn.writable() {
                         self.try_read_client();
                     } else {
-                        log::trace!("server connection is not writable, stop reading from client");
+                        log::trace!(
+                            "server connection:{} is not writable, stop reading from client",
+                            self.index
+                        );
                         self.read_client = true;
                     }
                 }
@@ -197,7 +200,10 @@ impl Connection {
                 if event.is_writable() {
                     self.try_send_client(&[]);
                     if self.writable() && self.read_server {
-                        log::trace!("client connection is writable, restore reading from server");
+                        log::trace!(
+                            "client connection:{} is writable, restore reading from server",
+                            self.index
+                        );
                         self.try_read_server();
                         self.read_server = false;
                     }
@@ -209,14 +215,20 @@ impl Connection {
                         self.try_read_server();
                     } else {
                         self.read_server = true;
-                        log::trace!("client connection is not writable, stop reading from server")
+                        log::trace!(
+                            "client connection:{} is not writable, stop reading from server",
+                            self.index
+                        )
                     }
                 }
 
                 if event.is_writable() {
                     self.try_send_server();
                     if self.server_conn.writable() && self.read_client {
-                        log::trace!("server connection is writable, restore reading from client");
+                        log::trace!(
+                            "server connection:{} is writable, restore reading from client",
+                            self.index
+                        );
                         self.try_read_client();
                         self.read_client = false;
                     }

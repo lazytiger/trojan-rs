@@ -98,7 +98,8 @@ impl Connection {
                             self.try_read_proxy(poll, resolver);
                         } else {
                             log::trace!(
-                                "backend connection is not writable, stop reading from proxy"
+                                "backend connection:{} is not writable, stop reading from proxy",
+                                self.index
                             );
                             self.read_proxy = true;
                         }
@@ -110,7 +111,8 @@ impl Connection {
                                 backend.do_read(&mut self.proxy);
                             }
                             log::trace!(
-                                "proxy connection is writable, restore reading from backend"
+                                "proxy connection:{} is writable, restore reading from backend",
+                                self.index
                             );
                             self.read_backend = false;
                         }
@@ -123,14 +125,14 @@ impl Connection {
                                     if self.proxy.writable() {
                                         backend.do_read(&mut self.proxy);
                                     } else {
-                                        log::trace!("proxy connection is not writable, stop reading from backend");
+                                        log::trace!("proxy connection:{} is not writable, stop reading from backend", self.index);
                                         self.read_backend = true;
                                     }
                                 }
                                 if event.is_writable() {
                                     backend.dispatch(&[]);
                                     if backend.writable() && self.read_proxy {
-                                        log::trace!("backend connection is writable, restore reading from proxy");
+                                        log::trace!("backend connection:{} is writable, restore reading from proxy", self.index);
                                         self.try_read_proxy(poll, resolver);
                                         self.read_proxy = false;
                                     }
