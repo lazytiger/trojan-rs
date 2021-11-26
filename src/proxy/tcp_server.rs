@@ -202,7 +202,7 @@ impl Connection {
                 }
             }
             CHANNEL_TCP => {
-                if event.is_readable() && self.writable() {
+                if event.is_readable() {
                     if self.writable() {
                         self.try_read_server();
                     } else {
