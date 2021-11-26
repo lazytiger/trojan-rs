@@ -38,6 +38,8 @@ struct Connection {
     status: ConnStatus,
     server_conn: TlsConn,
     last_active_time: Instant,
+    register_client: bool,
+    register_server: bool,
 }
 
 impl TcpServer {
@@ -129,6 +131,8 @@ impl Connection {
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             last_active_time: Instant::now(),
+            register_client: false,
+            register_server: false,
         }
     }
 
@@ -183,24 +187,28 @@ impl Connection {
             CHANNEL_CLIENT => {
                 if event.is_readable() && self.server_conn.writable() {
                     self.try_read_client();
+                } else {
+                    self.register_client = true;
                 }
                 if event.is_writable() {
-                    let writable = self.writable();
                     self.try_send_client(&[]);
-                    if self.writable() && !writable {
+                    if self.writable() && self.register_server {
                         self.server_conn.reregister(poll);
+                        self.register_server = false;
                     }
                 }
             }
             CHANNEL_TCP => {
                 if event.is_readable() && self.writable() {
                     self.try_read_server();
+                } else {
+                    self.register_server = true;
                 }
                 if event.is_writable() {
-                    let writable = self.server_conn.writable();
                     self.try_send_server();
-                    if self.server_conn.writable() && !writable {
+                    if self.server_conn.writable() && self.register_client {
                         self.reregister(poll);
+                        self.register_client = false;
                     }
                 }
             }

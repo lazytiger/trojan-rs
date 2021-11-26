@@ -40,6 +40,8 @@ pub struct Connection {
     backend: Option<Box<dyn Backend>>,
     target_addr: Option<SocketAddr>,
     data: Vec<u8>,
+    register_backend: bool,
+    register_proxy: bool,
 }
 
 impl Connection {
@@ -54,6 +56,8 @@ impl Connection {
             backend: None,
             target_addr: None,
             data: Vec::new(),
+            register_proxy: false,
+            register_backend: false,
         }
     }
 
@@ -92,25 +96,30 @@ impl Connection {
                         };
                         if writable {
                             self.try_read_proxy(poll, resolver);
+                        } else {
+                            self.register_proxy = true;
                         }
                     }
                     if event.is_writable() {
-                        let writable = self.proxy.writable();
                         self.try_send_proxy();
-                        if self.proxy.writable() && !writable {
+                        if self.proxy.writable() && self.register_backend {
                             if let Some(backend) = self.backend.as_mut() {
                                 backend.reregister(poll);
                             }
+                            self.register_backend = false;
                         }
                     }
                 } else {
                     match self.status {
                         Status::UDPForward | Status::TCPForward => {
                             if let Some(backend) = self.backend.as_mut() {
-                                let writable = backend.writable();
+                                if event.is_readable() && !self.proxy.writable() {
+                                    self.register_backend = true;
+                                }
                                 backend.ready(event, &mut self.proxy);
-                                if backend.writable() && !writable {
+                                if backend.writable() && self.register_proxy {
                                     self.proxy.reregister(poll);
+                                    self.register_proxy = false;
                                 }
                             } else {
                                 log::error!("connection:{} has invalid status", self.index);
