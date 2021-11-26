@@ -69,7 +69,7 @@ impl TcpServer {
         resolver: &DnsResolver,
     ) -> Result<()> {
         let (client, src_addr) = self.tcp_listener.accept()?;
-        sys::set_mark(&client, OPTIONS.marker)?;
+        //sys::set_mark(&client, OPTIONS.marker)?;
         client.set_nodelay(true)?;
         let dst_addr = sys::get_oridst_addr(&client)?;
         log::info!("got new connection from:{} to:{}", src_addr, dst_addr);

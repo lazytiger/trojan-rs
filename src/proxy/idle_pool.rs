@@ -11,7 +11,6 @@ use crate::{
     proxy::{next_index, CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, RESOLVER},
     resolver::DnsResolver,
     status::StatusProvider,
-    sys,
     tls_conn::TlsConn,
     types::Result,
 };
@@ -23,7 +22,6 @@ pub struct IdlePool {
     addr: SocketAddr,
     domain: String,
     port: u16,
-    marker: u8,
     config: Arc<ClientConfig>,
     hostname: ServerName,
 }
@@ -33,7 +31,6 @@ impl IdlePool {
         IdlePool {
             size: OPTIONS.proxy_args().pool_size + 1,
             addr: OPTIONS.back_addr.unwrap(),
-            marker: OPTIONS.marker,
             port: OPTIONS.proxy_args().port,
             domain: OPTIONS.proxy_args().hostname.clone(),
             pool: Vec::new(),
@@ -75,7 +72,7 @@ impl IdlePool {
 
     fn new_conn(&mut self) -> Result<TlsConn> {
         let server = TcpStream::connect(self.addr)?;
-        sys::set_mark(&server, self.marker)?;
+        //sys::set_mark(&server, self.marker)?;
         server.set_nodelay(true)?;
         let session = ClientConnection::new(self.config.clone(), self.hostname.clone())?;
         let index = next_index(&mut self.next_index);

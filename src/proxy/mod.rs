@@ -87,10 +87,12 @@ pub fn run() {
     let addr: SocketAddr = OPTIONS.local_addr.parse().unwrap();
     let mut tcp_listener = TcpListener::from_std(new_socket(addr, false).unwrap().into());
     let mut udp_listener = UdpSocket::from_std(new_socket(addr, true).unwrap().into());
+    /*
     if let Err(err) = sys::set_mark(&udp_listener, OPTIONS.marker) {
         log::error!("udp socket set mark failed:{}", err);
         return;
     }
+     */
     let mut udp_cache = UdpSvrCache::new();
     let mut poll = Poll::new().unwrap();
     let mut resolver = DnsResolver::new(&poll, Token(RESOLVER));
