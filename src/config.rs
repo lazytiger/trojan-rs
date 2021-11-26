@@ -33,8 +33,6 @@ pub struct Opts {
         about = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off"
     )]
     pub log_level: u8,
-    #[clap(short, long, default_value = "1", about = "set marker used by tproxy")]
-    pub marker: u8,
     #[clap(
         short,
         long,
