@@ -47,6 +47,10 @@ pub fn tcp_send(
         }
         match conn.write(data) {
             Ok(size) => {
+                if size == 0 {
+                    log::warn!("send failed, tcp stream closed");
+                    return false;
+                }
                 data = &data[size..];
                 log::debug!(
                     "connection:{} session write {} byte to backend",
