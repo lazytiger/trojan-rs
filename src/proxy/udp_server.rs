@@ -194,7 +194,7 @@ impl Connection {
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr, poll: &Poll) {
         if !self.server_conn.writable() {
-            log::warn!("sending data too fast, drop udp packet now");
+            log::warn!("udp packet is too fast, ignore now");
             return;
         }
         self.bytes_read += payload.len();

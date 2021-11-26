@@ -13,6 +13,7 @@ pub struct TlsConn {
     index: usize,
     token: Token,
     status: ConnStatus,
+    writable: bool,
 }
 
 impl TlsConn {
@@ -23,6 +24,7 @@ impl TlsConn {
             token,
             session,
             stream,
+            writable: false,
             status: ConnStatus::Established,
         }
     }
@@ -127,6 +129,7 @@ impl TlsConn {
     }
 
     pub fn do_send(&mut self) {
+        self.writable = true;
         loop {
             if !self.session.wants_write() {
                 break;
@@ -138,6 +141,7 @@ impl TlsConn {
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     log::debug!("connection:{} write to server blocked", self.index());
+                    self.writable = false;
                 }
                 Err(err) => {
                     log::warn!("connection:{} write to server failed:{}", self.index(), err);
@@ -187,7 +191,7 @@ impl TlsConn {
     }
 
     pub fn writable(&self) -> bool {
-        !self.session.wants_write() && self.alive()
+        self.writable && self.alive()
     }
 }
 
