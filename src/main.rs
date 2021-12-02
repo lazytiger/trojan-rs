@@ -1,7 +1,4 @@
-use crate::{
-    config::{Mode, OPTIONS},
-    types::TrojanError,
-};
+use crate::config::{Mode, OPTIONS};
 
 mod config;
 mod proto;
@@ -35,7 +32,7 @@ async fn main() {
         #[cfg(not(target_os = "windows"))]
         Mode::Wintun(_) => {
             log::warn!("trojan can't start in wintun mode on a non-windows platform");
-            Err(TrojanError::NonWindowsPlatform)
+            Err(crate::types::TrojanError::NonWindowsPlatform)
         }
     } {
         log::error!("trojan exited with error:{:?}", err);
