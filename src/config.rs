@@ -84,10 +84,18 @@ pub struct WintunArgs {
     pub name: String,
 
     #[clap(short, long, parse(try_from_str=maybe_hex), about = "guid for adapter")]
-    pub guid: u128,
+    pub guid: Option<u128>,
 
     #[clap(short, long, about = "delete current adapter")]
     pub delete: bool,
+
+    #[clap(
+        short,
+        long,
+        default_value = "1024000",
+        about = "max packet count in buffer for network"
+    )]
+    pub buffer_size: usize,
 }
 
 #[derive(Parser)]

@@ -15,9 +15,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 use crate::{
     config::OPTIONS,
-    proxy::{
-        idle_pool::IdlePool, tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer,
-    },
+    proxy::{tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer},
     resolver::DnsResolver,
     sys,
     types::Result,
@@ -27,6 +25,8 @@ mod idle_pool;
 mod tcp_server;
 mod udp_cache;
 mod udp_server;
+
+pub use idle_pool::IdlePool;
 
 /// minimal index used in `IdlePool`, `TcpServer` and `UdpServer`
 const MIN_INDEX: usize = 2;

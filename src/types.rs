@@ -10,6 +10,7 @@ pub enum TrojanError {
     AddrParse(std::net::AddrParseError),
     InvalidDnsName(rustls::client::InvalidDnsNameError),
     Webpki(webpki::Error),
+    Recv(std::sync::mpsc::RecvError),
 }
 
 pub type Result<T> = std::result::Result<T, TrojanError>;

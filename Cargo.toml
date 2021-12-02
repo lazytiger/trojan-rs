@@ -29,6 +29,8 @@ pnet = "0.28"
 wintun = {git = "https://github.com/lazytiger/wintun.git"}
 clap-num = "0.2"
 libloading = "0.7"
+tokio = {version ="1.14", features = ["macros", "rt-multi-thread"]}
+crossbeam = "0.8"
 
 [dependencies.fern]
 version = "0.6"

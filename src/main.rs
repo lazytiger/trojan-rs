@@ -12,7 +12,8 @@ mod tls_conn;
 mod types;
 mod wintun;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);
     if let Err(err) = match OPTIONS.mode {
         Mode::Proxy(_) => {
@@ -25,7 +26,7 @@ fn main() {
         }
         Mode::Wintun(_) => {
             log::warn!("trojan started in wintun mode");
-            wintun::run()
+            wintun::run().await
         }
     } {
         log::error!("trojan exited with error:{:?}", err);
