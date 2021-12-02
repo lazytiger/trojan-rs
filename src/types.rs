@@ -1,5 +1,6 @@
 use derive_more::From;
 
+#[allow(dead_code)]
 #[derive(From, Debug)]
 pub enum TrojanError {
     StdIo(std::io::Error),
@@ -10,7 +11,9 @@ pub enum TrojanError {
     AddrParse(std::net::AddrParseError),
     InvalidDnsName(rustls::client::InvalidDnsNameError),
     Webpki(webpki::Error),
-    Recv(std::sync::mpsc::RecvError),
+    CrossbeamRecv(crossbeam::channel::RecvError),
+    #[from(ignore)]
+    NonWindowsPlatform,
 }
 
 pub type Result<T> = std::result::Result<T, TrojanError>;

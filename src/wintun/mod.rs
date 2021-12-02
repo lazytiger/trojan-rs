@@ -1,11 +1,8 @@
-use std::{
-    process::Command,
-    sync::{mpsc::Receiver, Arc},
-};
+use std::{process::Command, sync::Arc};
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Receiver, Sender};
 use pnet::packet::{ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet as _};
-use wintun::{Adapter, Packet, Session};
+use wintun::{Adapter, Session};
 
 use crate::{types::Result, OPTIONS};
 
@@ -54,14 +51,16 @@ pub async fn run() -> Result<()> {
         log::error!("route add 8.8.8.8 failed:{}", err);
     }
 
+    let (sender, receiver) = crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
+
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
     tokio::select! {
-        err = do_tun_read(session) => {
+        err = do_tun_read(session.clone()) => {
             if let Err(err) = err {
                 log::error!("session read failed:{:?}", err);
             }
         },
-        err = do_tun_send(session) => {
+        err = do_tun_send(session.clone(), receiver) => {
             if let Err(err) = err {
                 log::error!("session send failed:{:?}", err);
             }
