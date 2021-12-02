@@ -308,7 +308,7 @@ impl Connection {
                         self.backend.replace(Box::new(backend));
                     }
                     Err(err) => {
-                        log::error!("connection:{} setup backend failed:{}", self.index, err);
+                        log::error!("connection:{} setup backend failed:{:?}", self.index, err);
                         self.proxy.shutdown();
                     }
                 }
@@ -336,7 +336,7 @@ impl Connection {
                         self.backend.replace(Box::new(backend));
                     }
                     Err(err) => {
-                        log::error!("connection:{} setup backend failed:{}", self.index, err);
+                        log::error!("connection:{} setup backend failed:{:?}", self.index, err);
                         self.proxy.shutdown();
                     }
                 }

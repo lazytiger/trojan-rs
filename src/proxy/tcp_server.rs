@@ -54,12 +54,12 @@ impl TcpServer {
     pub fn accept(&mut self, poll: &Poll, pool: &mut IdlePool, resolver: &DnsResolver) {
         loop {
             if let Err(err) = self.accept_once(poll, pool, resolver) {
-                if let TrojanError::StdIoError(err) = &err {
+                if let TrojanError::StdIo(err) = &err {
                     if err.kind() == ErrorKind::WouldBlock {
                         break;
                     }
                 }
-                log::error!("tcp server accept failed:{}", err);
+                log::error!("tcp server accept failed:{:?}", err);
             }
         }
     }

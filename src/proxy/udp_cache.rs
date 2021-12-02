@@ -28,7 +28,7 @@ impl UdpSvrCache {
                     Some(socket)
                 }
                 Err(err) => {
-                    log::error!("new socket failed:{}", err);
+                    log::error!("new socket failed:{:?}", err);
                     None
                 }
             }

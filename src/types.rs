@@ -1,9 +1,15 @@
-use derive_more::{Display, From};
+use derive_more::From;
 
-#[derive(From, Display, Debug)]
+#[derive(From, Debug)]
 pub enum TrojanError {
-    StdIoError(std::io::Error),
-    RustlsError(rustls::Error),
+    StdIo(std::io::Error),
+    Rustls(rustls::Error),
+    Wintun(wintun::WintunError),
+    LibLoading(libloading::Error),
+    Dummy(()),
+    AddrParse(std::net::AddrParseError),
+    InvalidDnsName(rustls::client::InvalidDnsNameError),
+    Webpki(webpki::Error),
 }
 
 pub type Result<T> = std::result::Result<T, TrojanError>;

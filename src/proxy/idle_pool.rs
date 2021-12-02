@@ -63,7 +63,7 @@ impl IdlePool {
                     }
                 }
                 Err(err) => {
-                    log::error!("new connection to remote server failed:{}", err);
+                    log::error!("new connection to remote server failed:{:?}", err);
                     self.update_dns(resolver);
                 }
             }

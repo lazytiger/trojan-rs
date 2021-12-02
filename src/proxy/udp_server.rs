@@ -58,12 +58,12 @@ impl UdpServer {
     ) {
         loop {
             if let Err(err) = self.accept_once(poll, pool, udp_cache, resolver) {
-                if let TrojanError::StdIoError(err) = &err {
+                if let TrojanError::StdIo(err) = &err {
                     if err.kind() == ErrorKind::WouldBlock {
                         break;
                     }
                 }
-                log::error!("accept udp data failed:{}", err);
+                log::error!("accept udp data failed:{:?}", err);
             }
         }
     }

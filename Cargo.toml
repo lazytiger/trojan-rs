@@ -25,6 +25,10 @@ rayon = "1.5"
 rustls-pemfile = "0.2"
 lazy_static = "1.4"
 derive_more = "0.99"
+pnet = "0.28"
+wintun = {git = "https://github.com/lazytiger/wintun.git"}
+clap-num = "0.2"
+libloading = "0.7"
 
 [dependencies.fern]
 version = "0.6"

@@ -5,6 +5,7 @@ use std::{
 };
 
 use clap::Parser;
+use clap_num::maybe_hex;
 use crypto::{digest::Digest, sha2::Sha224};
 
 #[derive(Parser)]
@@ -70,6 +71,23 @@ pub enum Mode {
     Proxy(ProxyArgs),
     #[clap(version, name = "server", about = "run in server mode")]
     Server(ServerArgs),
+    #[clap(version, name = "wintun", about = "run in windows tun mode")]
+    Wintun(WintunArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct WintunArgs {
+    #[clap(short, long, about = "native wintun.dll file location")]
+    pub wintun: String,
+
+    #[clap(short, long, about = "tunnel device name")]
+    pub name: String,
+
+    #[clap(short, long, parse(try_from_str=maybe_hex), about = "guid for adapter")]
+    pub guid: u128,
+
+    #[clap(short, long, about = "delete current adapter")]
+    pub delete: bool,
 }
 
 #[derive(Parser)]
@@ -141,6 +159,13 @@ impl Opts {
         }
     }
 
+    pub fn wintun_args(&self) -> &WintunArgs {
+        match self.mode {
+            Mode::Wintun(ref args) => args,
+            _ => panic!("not in wintun mode"),
+        }
+    }
+
     pub fn setup(&mut self) {
         match self.mode {
             Mode::Server(ref args) => {
@@ -170,6 +195,10 @@ impl Opts {
                 }
 
                 log::info!("server address is {}", self.back_addr.as_ref().unwrap());
+            }
+            Mode::Wintun(ref args) => {
+                log::info!("wintun args:{:?}", args);
+                return;
             }
         }
         let empty_addr = if self.back_addr.as_ref().unwrap().is_ipv4() {
