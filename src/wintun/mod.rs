@@ -1,15 +1,13 @@
-use std::process::Command;
-use std::sync::mpsc::Receiver;
-use std::sync::Arc;
+use std::{
+    process::Command,
+    sync::{mpsc::Receiver, Arc},
+};
 
 use crossbeam::channel::Sender;
-use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::Packet as _;
+use pnet::packet::{ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet as _};
 use wintun::{Adapter, Packet, Session};
 
-use crate::types::Result;
-use crate::OPTIONS;
+use crate::{types::Result, OPTIONS};
 
 mod udp;
 

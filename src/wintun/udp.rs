@@ -1,15 +1,21 @@
-use crate::proto::{UdpAssociate, UdpParseResult};
-use crate::proxy::IdlePool;
-use crate::resolver::DnsResolver;
-use crate::status::StatusProvider;
-use crate::tls_conn::TlsConn;
+use crate::{
+    proto::{UdpAssociate, UdpParseResult},
+    proxy::IdlePool,
+    resolver::DnsResolver,
+    status::StatusProvider,
+    tls_conn::TlsConn,
+};
 use bytes::BytesMut;
 use crossbeam::channel::{Receiver, Sender};
 use mio::{Poll, Token};
-use pnet::packet::udp::{MutableUdpPacket, UdpPacket};
-use pnet::packet::Packet as _;
-use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use pnet::packet::{
+    udp::{MutableUdpPacket, UdpPacket},
+    Packet as _,
+};
+use std::{
+    collections::HashMap,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+};
 
 pub struct Packet {
     pub source: Ipv4Addr,
