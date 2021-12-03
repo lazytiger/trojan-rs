@@ -4,52 +4,86 @@ use crate::{
     resolver::DnsResolver,
     status::StatusProvider,
     tls_conn::TlsConn,
+    wintun::{
+        ip::{IpPacket, MutableIpPacket},
+        CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX,
+    },
 };
 use bytes::BytesMut;
 use crossbeam::channel::{Receiver, Sender};
 use mio::{Poll, Token};
 use pnet::packet::{
-    udp::{MutableUdpPacket, UdpPacket},
+    udp::{MutableUdpPacket},
     Packet as _,
 };
 use std::{
     collections::HashMap,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{SocketAddr},
 };
 
-pub struct Packet {
-    pub source: Ipv4Addr,
-    pub target: Ipv4Addr,
-    pub packet: UdpPacket<'static>,
+pub struct UdpRequest {
+    pub source: SocketAddr,
+    pub target: SocketAddr,
+    pub payload: Vec<u8>,
 }
 
+pub type UdpResponse = IpPacket<'static>;
+
 pub struct UdpServer {
-    receiver: Receiver<Packet>,
-    sender: Sender<Packet>,
-    conns: HashMap<SocketAddrV4, Connection>,
+    receiver: Receiver<UdpRequest>,
+    sender: Sender<UdpResponse>,
+    src_map: HashMap<SocketAddr, usize>,
+    conns: HashMap<usize, Connection>,
+    next_index: usize,
 }
 
 impl UdpServer {
-    pub fn new(receiver: Receiver<Packet>, sender: Sender<Packet>) -> UdpServer {
+    pub fn new(receiver: Receiver<UdpRequest>, sender: Sender<UdpResponse>) -> UdpServer {
         UdpServer {
             receiver,
             sender,
+            src_map: Default::default(),
             conns: Default::default(),
+            next_index: MIN_INDEX,
         }
+    }
+
+    pub fn next_index(&mut self) -> usize {
+        let index = self.next_index;
+        self.next_index += 1;
+        if self.next_index > MAX_INDEX {
+            self.next_index = MIN_INDEX;
+        }
+        index
+    }
+
+    pub fn index2token(index: usize) -> Token {
+        Token(index * CHANNEL_CNT + CHANNEL_TCP)
+    }
+
+    pub fn token2index(token: Token) -> usize {
+        token.0 / CHANNEL_CNT
     }
 
     pub fn ready(&mut self, pool: &mut IdlePool, poll: &Poll, resolver: &DnsResolver) {
         self.receiver.clone().try_iter().for_each(|packet| {
-            let addr = SocketAddrV4::new(packet.source, packet.packet.get_source());
-            let conn = if let Some(conn) = self.conns.get_mut(&addr) {
-                conn
-            } else if let Some(conn) = pool.get(poll, resolver) {
-                let conn = Connection::new(1, conn, addr, self.sender.clone());
-                self.conns.insert(addr, conn);
-                self.conns.get_mut(&addr).unwrap()
+            let index = if let Some(index) = self.src_map.get_mut(&packet.source) {
+                *index
+            } else if let Some(mut conn) = pool.get(poll, resolver) {
+                let index = self.next_index();
+                if !conn.reset_index(index, UdpServer::index2token(index), poll) {
+                    conn.check_status(poll);
+                    return;
+                }
+
+                let conn = Connection::new(index, conn, packet.source, self.sender.clone());
+                let _ = self.src_map.insert(packet.source, index);
+                let _ = self.conns.insert(index, conn);
+                index
             } else {
                 return;
             };
+            let conn = self.conns.get_mut(&index).unwrap();
             conn.send_request(packet);
         });
     }
@@ -58,8 +92,8 @@ impl UdpServer {
 struct Connection {
     index: usize,
     conn: TlsConn,
-    source: SocketAddrV4,
-    sender: Sender<Packet>,
+    source: SocketAddr,
+    sender: Sender<UdpResponse>,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
 }
@@ -68,8 +102,8 @@ impl Connection {
     fn new(
         index: usize,
         conn: TlsConn,
-        source: SocketAddrV4,
-        sender: Sender<Packet>,
+        source: SocketAddr,
+        sender: Sender<UdpResponse>,
     ) -> Connection {
         Connection {
             index,
@@ -80,7 +114,7 @@ impl Connection {
             recv_buffer: Default::default(),
         }
     }
-    fn send_request(&mut self, packet: Packet) {
+    fn send_request(&mut self, packet: UdpRequest) {
         if !self.conn.writable() {
             log::warn!("udp packet is too fast, ignore now");
             return;
@@ -88,14 +122,11 @@ impl Connection {
         self.recv_buffer.clear();
         UdpAssociate::generate(
             &mut self.recv_buffer,
-            &SocketAddr::V4(SocketAddrV4::new(
-                packet.target,
-                packet.packet.get_destination(),
-            )),
-            packet.packet.payload().len() as u16,
+            &packet.target,
+            packet.payload.len() as u16,
         );
         if self.conn.write_session(self.recv_buffer.as_ref()) {
-            self.conn.write_session(packet.packet.payload());
+            self.conn.write_session(packet.payload.as_slice());
         }
         self.conn.do_send();
     }
@@ -144,20 +175,15 @@ impl Connection {
                 + MutableUdpPacket::minimum_packet_size()
         ])
         .unwrap();
-        let dest: SocketAddrV4 = if let SocketAddr::V4(v4) = dest {
-            v4
-        } else {
-            return;
-        };
         packet.set_payload(data);
         packet.set_source(dest.port());
         packet.set_destination(self.source.port());
-        if let Err(err) = self.sender.try_send(Packet {
-            source: *dest.ip(),
-            target: *self.source.ip(),
-            packet: packet.consume_to_immutable(),
-        }) {
-            log::warn!("socket is full, ignore udp packet:{}", err);
+        if let Some(packet) = MutableIpPacket::new(packet.packet(), dest.is_ipv6()) {
+            if let Err(err) = self.sender.try_send(packet.into_immutable()) {
+                log::warn!("socket is full, ignore udp packet:{}", err);
+            }
+        } else {
+            log::error!("invalid udp packet");
         }
     }
 }

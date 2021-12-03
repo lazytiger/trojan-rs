@@ -36,6 +36,10 @@ impl DnsResolver {
         }
     }
 
+    pub fn get_waker(&self) -> Arc<Waker> {
+        self.waker.clone()
+    }
+
     pub fn set_cache_timeout(&mut self, timeout: u64) {
         self.dns_cache_duration = Duration::new(timeout, 0);
     }
