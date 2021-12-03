@@ -128,7 +128,7 @@ impl Connection {
             dst_addr,
             client,
             server_conn,
-            status: ConnStatus::Connecting,
+            status: ConnStatus::Established,
             send_buffer: BytesMut::new(),
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
             last_active_time: Instant::now(),
