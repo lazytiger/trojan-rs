@@ -5,6 +5,7 @@ use derive_more::From;
 pub enum TrojanError {
     StdIo(std::io::Error),
     Rustls(rustls::Error),
+    #[cfg(target_os = "windows")]
     Wintun(wintun::WintunError),
     LibLoading(libloading::Error),
     Dummy(()),
