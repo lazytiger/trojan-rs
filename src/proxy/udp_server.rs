@@ -191,7 +191,7 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr, poll: &Poll) {
-        if !self.server_conn.writable() {
+        if !self.server_conn.is_connecting() && !self.server_conn.writable() {
             log::warn!("udp packet is too fast, ignore now");
             return;
         }
