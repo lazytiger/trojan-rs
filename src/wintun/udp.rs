@@ -1,25 +1,20 @@
 use crate::{
-    proto::{UdpAssociate, UdpParseResult},
+    proto::{TrojanRequest, UdpAssociate, UdpParseResult, UDP_ASSOCIATE},
     proxy::IdlePool,
     resolver::DnsResolver,
     status::StatusProvider,
     tls_conn::TlsConn,
     wintun::{
         ip::{IpPacket, MutableIpPacket},
-        CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX,
+        CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX,
     },
+    OPTIONS,
 };
 use bytes::BytesMut;
 use crossbeam::channel::{Receiver, Sender};
-use mio::{Poll, Token};
-use pnet::packet::{
-    udp::{MutableUdpPacket},
-    Packet as _,
-};
-use std::{
-    collections::HashMap,
-    net::{SocketAddr},
-};
+use mio::{event::Event, Events, Poll, Token};
+use pnet::packet::{udp::MutableUdpPacket, Packet as _};
+use std::{collections::HashMap, net::SocketAddr};
 
 pub struct UdpRequest {
     pub source: SocketAddr,
@@ -58,14 +53,14 @@ impl UdpServer {
     }
 
     pub fn index2token(index: usize) -> Token {
-        Token(index * CHANNEL_CNT + CHANNEL_TCP)
+        Token(index * CHANNEL_CNT + CHANNEL_UDP)
     }
 
     pub fn token2index(token: Token) -> usize {
         token.0 / CHANNEL_CNT
     }
 
-    pub fn ready(&mut self, pool: &mut IdlePool, poll: &Poll, resolver: &DnsResolver) {
+    pub fn do_local(&mut self, pool: &mut IdlePool, poll: &Poll, resolver: &DnsResolver) {
         self.receiver.clone().try_iter().for_each(|packet| {
             let index = if let Some(index) = self.src_map.get_mut(&packet.source) {
                 *index
@@ -76,16 +71,36 @@ impl UdpServer {
                     return;
                 }
 
-                let conn = Connection::new(index, conn, packet.source, self.sender.clone());
-                let _ = self.src_map.insert(packet.source, index);
-                let _ = self.conns.insert(index, conn);
-                index
+                let mut conn = Connection::new(index, conn, packet.source, self.sender.clone());
+                if conn.setup() {
+                    let _ = self.src_map.insert(packet.source, index);
+                    let _ = self.conns.insert(index, conn);
+                    index
+                } else {
+                    conn.conn.check_status(poll);
+                    return;
+                }
             } else {
                 return;
             };
             let conn = self.conns.get_mut(&index).unwrap();
             conn.send_request(packet);
         });
+    }
+
+    pub fn do_remote(&mut self, event: &Event, poll: &Poll) {
+        log::debug!("remote event for token:{}", event.token().0);
+        let index = Self::token2index(event.token());
+        if let Some(conn) = self.conns.get_mut(&index) {
+            conn.ready(event, poll);
+            if conn.destroyed() {
+                let _ = self.src_map.remove(&conn.source);
+                let _ = self.conns.remove(&index);
+                log::info!("connection:{} removed", index);
+            }
+        } else {
+            log::error!("connection:{} not found in udp server", index);
+        }
     }
 }
 
@@ -114,6 +129,12 @@ impl Connection {
             recv_buffer: Default::default(),
         }
     }
+
+    pub(crate) fn destroyed(&self) -> bool {
+        //TODO
+        self.conn.deregistered()
+    }
+
     fn send_request(&mut self, packet: UdpRequest) {
         if !self.conn.writable() {
             log::warn!("udp packet is too fast, ignore now");
@@ -128,7 +149,26 @@ impl Connection {
         if self.conn.write_session(self.recv_buffer.as_ref()) {
             self.conn.write_session(packet.payload.as_slice());
         }
-        self.conn.do_send();
+        //self.conn.do_send();
+    }
+
+    fn ready(&mut self, event: &Event, poll: &Poll) {
+        if event.is_readable() {
+            self.send_response();
+        } else {
+            self.conn.do_send();
+        }
+        self.conn.check_status(poll);
+    }
+
+    fn setup(&mut self) -> bool {
+        self.recv_buffer.clear();
+        TrojanRequest::generate(
+            &mut self.recv_buffer,
+            UDP_ASSOCIATE,
+            OPTIONS.empty_addr.as_ref().unwrap(),
+        );
+        self.conn.write_session(self.recv_buffer.as_ref())
     }
 
     fn send_response(&mut self) {
@@ -178,7 +218,9 @@ impl Connection {
         packet.set_payload(data);
         packet.set_source(dest.port());
         packet.set_destination(self.source.port());
-        if let Some(packet) = MutableIpPacket::new(packet.packet(), dest.is_ipv6()) {
+        if let Some(mut packet) = MutableIpPacket::new(packet.packet(), dest.is_ipv6()) {
+            packet.set_source(dest.ip());
+            packet.set_destination(self.source.ip());
             if let Err(err) = self.sender.try_send(packet.into_immutable()) {
                 log::warn!("socket is full, ignore udp packet:{}", err);
             }

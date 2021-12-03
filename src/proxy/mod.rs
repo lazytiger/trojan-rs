@@ -21,12 +21,11 @@ use crate::{
     types::Result,
 };
 
-mod idle_pool;
 mod tcp_server;
 mod udp_cache;
 mod udp_server;
 
-pub use idle_pool::IdlePool;
+pub use crate::idle_pool::IdlePool;
 
 /// minimal index used in `IdlePool`, `TcpServer` and `UdpServer`
 const MIN_INDEX: usize = 2;
@@ -122,8 +121,15 @@ pub fn run() -> Result<()> {
     let mut last_tcp_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
 
-    let mut pool = IdlePool::new(config, hostname);
+    let mut pool = IdlePool::new(
+        config,
+        hostname,
+        OPTIONS.proxy_args().pool_size + 1,
+        OPTIONS.proxy_args().port,
+        OPTIONS.proxy_args().hostname.clone(),
+    );
     pool.init(&poll, &resolver);
+    pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
 
     loop {
         poll.poll(&mut events, Some(check_duration))?;

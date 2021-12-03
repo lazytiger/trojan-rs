@@ -96,6 +96,19 @@ pub struct WintunArgs {
         about = "max packet count in buffer for network"
     )]
     pub buffer_size: usize,
+
+    #[clap(short = 'H', long, about = "trojan server hostname")]
+    pub hostname: String,
+
+    #[clap(short = 'o', long, default_value = "443", about = "trojan server port")]
+    pub port: u16,
+    #[clap(
+        short = 'P',
+        long,
+        default_value = "0",
+        about = "pool size, 0 for disable"
+    )]
+    pub pool_size: usize,
 }
 
 #[derive(Parser)]
@@ -174,6 +187,30 @@ impl Opts {
         }
     }
 
+    fn resolve(&mut self, hostname: String, port: u16) {
+        for i in 0..10 {
+            if let Ok(response) = dns_lookup::lookup_host(hostname.as_str()) {
+                for ip in response {
+                    if ip.is_ipv4() {
+                        self.back_addr.replace(SocketAddr::new(ip, port));
+                        break;
+                    } else if self.back_addr.is_none() {
+                        self.back_addr.replace(SocketAddr::new(ip, port));
+                    }
+                }
+            }
+            if self.back_addr.is_none() {
+                sleep(Duration::new(i + 1, 0));
+            } else {
+                break;
+            }
+        }
+        if self.back_addr.is_none() {
+            panic!("resolve host {} failed", hostname);
+        }
+        log::info!("server address is {}", self.back_addr.as_ref().unwrap());
+    }
+
     pub fn setup(&mut self) {
         match self.mode {
             Mode::Server(ref args) => {
@@ -181,32 +218,14 @@ impl Opts {
                 self.back_addr = Some(back_addr);
             }
             Mode::Proxy(ref args) => {
-                for i in 0..10 {
-                    if let Ok(response) = dns_lookup::lookup_host(args.hostname.as_str()) {
-                        for ip in response {
-                            if ip.is_ipv4() {
-                                self.back_addr.replace(SocketAddr::new(ip, args.port));
-                                break;
-                            } else if self.back_addr.is_none() {
-                                self.back_addr.replace(SocketAddr::new(ip, args.port));
-                            }
-                        }
-                    }
-                    if self.back_addr.is_none() {
-                        sleep(Duration::new(i + 1, 0));
-                    } else {
-                        break;
-                    }
-                }
-                if self.back_addr.is_none() {
-                    panic!("resolve host {} failed", args.hostname);
-                }
-
-                log::info!("server address is {}", self.back_addr.as_ref().unwrap());
+                let hostname = args.hostname.clone();
+                let port = args.port;
+                self.resolve(hostname, port);
             }
             Mode::Wintun(ref args) => {
-                log::info!("wintun args:{:?}", args);
-                return;
+                let hostname = args.hostname.clone();
+                let port = args.port;
+                self.resolve(hostname, port);
             }
         }
         let empty_addr = if self.back_addr.as_ref().unwrap().is_ipv4() {

@@ -2,7 +2,10 @@ use std::{convert::TryInto, net::SocketAddr, process::Command, sync::Arc};
 
 use crossbeam::channel::{Receiver, Sender};
 use mio::{Events, Poll, Token, Waker};
-use pnet::packet::{ip::IpNextHeaderProtocols, udp::UdpPacket, Packet as _, Packet};
+use pnet::{
+    ipnetwork::{IpNetwork, IpNetworkIterator},
+    packet::{ip::IpNextHeaderProtocols, udp::UdpPacket, Packet as _, Packet},
+};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use wintun::{Adapter, Session};
 
@@ -34,7 +37,7 @@ const CHANNEL_UDP: usize = 1;
 /// channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
 
-pub async fn run() -> Result<()> {
+pub fn run() -> Result<()> {
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let mut adapter = match Adapter::open(&wintun, "trojan", OPTIONS.wintun_args().name.as_str()) {
         Ok(a) => a,
@@ -77,7 +80,7 @@ pub async fn run() -> Result<()> {
         log::error!("route add 8.8.8.8 failed:{}", err);
     }
 
-    let hostname = OPTIONS.proxy_args().hostname.as_str().try_into()?;
+    let hostname = OPTIONS.wintun_args().hostname.as_str().try_into()?;
 
     let mut root_store = RootCertStore::empty();
     root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
@@ -98,8 +101,15 @@ pub async fn run() -> Result<()> {
 
     let poll = Poll::new()?;
     let resolver = DnsResolver::new(&poll, Token(RESOLVER));
-    let mut pool = IdlePool::new(config, hostname);
+    let mut pool = IdlePool::new(
+        config,
+        hostname,
+        OPTIONS.wintun_args().pool_size + 1,
+        OPTIONS.wintun_args().port,
+        OPTIONS.wintun_args().hostname.clone(),
+    );
     pool.init(&poll, &resolver);
+    pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
 
     let (udp_req_sender, udp_req_receiver) =
         crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
@@ -113,37 +123,37 @@ pub async fn run() -> Result<()> {
     let udp_server = UdpServer::new(udp_req_receiver, udp_resp_sender);
 
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
-    tokio::select! {
-        err = do_tun_read(session.clone(), resolver.get_waker(), udp_req_sender, tcp_req_sender) => {
-            if let Err(err) = err {
-                log::error!("session read failed:{:?}", err);
-            }
-        },
-        err = do_tun_send(session.clone(), tcp_resp_receiver, udp_resp_receiver) => {
-            if let Err(err) = err {
-                log::error!("session send failed:{:?}", err);
-            }
-        },
-        err = do_network(poll, resolver, pool, udp_server) => {
-            if let Err(err) = err {
-                log::error!("network failed:{:?}", err);
-            }
-        }
-    };
-    Ok(())
+
+    let waker = resolver.get_waker();
+    let read_session = session.clone();
+    rayon::spawn(|| {
+        do_tun_read(read_session, waker, udp_req_sender, tcp_req_sender).unwrap();
+    });
+
+    rayon::spawn(|| {
+        do_tun_send(session, tcp_resp_receiver, udp_resp_receiver).unwrap();
+    });
+
+    do_network(poll, resolver, pool, udp_server)
 }
 
-async fn do_tun_read(
+fn do_tun_read(
     session: Arc<Session>,
     waker: Arc<Waker>,
     udp_sender: Sender<UdpRequest>,
     _tcp_sender: Sender<TcpRequest>,
 ) -> Result<()> {
+    log::warn!("do_tun_read started");
+    let private = IpNetwork::new("224.0.0.0".parse()?, 4)?;
     loop {
         let packet = session.receive_blocking()?;
         if let Some(packet) = IpPacket::new(packet.bytes()) {
             let source_addr = packet.get_source();
             let target_addr = packet.get_destination();
+            if !target_addr.is_global() || private.contains(target_addr) {
+                log::debug!("ignore private ip:{}", target_addr);
+                continue;
+            }
             match packet.get_next_level_protocol() {
                 IpNextHeaderProtocols::Udp => {
                     if let Some(packet) = UdpPacket::new(packet.payload()) {
@@ -155,6 +165,13 @@ async fn do_tun_read(
                             payload: Vec::from(packet.payload()),
                         }) {
                             log::warn!("udp send buffer is full, drop packet now");
+                        } else {
+                            log::debug!(
+                                "[{}->{}]udp packet size:{}",
+                                source,
+                                target,
+                                packet.payload().len()
+                            );
                         }
                     } else {
                         log::error!("parse udp packet failed");
@@ -170,11 +187,12 @@ async fn do_tun_read(
     }
 }
 
-async fn do_tun_send(
+fn do_tun_send(
     session: Arc<Session>,
     tcp_receiver: Receiver<TcpResponse>,
     udp_receiver: Receiver<UdpResponse>,
 ) -> Result<()> {
+    log::warn!("do_tun_send started");
     loop {
         crossbeam::select! {
             recv(udp_receiver) -> packet => {
@@ -190,27 +208,31 @@ async fn do_tun_send(
     }
 }
 
-async fn do_network(
+fn do_network(
     mut poll: Poll,
     mut resolver: DnsResolver,
     mut pool: IdlePool,
     mut udp_server: UdpServer,
 ) -> Result<()> {
+    log::warn!("do_network started");
     let mut events = Events::with_capacity(1024);
     loop {
         poll.poll(&mut events, None)?;
         for event in &events {
             match event.token().0 {
+                RESOLVER => {
+                    resolver.consume(|_, ip| {
+                        pool.resolve(ip);
+                    });
+                    udp_server.do_local(&mut pool, &poll, &resolver);
+                }
                 i if i % CHANNEL_CNT == CHANNEL_IDLE => {
                     pool.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.ready(&mut pool, &poll, &resolver);
+                    udp_server.do_remote(event, &poll);
                 }
-                i if i % CHANNEL_CNT == CHANNEL_TCP => {}
-                _ => resolver.consume(|_, ip| {
-                    pool.resolve(ip);
-                }),
+                _ => {}
             }
         }
     }

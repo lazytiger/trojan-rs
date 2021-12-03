@@ -21,6 +21,7 @@ pub struct DnsResolver {
     sender: Sender<(Token, String, Option<IpAddr>)>,
     dns_cache: HashMap<String, DnsEntry>,
     dns_cache_duration: Duration,
+    token: Token,
 }
 
 impl DnsResolver {
@@ -28,9 +29,10 @@ impl DnsResolver {
         let (sender, receiver) = channel();
         let waker = Arc::new(Waker::new(poll.registry(), token).unwrap());
         Self {
-            waker,
-            receiver: Some(receiver),
             sender,
+            waker,
+            token,
+            receiver: Some(receiver),
             dns_cache: HashMap::new(),
             dns_cache_duration: Duration::new(10, 0),
         }
@@ -70,7 +72,8 @@ impl DnsResolver {
         None
     }
 
-    pub fn resolve(&self, domain: String, token: Token) {
+    pub fn resolve(&self, domain: String, token: Option<Token>) {
+        let token = token.unwrap_or(self.token);
         log::info!("resolve domain:{} with token:{}", domain, token.0);
         let sender = self.sender.clone();
         let waker = self.waker.clone();

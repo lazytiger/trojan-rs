@@ -223,7 +223,7 @@ impl Connection {
                 if let Some(ip) = (*resolver).query_dns(domain.as_str()) {
                     self.target_addr.replace(SocketAddr::new(ip, *port));
                 } else {
-                    resolver.resolve(domain.clone(), self.target_token());
+                    resolver.resolve(domain.clone(), Some(self.target_token()));
                 }
             }
             Sock5Address::Socket(address) => {

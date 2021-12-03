@@ -14,8 +14,9 @@ use mio::{
 
 use crate::{
     config::OPTIONS,
+    idle_pool::IdlePool,
     proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
-    proxy::{idle_pool::IdlePool, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
+    proxy::{next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     sys, tcp_util,
