@@ -129,7 +129,7 @@ impl TlsConn {
     }
 
     pub fn do_send(&mut self) {
-        if !self.alive() {
+        if self.is_connecting() {
             return;
         }
         self.writable = true;
