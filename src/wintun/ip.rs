@@ -1,5 +1,5 @@
 use pnet::packet::{
-    ip::IpNextHeaderProtocol,
+    ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
     ipv4::{Ipv4Packet, MutableIpv4Packet},
     ipv6::{Ipv6Packet, MutableIpv6Packet},
     Packet,
@@ -29,9 +29,14 @@ impl<'a> Packet for IpPacket<'a> {
 
 impl<'a> IpPacket<'a> {
     pub fn new(data: &'a [u8]) -> Option<IpPacket<'a>> {
-        Ipv4Packet::new(data)
-            .map(IpPacket::V4)
-            .or_else(|| Ipv6Packet::new(data).map(IpPacket::V6))
+        let version = data[0] >> 4;
+        if version == 4 {
+            Ipv4Packet::new(data).map(IpPacket::V4)
+        } else if version == 6 {
+            Ipv6Packet::new(data).map(IpPacket::V6)
+        } else {
+            None
+        }
     }
 
     pub fn get_source(&self) -> IpAddr {
@@ -64,11 +69,24 @@ pub enum MutableIpPacket {
 impl MutableIpPacket {
     pub fn new(data: &[u8], is_v6: bool) -> Option<MutableIpPacket> {
         let mut packet = if is_v6 {
-            MutableIpv6Packet::owned(vec![0u8; Ipv6Packet::minimum_packet_size() + data.len()])
-                .map(MutableIpPacket::V6)
+            let header_length = Ipv6Packet::minimum_packet_size();
+            let total_length = header_length + data.len();
+            MutableIpv6Packet::owned(vec![0u8; total_length]).map(|mut packet| {
+                packet.set_payload_length(data.len() as u16);
+                packet.set_next_header(IpNextHeaderProtocols::Udp);
+                packet.set_version(6);
+                MutableIpPacket::V6(packet)
+            })
         } else {
-            MutableIpv4Packet::owned(vec![0u8; Ipv4Packet::minimum_packet_size() + data.len()])
-                .map(MutableIpPacket::V4)
+            let header_length = Ipv4Packet::minimum_packet_size();
+            let total_length = header_length + data.len();
+            MutableIpv4Packet::owned(vec![0u8; total_length]).map(|mut packet| {
+                packet.set_total_length(total_length as u16);
+                packet.set_header_length(5);
+                packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+                packet.set_version(4);
+                MutableIpPacket::V4(packet)
+            })
         };
         if let Some(packet) = &mut packet {
             packet.set_payload(data);
@@ -103,9 +121,21 @@ impl MutableIpPacket {
             MutableIpPacket::V6(packet) => IpPacket::V6(packet.consume_to_immutable()),
         }
     }
+
+    pub fn checksum(&mut self) {
+        match self {
+            MutableIpPacket::V4(packet) => {
+                let p = packet.to_immutable();
+                let checksum = pnet::packet::ipv4::checksum(&p);
+                packet.set_checksum(checksum);
+                packet.set_ttl(64);
+            }
+            MutableIpPacket::V6(_) => {}
+        }
+    }
 }
 
-fn get_ipv4(ip: IpAddr) -> Ipv4Addr {
+pub fn get_ipv4(ip: IpAddr) -> Ipv4Addr {
     if let IpAddr::V4(ip) = ip {
         ip
     } else {
@@ -113,7 +143,7 @@ fn get_ipv4(ip: IpAddr) -> Ipv4Addr {
     }
 }
 
-fn get_ipv6(ip: IpAddr) -> Ipv6Addr {
+pub fn get_ipv6(ip: IpAddr) -> Ipv6Addr {
     if let IpAddr::V6(ip) = ip {
         ip
     } else {

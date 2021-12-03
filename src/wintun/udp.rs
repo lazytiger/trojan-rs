@@ -5,7 +5,7 @@ use crate::{
     status::StatusProvider,
     tls_conn::TlsConn,
     wintun::{
-        ip::{IpPacket, MutableIpPacket},
+        ip::{get_ipv4, get_ipv6, MutableIpPacket},
         CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX,
     },
     OPTIONS,
@@ -22,7 +22,7 @@ pub struct UdpRequest {
     pub payload: Vec<u8>,
 }
 
-pub type UdpResponse = IpPacket<'static>;
+pub type UdpResponse = MutableIpPacket;
 
 pub struct UdpServer {
     receiver: Receiver<UdpRequest>,
@@ -111,6 +111,7 @@ struct Connection {
     sender: Sender<UdpResponse>,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
+    id: u16,
 }
 
 impl Connection {
@@ -127,6 +128,7 @@ impl Connection {
             sender,
             send_buffer: Default::default(),
             recv_buffer: Default::default(),
+            id: 1,
         }
     }
 
@@ -210,21 +212,36 @@ impl Connection {
         }
     }
 
+    fn id(&mut self) -> u16 {
+        self.id += 1;
+        self.id
+    }
+
     fn do_send_udp(&mut self, dest: SocketAddr, data: &[u8]) {
-        let mut packet = MutableUdpPacket::owned(vec![
-            0u8;
-            data.len()
-                + MutableUdpPacket::minimum_packet_size()
-        ])
-        .unwrap();
+        let length = data.len() + MutableUdpPacket::minimum_packet_size();
+        let mut packet = MutableUdpPacket::owned(vec![0u8; length]).unwrap();
         log::debug!("udp packet created");
+        packet.set_length(length as u16);
         packet.set_payload(data);
         packet.set_source(dest.port());
         packet.set_destination(self.source.port());
+        let checksum = if dest.is_ipv4() {
+            let packet = packet.to_immutable();
+            let source = get_ipv4(dest.ip());
+            let target = get_ipv4(self.source.ip());
+            pnet::packet::udp::ipv4_checksum(&packet, &source, &target)
+        } else {
+            let packet = packet.to_immutable();
+            let source = get_ipv6(dest.ip());
+            let target = get_ipv6(self.source.ip());
+            pnet::packet::udp::ipv6_checksum(&packet, &source, &target)
+        };
+        packet.set_checksum(checksum);
         if let Some(mut packet) = MutableIpPacket::new(packet.packet(), dest.is_ipv6()) {
             packet.set_source(dest.ip());
             packet.set_destination(self.source.ip());
-            if let Err(err) = self.sender.try_send(packet.into_immutable()) {
+            packet.checksum();
+            if let Err(err) = self.sender.try_send(packet) {
                 log::warn!("socket is full, ignore udp packet:{}", err);
             }
         } else {

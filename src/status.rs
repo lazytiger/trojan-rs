@@ -60,7 +60,7 @@ pub trait StatusProvider {
     fn close_conn(&self);
     fn shutdown(&mut self) {
         match self.get_status() {
-            ConnStatus::Established | ConnStatus::PeerClosed => {
+            ConnStatus::Established | ConnStatus::PeerClosed | ConnStatus::Connecting => {
                 self.close_conn();
                 self.set_status(ConnStatus::Shutdown);
             }

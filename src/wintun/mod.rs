@@ -154,6 +154,21 @@ fn do_tun_read(
                 log::debug!("ignore private ip:{}", target_addr);
                 continue;
             }
+            if let IpPacket::V4(p) = &packet {
+                log::info!(
+                    "version:{}, ttl:{}, dscp:{}, ecn:{}, flags:{}, offset:{}, id:{}, total:{}, header:{}, options:{:?}",
+                    p.get_version(),
+                    p.get_ttl(),
+                    p.get_dscp(),
+                    p.get_ecn(),
+                    p.get_flags(),
+                    p.get_fragment_offset(),
+                    p.get_identification(),
+                    p.get_total_length(),
+                    p.get_header_length(),
+                    p.get_options_raw(),
+                );
+            }
             match packet.get_next_level_protocol() {
                 IpNextHeaderProtocols::Udp => {
                     if let Some(packet) = UdpPacket::new(packet.payload()) {
@@ -193,13 +208,20 @@ fn do_tun_send(
     udp_receiver: Receiver<UdpResponse>,
 ) -> Result<()> {
     log::warn!("do_tun_send started");
+    let mut id: u16 = 1;
     loop {
         crossbeam::select! {
             recv(udp_receiver) -> packet => {
-                let packet = packet?;
+                let mut packet = packet?;
+                if let ip::MutableIpPacket::V4(p) = &mut packet {
+                   p.set_identification(id);
+                    id +=1;
+                }
+                let packet = packet.into_immutable();
                 let mut send = session.allocate_send_packet(packet.packet().len() as u16)?;
                 send.bytes_mut().copy_from_slice(packet.packet());
                 session.send_packet(send);
+                log::info!("send {} bytes through tunnel", packet.packet().len());
             },
             recv(tcp_receiver) -> _packet => {
 
