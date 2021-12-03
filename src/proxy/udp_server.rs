@@ -222,6 +222,7 @@ impl Connection {
             self.try_read_server(udp_cache);
         }
         if event.is_writable() {
+            self.server_conn.established();
             self.try_send_server();
         }
         self.do_status(poll);

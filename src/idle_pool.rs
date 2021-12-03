@@ -145,6 +145,7 @@ impl IdlePool {
                     log::error!("found data in https handshake phase");
                 }
                 if event.is_writable() {
+                    conn.established();
                     conn.do_send();
                 }
                 conn.check_status(poll);

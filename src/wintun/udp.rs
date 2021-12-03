@@ -136,7 +136,7 @@ impl Connection {
     }
 
     fn send_request(&mut self, packet: UdpRequest) {
-        if !self.conn.writable() {
+        if !self.conn.is_connecting() && !self.conn.writable() {
             log::warn!("udp packet is too fast, ignore now");
             return;
         }
@@ -149,12 +149,15 @@ impl Connection {
         if self.conn.write_session(self.recv_buffer.as_ref()) {
             self.conn.write_session(packet.payload.as_slice());
         }
+
+        self.conn.do_send();
     }
 
     fn ready(&mut self, event: &Event, poll: &Poll) {
         if event.is_readable() {
             self.send_response();
         } else {
+            self.conn.established();
             self.conn.do_send();
         }
         self.conn.check_status(poll);

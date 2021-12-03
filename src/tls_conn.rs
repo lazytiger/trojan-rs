@@ -25,7 +25,7 @@ impl TlsConn {
             session,
             stream,
             writable: true,
-            status: ConnStatus::Established,
+            status: ConnStatus::Connecting,
         }
     }
 
@@ -129,6 +129,9 @@ impl TlsConn {
     }
 
     pub fn do_send(&mut self) {
+        if !self.alive() {
+            return;
+        }
         self.writable = true;
         loop {
             if !self.session.wants_write() {

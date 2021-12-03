@@ -2,6 +2,7 @@ use mio::Poll;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ConnStatus {
+    Connecting,   //
     Established,  // connection is ok
     PeerClosed,   // peer is closed, sending remaining data
     Shutdown,     // self shutdown now
@@ -21,6 +22,9 @@ pub trait StatusProvider {
     fn is_shutdown(&self) -> bool {
         matches!(self.get_status(), ConnStatus::Shutdown)
     }
+    fn is_connecting(&self) -> bool {
+        matches!(self.get_status(), ConnStatus::Connecting)
+    }
     fn set_status(&mut self, status: ConnStatus);
     fn get_status(&self) -> ConnStatus;
     fn peer_closed(&mut self) {
@@ -29,6 +33,21 @@ pub trait StatusProvider {
                 self.set_status(ConnStatus::PeerClosed);
             }
             ConnStatus::PeerClosed => {}
+            _ => {
+                log::warn!(
+                    "invalid status change from:{:?} to {:?}",
+                    self.get_status(),
+                    ConnStatus::PeerClosed
+                );
+            }
+        }
+    }
+    fn established(&mut self) {
+        match self.get_status() {
+            ConnStatus::Connecting => {
+                self.set_status(ConnStatus::Established);
+            }
+            ConnStatus::Established => {}
             _ => {
                 log::warn!(
                     "invalid status change from:{:?} to {:?}",
@@ -60,7 +79,7 @@ pub trait StatusProvider {
     fn check_status(&mut self, poll: &Poll) {
         loop {
             match self.get_status() {
-                ConnStatus::Established => {}
+                ConnStatus::Established | ConnStatus::Connecting => {}
                 ConnStatus::PeerClosed => {
                     if self.finish_send() {
                         self.shutdown();
