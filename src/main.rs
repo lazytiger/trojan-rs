@@ -13,6 +13,7 @@ mod sys;
 mod tcp_util;
 mod tls_conn;
 mod types;
+#[cfg(target_os = "windows")]
 mod wintun;
 
 fn main() {
