@@ -149,7 +149,6 @@ impl Connection {
         if self.conn.write_session(self.recv_buffer.as_ref()) {
             self.conn.write_session(packet.payload.as_slice());
         }
-        //self.conn.do_send();
     }
 
     fn ready(&mut self, event: &Event, poll: &Poll) {
@@ -215,6 +214,7 @@ impl Connection {
                 + MutableUdpPacket::minimum_packet_size()
         ])
         .unwrap();
+        log::debug!("udp packet created");
         packet.set_payload(data);
         packet.set_source(dest.port());
         packet.set_destination(self.source.port());

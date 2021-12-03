@@ -201,7 +201,7 @@ impl Connection {
         if self.server_conn.write_session(self.recv_buffer.as_ref()) {
             self.server_conn.write_session(payload);
         }
-        self.try_send_server();
+        //self.try_send_server();  // This may cause an error is connection is not completed.
         self.do_status(poll);
     }
 
