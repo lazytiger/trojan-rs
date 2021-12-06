@@ -39,29 +39,24 @@ const CHANNEL_TCP: usize = 2;
 
 pub fn run() -> Result<()> {
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
-    let mut adapter = match Adapter::open(&wintun, "trojan", OPTIONS.wintun_args().name.as_str()) {
+    let mut adapter = match Adapter::open(&wintun, OPTIONS.wintun_args().name.as_str()) {
         Ok(a) => a,
-        Err(_) => {
-            Adapter::create(
-                &wintun,
-                "trojan",
-                OPTIONS.wintun_args().name.as_str(),
-                OPTIONS.wintun_args().guid,
-            )?
-            .adapter
-        }
+        Err(_) => Adapter::create(
+            &wintun,
+            "trojan",
+            OPTIONS.wintun_args().name.as_str(),
+            OPTIONS.wintun_args().guid,
+        )?,
     };
 
     if OPTIONS.wintun_args().delete {
-        adapter.delete(true)?;
+        if let Ok(adapter) = Arc::try_unwrap(adapter) {
+            adapter.delete()?;
+        }
         return Ok(());
     }
 
-    if let Some(guid) = OPTIONS.wintun_args().guid {
-        adapter.set_guid(guid);
-    }
-
-    let index = adapter.get_adapter_index()?;
+    let index = adapter.get_adapter_index(OPTIONS.wintun_args().guid)?;
 
     if let Err(err) = Command::new("route")
         .args([
@@ -173,7 +168,7 @@ fn do_tun_read(
                             log::warn!("udp send buffer is full, drop packet now");
                         } else {
                             log::info!(
-                                "[{}->{}]udp packet size:{}",
+                                "[{}->{}]receive udp packet size:{}",
                                 source,
                                 target,
                                 packet.payload().len()
