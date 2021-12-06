@@ -5,7 +5,7 @@ use crate::{
     status::StatusProvider,
     tls_conn::TlsConn,
     wintun::{
-        ip::{get_ipv4, get_ipv6, MutableIpPacket},
+        ip::{get_ipv4, get_ipv6},
         CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX,
     },
     OPTIONS,
@@ -13,7 +13,6 @@ use crate::{
 use bytes::BytesMut;
 use crossbeam::channel::{Receiver, Sender};
 use mio::{event::Event, Events, Poll, Token};
-use pnet::packet::{udp::MutableUdpPacket, Packet as _};
 use smoltcp::wire::{IpProtocol, Ipv4Packet, TcpPacket, UdpPacket};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use wintun::Session;
@@ -23,8 +22,6 @@ pub struct UdpRequest {
     pub target: SocketAddr,
     pub payload: Vec<u8>,
 }
-
-pub type UdpResponse = MutableIpPacket;
 
 pub struct UdpServer {
     receiver: Receiver<UdpRequest>,

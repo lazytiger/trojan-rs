@@ -1,12 +1,15 @@
-use std::{convert::TryInto, net::SocketAddr, process::Command, sync::Arc};
+use std::{
+    convert::TryInto,
+    net::{Ipv4Addr, SocketAddr},
+    process::Command,
+    sync::Arc,
+};
 
 use crossbeam::channel::Sender;
 use mio::{Events, Poll, Token, Waker};
-use pnet::{
-    ipnetwork::IpNetwork,
-    packet::{ip::IpNextHeaderProtocols, tcp::TcpPacket, udp::UdpPacket, Packet as _, Packet},
-};
+
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
+use smoltcp::wire::{IpProtocol, Ipv4Packet, UdpPacket};
 use wintun::{Adapter, Session};
 
 use crate::{
@@ -14,7 +17,7 @@ use crate::{
     resolver::DnsResolver,
     types::Result,
     wintun::{
-        ip::IpPacket,
+        ip::is_private,
         tcp::TcpRequest,
         udp::{UdpRequest, UdpServer},
     },
@@ -130,65 +133,46 @@ fn do_tun_read(
     tcp_sender: Sender<TcpRequest>,
 ) -> Result<()> {
     log::warn!("do_tun_read started");
-    let private = IpNetwork::new("224.0.0.0".parse()?, 4)?;
     loop {
         let packet = session.receive_blocking()?;
-        if let Some(packet) = IpPacket::new(packet.bytes()) {
-            let source_addr = packet.get_source();
-            let target_addr = packet.get_destination();
-            if !target_addr.is_global() || private.contains(target_addr) {
+        let version = packet.bytes()[0] >> 4;
+        if version == 4 {
+            let packet = Ipv4Packet::new_checked(packet.bytes())?;
+            let source_addr = packet.src_addr();
+            let target_addr = packet.dst_addr();
+            if is_private(target_addr) {
                 log::debug!("[{}->{}]skip packet", source_addr, target_addr);
                 continue;
             }
-
-            match packet.get_next_level_protocol() {
-                IpNextHeaderProtocols::Udp => {
-                    if let Some(packet) = UdpPacket::new(packet.payload()) {
-                        let source = SocketAddr::new(source_addr, packet.get_source());
-                        let target = SocketAddr::new(target_addr, packet.get_destination());
-                        if let Ok(()) = udp_sender.try_send(UdpRequest {
+            match packet.protocol() {
+                IpProtocol::Udp => {
+                    let packet = UdpPacket::new_checked(packet.payload())?;
+                    let source =
+                        SocketAddr::new(Ipv4Addr::from(source_addr).into(), packet.src_port());
+                    let target =
+                        SocketAddr::new(Ipv4Addr::from(target_addr).into(), packet.dst_port());
+                    if let Ok(()) = udp_sender.try_send(UdpRequest {
+                        source,
+                        target,
+                        payload: Vec::from(packet.payload()),
+                    }) {
+                        log::info!(
+                            "[{}->{}]receive udp packet size:{}",
                             source,
                             target,
-                            payload: Vec::from(packet.payload()),
-                        }) {
-                            log::info!(
-                                "[{}->{}]receive udp packet size:{}",
-                                source,
-                                target,
-                                packet.payload().len()
-                            );
-                        }
+                            packet.payload().len()
+                        );
                     } else {
-                        log::error!("parse udp packet failed");
+                        log::warn!("udp buffer is full, skip packet");
                     }
                 }
-                IpNextHeaderProtocols::Tcp => {
-                    if let Some(packet) = TcpPacket::owned(packet.payload().into()) {
-                        let source = SocketAddr::new(source_addr, packet.get_source());
-                        let target = SocketAddr::new(target_addr, packet.get_destination());
-                        if let Ok(()) = tcp_sender.try_send(TcpRequest {
-                            source,
-                            target,
-                            packet,
-                        }) {
-                            log::info!("[tcp][{}->{}]receive tcp packet", source, target);
-                        }
-                    } else {
-                        log::error!("parse tcp packet failed");
-                    }
-                }
-                _ => {
-                    log::info!(
-                        "[{}->{}]skip other protocol",
-                        packet.get_source(),
-                        packet.get_destination()
-                    );
-                }
+                IpProtocol::Tcp => {}
+                _ => {}
             }
-            waker.wake()?;
         } else {
-            log::error!("invalid ip packet");
         }
+
+        waker.wake()?;
     }
 }
 
