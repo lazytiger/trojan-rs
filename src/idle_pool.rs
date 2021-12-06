@@ -104,9 +104,7 @@ impl IdlePool {
     }
 
     fn new_conn(&mut self) -> Result<TlsConn> {
-        log::info!("connecting to server:{}", self.addr);
         let server = TcpStream::connect(self.addr)?;
-        log::info!("server connected");
         //sys::set_mark(&server, self.marker)?;
         #[cfg(not(target_os = "windows"))]
         server.set_nodelay(true)?;

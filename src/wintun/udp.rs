@@ -14,6 +14,7 @@ use bytes::BytesMut;
 use crossbeam::channel::{Receiver, Sender};
 use mio::{event::Event, Events, Poll, Token};
 use pnet::packet::{udp::MutableUdpPacket, Packet as _};
+use smoltcp::wire::{IpProtocol, Ipv4Packet, TcpPacket, UdpPacket};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use wintun::Session;
 
@@ -63,6 +64,12 @@ impl UdpServer {
 
     pub fn do_local(&mut self, pool: &mut IdlePool, poll: &Poll, resolver: &DnsResolver) {
         self.receiver.clone().try_iter().for_each(|packet| {
+            log::info!(
+                "[udp][{}->{}]received packet:{}",
+                packet.source,
+                packet.target,
+                packet.payload.len()
+            );
             let index = if let Some(index) = self.src_map.get_mut(&packet.source) {
                 *index
             } else if let Some(mut conn) = pool.get(poll, resolver) {
@@ -82,6 +89,7 @@ impl UdpServer {
                     return;
                 }
             } else {
+                log::error!("get connection from idle pool failed");
                 return;
             };
             let conn = self.conns.get_mut(&index).unwrap();
@@ -138,6 +146,7 @@ impl Connection {
             log::warn!("udp packet is too fast, ignore now");
             return;
         }
+        log::info!("sending request to remote");
         self.recv_buffer.clear();
         UdpAssociate::generate(
             &mut self.recv_buffer,
@@ -196,7 +205,8 @@ impl Connection {
                 }
                 UdpParseResult::Packet(packet) => {
                     let payload = &packet.payload[..packet.length];
-                    self.do_send_udp(packet.address, payload);
+                    self.do_send_udp_smoltcp(packet.address, payload);
+                    //self.do_send_udp(packet.address, payload);
                     buffer = &packet.payload[packet.length..];
                 }
                 UdpParseResult::InvalidProtocol => {
@@ -209,53 +219,56 @@ impl Connection {
     }
 
     fn id(&mut self) -> u16 {
+        let id = self.id;
         self.id += 1;
-        self.id
+        id
     }
 
-    fn do_send_udp(&mut self, dest: SocketAddr, data: &[u8]) {
-        let length = data.len() + MutableUdpPacket::minimum_packet_size();
-        let mut packet = MutableUdpPacket::owned(vec![0u8; length]).unwrap();
-        log::debug!("udp packet created");
-        packet.set_length(length as u16);
-        packet.set_payload(data);
-        packet.set_source(dest.port());
-        packet.set_destination(self.source.port());
-        let checksum = if dest.is_ipv4() {
-            let packet = packet.to_immutable();
-            let source = get_ipv4(dest.ip());
-            let target = get_ipv4(self.source.ip());
-            pnet::packet::udp::ipv4_checksum(&packet, &source, &target)
+    fn do_send_udp_smoltcp(&mut self, dest: SocketAddr, data: &[u8]) {
+        let length = 28 + data.len();
+        let mut buffer = vec![0u8; length];
+
+        //ip header
+        let mut packet = Ipv4Packet::new_unchecked(buffer.as_mut_slice());
+        packet.set_version(4);
+        packet.set_header_len(20);
+        packet.set_dscp(0);
+        packet.set_ecn(0);
+        packet.set_total_len(length as u16);
+        packet.set_ident(self.id());
+        packet.set_dont_frag(true);
+        packet.set_more_frags(false);
+        packet.set_frag_offset(0);
+        packet.set_hop_limit(64);
+        packet.set_protocol(IpProtocol::Udp);
+        packet.set_src_addr(get_ipv4(dest.ip()).into());
+        packet.set_dst_addr(get_ipv4(self.source.ip()).into());
+        packet.fill_checksum();
+        packet.check_len().unwrap();
+
+        //udp header
+        let mut packet = UdpPacket::new_unchecked(packet.payload_mut());
+        packet.set_len((length - 20) as u16);
+        packet.set_src_port(dest.port());
+        packet.set_dst_port(self.source.port());
+        packet.payload_mut().copy_from_slice(data);
+        let source = get_ipv4(dest.ip()).into();
+        let target = get_ipv4(self.source.ip()).into();
+        packet.fill_checksum(&source, &target);
+        packet.check_len().unwrap();
+
+        if let Ok(mut send_packet) = self.session.allocate_send_packet(length as u16) {
+            send_packet.bytes_mut().copy_from_slice(buffer.as_slice());
+            self.session.send_packet(send_packet);
+            log::info!(
+                "[{}->{}]send udp packet:{}, data:{}",
+                dest,
+                self.source,
+                buffer.len(),
+                data.len()
+            );
         } else {
-            let packet = packet.to_immutable();
-            let source = get_ipv6(dest.ip());
-            let target = get_ipv6(self.source.ip());
-            pnet::packet::udp::ipv6_checksum(&packet, &source, &target)
-        };
-        packet.set_checksum(checksum);
-        if let Some(mut packet) = MutableIpPacket::new(packet.packet(), dest.is_ipv6()) {
-            packet.set_source(dest.ip());
-            packet.set_destination(self.source.ip());
-            packet.fill(self.id());
-            let packet = packet.into_immutable();
-            if let Ok(mut send_packet) = self
-                .session
-                .allocate_send_packet(packet.packet().len() as u16)
-            {
-                send_packet.bytes_mut().copy_from_slice(packet.packet());
-                log::info!(
-                    "[{}->{}]send udp packet:{}, data:{}",
-                    dest,
-                    self.source,
-                    send_packet.bytes().len(),
-                    data.len()
-                );
-                self.session.send_packet(send_packet);
-            } else {
-                log::error!("allocate send packet failed");
-            }
-        } else {
-            log::error!("invalid udp packet");
+            log::error!("send packet failed");
         }
     }
 }
