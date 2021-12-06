@@ -122,13 +122,14 @@ impl MutableIpPacket {
         }
     }
 
-    pub fn checksum(&mut self) {
+    pub fn fill(&mut self, id: u16) {
         match self {
             MutableIpPacket::V4(packet) => {
                 let p = packet.to_immutable();
                 let checksum = pnet::packet::ipv4::checksum(&p);
                 packet.set_checksum(checksum);
                 packet.set_ttl(64);
+                packet.set_identification(id);
             }
             MutableIpPacket::V6(_) => {}
         }

@@ -14,7 +14,8 @@ use bytes::BytesMut;
 use crossbeam::channel::{Receiver, Sender};
 use mio::{event::Event, Events, Poll, Token};
 use pnet::packet::{udp::MutableUdpPacket, Packet as _};
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use wintun::Session;
 
 pub struct UdpRequest {
     pub source: SocketAddr,
@@ -26,17 +27,17 @@ pub type UdpResponse = MutableIpPacket;
 
 pub struct UdpServer {
     receiver: Receiver<UdpRequest>,
-    sender: Sender<UdpResponse>,
     src_map: HashMap<SocketAddr, usize>,
     conns: HashMap<usize, Connection>,
     next_index: usize,
+    session: Arc<Session>,
 }
 
 impl UdpServer {
-    pub fn new(receiver: Receiver<UdpRequest>, sender: Sender<UdpResponse>) -> UdpServer {
+    pub fn new(receiver: Receiver<UdpRequest>, session: Arc<Session>) -> UdpServer {
         UdpServer {
             receiver,
-            sender,
+            session,
             src_map: Default::default(),
             conns: Default::default(),
             next_index: MIN_INDEX,
@@ -71,7 +72,7 @@ impl UdpServer {
                     return;
                 }
 
-                let mut conn = Connection::new(index, conn, packet.source, self.sender.clone());
+                let mut conn = Connection::new(index, conn, packet.source, self.session.clone());
                 if conn.setup() {
                     let _ = self.src_map.insert(packet.source, index);
                     let _ = self.conns.insert(index, conn);
@@ -108,24 +109,19 @@ struct Connection {
     index: usize,
     conn: TlsConn,
     source: SocketAddr,
-    sender: Sender<UdpResponse>,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
     id: u16,
+    session: Arc<Session>,
 }
 
 impl Connection {
-    fn new(
-        index: usize,
-        conn: TlsConn,
-        source: SocketAddr,
-        sender: Sender<UdpResponse>,
-    ) -> Connection {
+    fn new(index: usize, conn: TlsConn, source: SocketAddr, session: Arc<Session>) -> Connection {
         Connection {
             index,
             conn,
             source,
-            sender,
+            session,
             send_buffer: Default::default(),
             recv_buffer: Default::default(),
             id: 1,
@@ -240,9 +236,23 @@ impl Connection {
         if let Some(mut packet) = MutableIpPacket::new(packet.packet(), dest.is_ipv6()) {
             packet.set_source(dest.ip());
             packet.set_destination(self.source.ip());
-            packet.checksum();
-            if let Err(err) = self.sender.try_send(packet) {
-                log::warn!("socket is full, ignore udp packet:{}", err);
+            packet.fill(self.id());
+            let packet = packet.into_immutable();
+            if let Ok(mut send_packet) = self
+                .session
+                .allocate_send_packet(packet.packet().len() as u16)
+            {
+                send_packet.bytes_mut().copy_from_slice(packet.packet());
+                log::info!(
+                    "[{}->{}]send udp packet:{}, data:{}",
+                    dest,
+                    self.source,
+                    send_packet.bytes().len(),
+                    data.len()
+                );
+                self.session.send_packet(send_packet);
+            } else {
+                log::error!("allocate send packet failed");
             }
         } else {
             log::error!("invalid udp packet");

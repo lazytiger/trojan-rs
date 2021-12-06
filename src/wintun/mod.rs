@@ -113,25 +113,16 @@ pub fn run() -> Result<()> {
 
     let (udp_req_sender, udp_req_receiver) =
         crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
-    let (udp_resp_sender, udp_resp_receiver) =
-        crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
     let (tcp_req_sender, _tcp_req_receiver) =
         crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
-    let (tcp_resp_sender, tcp_resp_receiver) =
-        crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
-
-    let udp_server = UdpServer::new(udp_req_receiver, udp_resp_sender);
 
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
 
-    let waker = resolver.get_waker();
-    let read_session = session.clone();
-    rayon::spawn(|| {
-        do_tun_read(read_session, waker, udp_req_sender, tcp_req_sender).unwrap();
-    });
+    let udp_server = UdpServer::new(udp_req_receiver, session.clone());
 
+    let waker = resolver.get_waker();
     rayon::spawn(|| {
-        do_tun_send(session, tcp_resp_receiver, udp_resp_receiver).unwrap();
+        do_tun_read(session, waker, udp_req_sender, tcp_req_sender).unwrap();
     });
 
     do_network(poll, resolver, pool, udp_server)
@@ -181,7 +172,7 @@ fn do_tun_read(
                         }) {
                             log::warn!("udp send buffer is full, drop packet now");
                         } else {
-                            log::debug!(
+                            log::info!(
                                 "[{}->{}]udp packet size:{}",
                                 source,
                                 target,
@@ -198,34 +189,6 @@ fn do_tun_read(
             waker.wake()?;
         } else {
             log::error!("invalid ip packet");
-        }
-    }
-}
-
-fn do_tun_send(
-    session: Arc<Session>,
-    tcp_receiver: Receiver<TcpResponse>,
-    udp_receiver: Receiver<UdpResponse>,
-) -> Result<()> {
-    log::warn!("do_tun_send started");
-    let mut id: u16 = 1;
-    loop {
-        crossbeam::select! {
-            recv(udp_receiver) -> packet => {
-                let mut packet = packet?;
-                if let ip::MutableIpPacket::V4(p) = &mut packet {
-                   p.set_identification(id);
-                    id +=1;
-                }
-                let packet = packet.into_immutable();
-                let mut send = session.allocate_send_packet(packet.packet().len() as u16)?;
-                send.bytes_mut().copy_from_slice(packet.packet());
-                session.send_packet(send);
-                log::info!("send {} bytes through tunnel", packet.packet().len());
-            },
-            recv(tcp_receiver) -> _packet => {
-
-            }
         }
     }
 }
