@@ -242,6 +242,9 @@ impl Connection {
                 );
                 self.target_addr = OPTIONS.back_addr;
             }
+            _ => {
+                unreachable!()
+            }
         }
         true
     }

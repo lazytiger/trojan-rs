@@ -8,7 +8,7 @@ use std::{
 
 use mio::{
     net::{TcpListener, UdpSocket},
-    Events, Interest, Poll, Token,
+    Events, Interest, Poll, Token, Waker,
 };
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -88,7 +88,8 @@ pub fn run() -> Result<()> {
     let mut udp_listener = UdpSocket::from_std(new_socket(addr, true)?.into());
     let mut udp_cache = UdpSvrCache::new();
     let mut poll = Poll::new()?;
-    let mut resolver = DnsResolver::new(&poll, Token(RESOLVER));
+    let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
+    let mut resolver = DnsResolver::new(&poll, waker, Token(RESOLVER));
     poll.registry()
         .register(&mut tcp_listener, Token(TCP_LISTENER), Interest::READABLE)?;
     poll.registry()

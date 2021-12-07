@@ -109,6 +109,9 @@ pub struct WintunArgs {
         about = "pool size, 0 for disable"
     )]
     pub pool_size: usize,
+
+    #[clap(short, long, default_value = "1500", about = "maximum transmit unit")]
+    pub mtu: usize,
 }
 
 #[derive(Parser)]

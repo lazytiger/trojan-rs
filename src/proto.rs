@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use bytes::{BufMut, BytesMut};
+use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address, Ipv6Address};
 
 use crate::config::OPTIONS;
 
@@ -19,6 +20,7 @@ const IPV6: u8 = 0x04;
 
 /// Trojan Socks5 address enum
 pub enum Sock5Address {
+    Endpoint(IpEndpoint),
     Socket(SocketAddr),
     // IP address
     Domain(String, u16),
@@ -165,14 +167,77 @@ fn parse_address(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Address)> {
     }
 }
 
+fn parse_address_endpoint(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Address)> {
+    match atyp {
+        IPV4 => {
+            log::debug!("ipv4 address found");
+            if buffer.len() < 6 {
+                log::error!("unknown protocol, invalid ipv4 address");
+                return None;
+            }
+            let port = to_u16(&buffer[4..]);
+            let addr = Ipv4Address::new(buffer[0], buffer[1], buffer[2], buffer[3]);
+            Some((
+                6,
+                Sock5Address::Endpoint(IpEndpoint::new(IpAddress::Ipv4(addr), port)),
+            ))
+        }
+        DOMAIN => {
+            log::debug!("domain address found");
+            let length = buffer[0] as usize;
+            if buffer.len() < length + 3 {
+                log::error!("unknown protocol, invalid domain address");
+                return None;
+            }
+            let domain: String = String::from_utf8_lossy(&buffer[1..length + 1]).into();
+            let port = to_u16(&buffer[length + 1..]);
+            if let Ok(ip) = domain.parse::<IpAddr>() {
+                Some((
+                    length + 3,
+                    Sock5Address::Endpoint(IpEndpoint::new(IpAddress::from(ip), port)),
+                ))
+            } else {
+                log::debug!("domain found:{}:{}", domain, port);
+                Some((length + 3, Sock5Address::Domain(domain, port)))
+            }
+        }
+        IPV6 => {
+            log::debug!("ipv6 address found");
+            if buffer.len() < 18 {
+                log::error!("unknown protocol, invalid ipv6 address");
+                return None;
+            }
+            let addr = Ipv6Address::from_bytes(buffer);
+            let endpoint = IpEndpoint::new(IpAddress::Ipv6(addr), to_u16(&buffer[16..]));
+            Some((18, Sock5Address::Endpoint(endpoint)))
+        }
+        _ => {
+            log::warn!("unknown protocol, invalid address type:{}", atyp);
+            None
+        }
+    }
+}
+
 pub struct UdpAssociate<'a> {
     pub address: SocketAddr,
     pub length: usize,
     pub payload: &'a [u8],
 }
 
+pub struct UdpAssociateEndpoint<'a> {
+    pub endpoint: IpEndpoint,
+    pub length: usize,
+    pub payload: &'a [u8],
+}
+
 pub enum UdpParseResult<'a> {
     Packet(UdpAssociate<'a>),
+    InvalidProtocol,
+    Continued,
+}
+
+pub enum UdpParseResultEndpoint<'a> {
+    Packet(UdpAssociateEndpoint<'a>),
     InvalidProtocol,
     Continued,
 }
@@ -218,8 +283,57 @@ impl<'a> UdpAssociate<'a> {
         }
     }
 
+    pub fn parse_endpoint(mut buffer: &'a [u8]) -> UdpParseResultEndpoint<'a> {
+        if buffer.len() < 11 {
+            log::debug!("data is too short for UDP_ASSOCIATE");
+            return UdpParseResultEndpoint::Continued;
+        }
+        let atyp = buffer[0];
+        buffer = &buffer[1..];
+        if let Some((size, addr)) = parse_address_endpoint(atyp, buffer) {
+            buffer = &buffer[size..];
+            if buffer.len() < 4 {
+                return UdpParseResultEndpoint::Continued;
+            }
+            let length = to_u16(buffer) as usize;
+            if length > MAX_PACKET_SIZE {
+                log::error!("udp packet size:{} is too long", length);
+                return UdpParseResultEndpoint::InvalidProtocol;
+            }
+            if buffer.len() < length + 4 {
+                return UdpParseResultEndpoint::Continued;
+            }
+            if buffer[2] != b'\r' || buffer[3] != b'\n' {
+                log::warn!("udp packet expected CRLF after length");
+                return UdpParseResultEndpoint::InvalidProtocol;
+            }
+            match addr {
+                Sock5Address::Endpoint(endpoint) => {
+                    UdpParseResultEndpoint::Packet(UdpAssociateEndpoint {
+                        endpoint,
+                        length,
+                        payload: &buffer[4..],
+                    })
+                }
+                _ => {
+                    log::warn!("udp packet only accept ip address");
+                    UdpParseResultEndpoint::InvalidProtocol
+                }
+            }
+        } else {
+            UdpParseResultEndpoint::InvalidProtocol
+        }
+    }
+
     pub fn generate(buffer: &mut BytesMut, address: &SocketAddr, length: u16) {
         Sock5Address::generate(buffer, address);
+        buffer.put_u16(length);
+        buffer.put_u8(b'\r');
+        buffer.put_u8(b'\n');
+    }
+
+    pub fn generate_endpoint(buffer: &mut BytesMut, endpoint: &IpEndpoint, length: u16) {
+        Sock5Address::generate_endpoint(buffer, endpoint);
         buffer.put_u16(length);
         buffer.put_u8(b'\r');
         buffer.put_u8(b'\n');
@@ -245,5 +359,22 @@ impl Sock5Address {
             }
         };
         buffer.put_u16(port);
+    }
+
+    pub fn generate_endpoint(buffer: &mut BytesMut, endpoint: &IpEndpoint) {
+        match endpoint.addr {
+            IpAddress::Ipv4(v4) => {
+                buffer.put_u8(IPV4);
+                buffer.extend_from_slice(v4.as_bytes());
+            }
+            IpAddress::Ipv6(v6) => {
+                buffer.put_u8(IPV6);
+                buffer.extend_from_slice(v6.as_bytes());
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+        buffer.put_u16(endpoint.port);
     }
 }

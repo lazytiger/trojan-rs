@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{net::TcpListener, Events, Interest, Poll, Token};
+use mio::{net::TcpListener, Events, Interest, Poll, Token, Waker};
 use rustls::{
     server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth},
     KeyLogFile, RootCertStore, ServerConfig,
@@ -93,7 +93,8 @@ fn init_config() -> Result<Arc<ServerConfig>> {
 pub fn run() -> Result<()> {
     let config = init_config()?;
     let mut poll = Poll::new()?;
-    let mut resolver = DnsResolver::new(&poll, Token(RESOLVER));
+    let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
+    let mut resolver = DnsResolver::new(&poll, waker, Token(RESOLVER));
     resolver.set_cache_timeout(OPTIONS.server_args().dns_cache_time);
     let addr = OPTIONS.local_addr.parse()?;
     let mut listener = TcpListener::bind(addr)?;

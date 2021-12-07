@@ -25,9 +25,8 @@ pub struct DnsResolver {
 }
 
 impl DnsResolver {
-    pub fn new(poll: &Poll, token: Token) -> Self {
+    pub fn new(poll: &Poll, waker: Arc<Waker>, token: Token) -> Self {
         let (sender, receiver) = channel();
-        let waker = Arc::new(Waker::new(poll.registry(), token).unwrap());
         Self {
             sender,
             waker,
@@ -36,10 +35,6 @@ impl DnsResolver {
             dns_cache: HashMap::new(),
             dns_cache_duration: Duration::new(10, 0),
         }
-    }
-
-    pub fn get_waker(&self) -> Arc<Waker> {
-        self.waker.clone()
     }
 
     pub fn set_cache_timeout(&mut self, timeout: u64) {

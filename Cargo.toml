@@ -25,11 +25,10 @@ rayon = "1.5"
 rustls-pemfile = "0.2"
 lazy_static = "1.4"
 derive_more = "0.99"
-pnet = "0.28"
 clap-num = "0.2"
 libloading = "0.7"
 crossbeam = "0.8"
-smoltcp = "0.7"
+smoltcp = {git = "https://github.com/smoltcp-rs/smoltcp.git", branch = "medium-ip"}
 
 [target.'cfg(windows)'.dependencies]
 wintun = {git = "https://github.com/lazytiger/wintun.git", features = ["panic_on_unsent_packets"]}
