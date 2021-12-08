@@ -5,6 +5,7 @@ use crate::{
     status::{ConnStatus, StatusProvider},
     tls_conn::TlsConn,
     wintun::{CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
+    OPTIONS,
 };
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
@@ -12,7 +13,7 @@ use smoltcp::{
     socket::{SocketHandle, SocketRef, SocketSet, TcpSocket, TcpState},
     wire::IpEndpoint,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 fn next_index() -> usize {
     static mut NEXT_INDEX: usize = MIN_INDEX;
@@ -37,6 +38,12 @@ impl TcpServer {
             conns: Default::default(),
             src_map: Default::default(),
         }
+    }
+
+    pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, sockets: &mut SocketSet) {
+        self.conns.iter_mut().for_each(|(_, conn)| unsafe {
+            Arc::get_mut_unchecked(conn).check_timeout(poll, now, sockets)
+        });
     }
 
     pub fn index2token(index: usize) -> Token {
@@ -119,10 +126,13 @@ pub struct Connection {
     recv_buffer: Vec<u8>,
     send_buffer: BytesMut,
     status: ConnStatus,
+    last_active_time: Instant,
     closing: bool,
     read_client: bool,
     read_server: bool,
 }
+
+impl Connection {}
 
 impl Connection {
     fn new(conn: TlsConn, handle: SocketHandle, index: usize, endpoint: IpEndpoint) -> Self {
@@ -131,6 +141,7 @@ impl Connection {
             handle,
             endpoint,
             index,
+            last_active_time: Instant::now(),
             closing: false,
             read_server: false,
             read_client: false,
@@ -138,6 +149,18 @@ impl Connection {
             recv_buffer: vec![0; MAX_PACKET_SIZE],
             send_buffer: BytesMut::new(),
         }
+    }
+
+    pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, sockets: &mut SocketSet) {
+        if self.timeout(now) {
+            self.shutdown();
+            self.conn.shutdown();
+            self.do_check_status(poll, sockets);
+        }
+    }
+
+    fn timeout(&self, now: Instant) -> bool {
+        now - self.last_active_time > OPTIONS.tcp_idle_duration
     }
 
     fn writable(&self) -> bool {
@@ -179,6 +202,7 @@ impl Connection {
     }
 
     fn do_local(&mut self, poll: &Poll, sockets: &mut SocketSet) {
+        self.last_active_time = Instant::now();
         let mut socket = sockets.get::<TcpSocket>(self.handle);
         if self.conn.writable() {
             self.try_recv_client(&mut socket);
@@ -248,6 +272,7 @@ impl Connection {
     }
 
     pub(crate) fn ready(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
+        self.last_active_time = Instant::now();
         if event.is_readable() {
             if self.writable() {
                 self.do_recv_server(sockets);

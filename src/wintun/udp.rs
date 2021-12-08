@@ -13,7 +13,7 @@ use smoltcp::{
     socket::{SocketHandle, SocketRef, SocketSet, UdpSocket},
     wire::IpEndpoint,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 pub struct UdpServer {
     src_map: HashMap<SocketHandle, Arc<UdpListener>>,
@@ -78,15 +78,41 @@ impl UdpServer {
         let index = Self::token2index(event.token());
         if let Some(listener) = self.conns.get_mut(&index) {
             let listener = unsafe { Arc::get_mut_unchecked(listener) };
-            listener.ready(event, poll, sockets);
-            if listener.src_map.is_empty() {
-                log::info!("remove udp endpoint:{}", listener.endpoint);
-                sockets.remove(listener.handle);
-                let _ = self.src_map.remove(&listener.handle);
+            if let Some(index) = listener.ready(event, poll, sockets) {
                 let _ = self.conns.remove(&index);
             }
         } else {
             log::error!("connection:{} not found in udp server", index);
+        }
+    }
+
+    pub fn check_timeout(&mut self, now: Instant) {
+        let timeouts: Vec<_> = self
+            .conns
+            .iter_mut()
+            .map(|(_, conn)| unsafe { Arc::get_mut_unchecked(conn).check_timeout(now) })
+            .collect();
+
+        for to in &timeouts {
+            for (index, _) in to {
+                let _ = self.conns.remove(index);
+            }
+        }
+
+        let timeouts: Vec<_> = self
+            .conns
+            .iter()
+            .filter_map(|(_, conn)| {
+                if conn.is_empty() {
+                    Some(conn.handle)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for handle in timeouts {
+            let _ = self.src_map.remove(&handle);
         }
     }
 }
@@ -158,19 +184,49 @@ impl UdpListener {
         indexes
     }
 
-    fn ready(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
+    fn remove_conn(&mut self, index: &usize, endpoint: &IpEndpoint) {
+        let _ = self.src_map.remove(endpoint);
+        let _ = self.conns.remove(index);
+        log::info!("connection:{} removed", index);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.conns.is_empty()
+    }
+
+    fn ready(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) -> Option<usize> {
         let index = UdpServer::token2index(event.token());
         if let Some(conn) = self.conns.get_mut(&index) {
             let conn = unsafe { Arc::get_mut_unchecked(conn) };
             conn.ready(event, poll, sockets);
             if conn.destroyed() {
-                let _ = self.src_map.remove(&conn.src_endpoint);
-                let _ = self.conns.remove(&index);
-                log::info!("connection:{} removed", index);
+                let index = conn.index;
+                let endpoint = conn.src_endpoint;
+                self.remove_conn(&index, &endpoint);
+                return Some(index);
             }
         } else {
             log::warn!("connection:{} not found", index);
         }
+        None
+    }
+
+    fn check_timeout(&mut self, now: Instant) -> Vec<(usize, IpEndpoint)> {
+        let timeouts: Vec<_> = self
+            .conns
+            .iter()
+            .filter_map(|(index, conn)| {
+                if conn.timeout(now) {
+                    Some((*index, conn.src_endpoint))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (index, endpoint) in &timeouts {
+            self.remove_conn(index, endpoint);
+        }
+        timeouts
     }
 }
 
@@ -181,6 +237,7 @@ struct Connection {
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
     src_endpoint: IpEndpoint,
+    last_active_time: Instant,
 }
 
 impl Connection {
@@ -195,17 +252,22 @@ impl Connection {
             conn,
             handle,
             src_endpoint,
+            last_active_time: Instant::now(),
             send_buffer: Default::default(),
             recv_buffer: Default::default(),
         }
     }
 
+    fn timeout(&self, now: Instant) -> bool {
+        now - self.last_active_time > OPTIONS.tcp_idle_duration
+    }
+
     pub(crate) fn destroyed(&self) -> bool {
-        //TODO
         self.conn.deregistered()
     }
 
     fn send_request(&mut self, payload: &[u8], target: IpEndpoint) {
+        self.last_active_time = Instant::now();
         if !self.conn.is_connecting() && !self.conn.writable() {
             log::warn!("udp packet is too fast, ignore now");
             return;
@@ -221,6 +283,7 @@ impl Connection {
     }
 
     fn ready(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
+        self.last_active_time = Instant::now();
         if event.is_readable() {
             self.send_response(sockets);
         } else {

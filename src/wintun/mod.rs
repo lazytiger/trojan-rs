@@ -143,6 +143,11 @@ pub fn run() -> Result<()> {
     let timeout = Some(Duration::from_millis(1));
     let mut udp_server = UdpServer::new();
     let mut tcp_server = TcpServer::new();
+
+    let mut last_udp_check_time = std::time::Instant::now();
+    let mut last_tcp_check_time = std::time::Instant::now();
+    let check_duration = std::time::Duration::new(1, 0);
+
     loop {
         let now = Instant::now();
         let timeout = interface.poll_delay(&sockets, now).or(timeout);
@@ -174,6 +179,17 @@ pub fn run() -> Result<()> {
         }
         udp_server.do_local(&mut pool, &poll, &resolver, udp_handles, &mut sockets);
         tcp_server.do_local(&mut pool, &poll, &resolver, tcp_handles, &mut sockets);
+
+        let now = std::time::Instant::now();
+        if now - last_tcp_check_time > check_duration {
+            tcp_server.check_timeout(&poll, now, &mut sockets);
+            last_tcp_check_time = now;
+        }
+
+        if now - last_udp_check_time > OPTIONS.udp_idle_duration {
+            udp_server.check_timeout(now);
+            last_udp_check_time = now;
+        }
     }
 }
 
