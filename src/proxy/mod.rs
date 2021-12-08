@@ -89,7 +89,7 @@ pub fn run() -> Result<()> {
     let mut udp_cache = UdpSvrCache::new();
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
-    let mut resolver = DnsResolver::new(&poll, waker, Token(RESOLVER));
+    let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
     poll.registry()
         .register(&mut tcp_listener, Token(TCP_LISTENER), Interest::READABLE)?;
     poll.registry()

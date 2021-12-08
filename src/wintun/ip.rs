@@ -1,35 +1,12 @@
 use crossbeam::channel::Receiver;
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use smoltcp::{
     phy::{Device, DeviceCapabilities, Medium},
-    socket::SocketSet,
     time::Instant,
-    wire::{
-        IpAddress, IpEndpoint, IpProtocol, IpVersion, Ipv4Address, Ipv4Packet, Ipv6Packet,
-        TcpPacket, UdpPacket,
-    },
+    wire::{IpAddress, IpEndpoint},
 };
 use wintun::Session;
-
-pub fn get_ipv4(ip: IpAddr) -> Ipv4Addr {
-    if let IpAddr::V4(ip) = ip {
-        ip
-    } else {
-        panic!("invalid ip type, v4 required")
-    }
-}
-
-pub fn get_ipv6(ip: IpAddr) -> Ipv6Addr {
-    if let IpAddr::V6(ip) = ip {
-        ip
-    } else {
-        panic!("invalid ip type, v6 required")
-    }
-}
 
 //TODO ipv6
 pub fn is_private(endpoint: IpEndpoint) -> bool {
@@ -71,7 +48,6 @@ impl<'d> Device<'d> for TunInterface {
     fn receive(&'d mut self) -> Option<(Self::RxToken, Self::TxToken)> {
         match self.receiver.try_recv() {
             Ok(packet) => {
-                log::info!("receive one ip packet");
                 let rx = RxToken { buffer: packet };
                 let tx = TxToken {
                     session: self.session.clone(),

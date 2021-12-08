@@ -81,7 +81,7 @@ impl StatusProvider for TcpBackend {
         self.status
     }
 
-    fn close_conn(&self) {
+    fn close_conn(&mut self) {
         let _ = self.conn.shutdown(Shutdown::Both);
     }
 

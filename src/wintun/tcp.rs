@@ -2,14 +2,14 @@ use crate::{
     idle_pool::IdlePool,
     proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
     resolver::DnsResolver,
-    status::StatusProvider,
+    status::{ConnStatus, StatusProvider},
     tls_conn::TlsConn,
     wintun::{CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
 };
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
 use smoltcp::{
-    socket::{SocketHandle, SocketRef, SocketSet, TcpSocket},
+    socket::{SocketHandle, SocketRef, SocketSet, TcpSocket, TcpState},
     wire::IpEndpoint,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -55,6 +55,7 @@ impl TcpServer {
         handles: Vec<SocketHandle>,
         sockets: &mut SocketSet,
     ) {
+        let mut destroyed = Vec::new();
         for handle in handles {
             let conn = if let Some(conn) = self.src_map.get_mut(&handle) {
                 conn
@@ -65,7 +66,7 @@ impl TcpServer {
                     continue;
                 }
                 let socket = sockets.get::<TcpSocket>(handle);
-                let mut conn = Connection::new(conn, handle, socket.local_endpoint());
+                let mut conn = Connection::new(conn, handle, index, socket.local_endpoint());
                 if !conn.setup() {
                     conn.conn.check_status(poll);
                     continue;
@@ -79,7 +80,13 @@ impl TcpServer {
                 continue;
             };
             let conn = unsafe { Arc::get_mut_unchecked(conn) };
-            conn.do_local(sockets);
+            conn.do_local(poll, sockets);
+            if conn.destroyed() {
+                destroyed.push((conn.handle, conn.index));
+            }
+        }
+        for (handle, index) in destroyed {
+            self.remove_conn(handle, index);
         }
     }
 
@@ -88,26 +95,42 @@ impl TcpServer {
         if let Some(conn) = self.conns.get_mut(&index) {
             let conn = unsafe { Arc::get_mut_unchecked(conn) };
             conn.ready(event, poll, sockets);
+            if conn.destroyed() {
+                let handle = conn.handle;
+                let index = conn.index;
+                self.remove_conn(handle, index);
+            }
         } else {
             log::warn!("connection:{} not found in tcp sockets", index);
         }
+    }
+    fn remove_conn(&mut self, handle: SocketHandle, index: usize) {
+        log::info!("connection:{}-{} removed", handle, index);
+        let _ = self.conns.remove(&index);
+        let _ = self.src_map.remove(&handle);
     }
 }
 
 pub struct Connection {
     conn: TlsConn,
     handle: SocketHandle,
+    index: usize,
     endpoint: IpEndpoint,
     recv_buffer: Vec<u8>,
     send_buffer: BytesMut,
+    status: ConnStatus,
+    closing: bool,
 }
 
 impl Connection {
-    fn new(conn: TlsConn, handle: SocketHandle, endpoint: IpEndpoint) -> Self {
+    fn new(conn: TlsConn, handle: SocketHandle, index: usize, endpoint: IpEndpoint) -> Self {
         Self {
             conn,
             handle,
             endpoint,
+            index,
+            closing: false,
+            status: ConnStatus::Connecting,
             recv_buffer: vec![0; MAX_PACKET_SIZE],
             send_buffer: BytesMut::new(),
         }
@@ -119,32 +142,61 @@ impl Connection {
         self.conn.write_session(request.as_ref())
     }
 
-    fn do_local(&mut self, sockets: &mut SocketSet) {
+    fn do_check_status(&mut self, poll: &Poll, sockets: &mut SocketSet) {
+        let mut socket = sockets.get::<TcpSocket>(self.handle);
+        if self.closing || matches!(socket.state(), TcpState::CloseWait) {
+            socket.close();
+            self.closing = false;
+        }
+        std::mem::drop(socket);
+
+        if self.is_shutdown() {
+            self.conn.peer_closed();
+        }
+        if self.conn.is_shutdown() {
+            self.peer_closed();
+        }
+        self.check_status(poll);
+        self.conn.check_status(poll);
+        if self.deregistered() {
+            sockets.remove(self.handle);
+        }
+    }
+
+    fn destroyed(&self) -> bool {
+        self.deregistered() && self.conn.deregistered()
+    }
+
+    fn do_local(&mut self, poll: &Poll, sockets: &mut SocketSet) {
         let mut socket = sockets.get::<TcpSocket>(self.handle);
         self.try_recv_client(&mut socket);
         self.try_send_client(&mut socket, &[]);
+        std::mem::drop(socket);
+        self.do_check_status(poll, sockets);
     }
 
     fn try_recv_client(&mut self, socket: &mut SocketRef<TcpSocket>) {
+        let buffer = self.recv_buffer.as_mut_slice();
         while socket.may_recv() {
-            match socket.recv_slice(self.recv_buffer.as_mut_slice()) {
+            match socket.recv_slice(buffer) {
                 Ok(size) => {
-                    if !self
-                        .conn
-                        .write_session(&self.recv_buffer.as_slice()[..size])
-                    {
-                        //TODO
+                    if size == 0 || !self.conn.write_session(&buffer[..size]) {
+                        break;
                     }
+                    log::info!("receive {} bytes from client", size);
                 }
                 Err(err) => {
                     log::error!("read from socket failed:{}", err);
+                    break;
                 }
             }
         }
+        self.do_send_server();
     }
 
     fn try_send_client(&mut self, socket: &mut SocketRef<TcpSocket>, data: &[u8]) {
         if socket.may_send() {
+            self.established();
             if self.send_buffer.is_empty() {
                 self.do_send_client(socket, data);
             } else {
@@ -158,8 +210,12 @@ impl Connection {
     }
 
     fn do_send_client(&mut self, socket: &mut SocketRef<TcpSocket>, data: &[u8]) {
+        if data.is_empty() {
+            return;
+        }
         match socket.send_slice(data) {
             Ok(size) => {
+                log::info!("send {}:{} bytes to client", size, data.len());
                 if size != data.len() {
                     self.send_buffer.extend_from_slice(&data[size..])
                 }
@@ -176,10 +232,11 @@ impl Connection {
         }
 
         if event.is_writable() {
-            self.do_send_server(sockets);
+            self.conn.established();
+            self.do_send_server();
         }
 
-        self.conn.check_status(poll);
+        self.do_check_status(poll, sockets);
     }
 
     fn do_recv_server(&mut self, sockets: &mut SocketSet) {
@@ -189,7 +246,27 @@ impl Connection {
         }
     }
 
-    fn do_send_server(&mut self, sockets: &mut SocketSet) {
+    fn do_send_server(&mut self) {
         self.conn.do_send();
+    }
+}
+
+impl StatusProvider for Connection {
+    fn set_status(&mut self, status: ConnStatus) {
+        self.status = status;
+    }
+
+    fn get_status(&self) -> ConnStatus {
+        self.status
+    }
+
+    fn close_conn(&mut self) {
+        self.closing = true;
+    }
+
+    fn deregister(&mut self, _poll: &Poll) {}
+
+    fn finish_send(&mut self) -> bool {
+        self.send_buffer.is_empty()
     }
 }

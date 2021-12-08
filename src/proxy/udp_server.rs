@@ -317,7 +317,7 @@ impl StatusProvider for Connection {
         self.status
     }
 
-    fn close_conn(&self) {}
+    fn close_conn(&mut self) {}
 
     fn deregister(&mut self, _: &Poll) {}
 

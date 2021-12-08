@@ -207,7 +207,7 @@ impl StatusProvider for TlsConn {
         self.status
     }
 
-    fn close_conn(&self) {
+    fn close_conn(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
     }
 

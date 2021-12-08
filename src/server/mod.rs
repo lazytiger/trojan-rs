@@ -94,7 +94,7 @@ pub fn run() -> Result<()> {
     let config = init_config()?;
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
-    let mut resolver = DnsResolver::new(&poll, waker, Token(RESOLVER));
+    let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
     resolver.set_cache_timeout(OPTIONS.server_args().dns_cache_time);
     let addr = OPTIONS.local_addr.parse()?;
     let mut listener = TcpListener::bind(addr)?;

@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{Poll, Token, Waker};
+use mio::{Token, Waker};
 
 pub struct DnsEntry {
     pub address: IpAddr,
@@ -25,7 +25,7 @@ pub struct DnsResolver {
 }
 
 impl DnsResolver {
-    pub fn new(poll: &Poll, waker: Arc<Waker>, token: Token) -> Self {
+    pub fn new(waker: Arc<Waker>, token: Token) -> Self {
         let (sender, receiver) = channel();
         Self {
             sender,

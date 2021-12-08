@@ -6,8 +6,8 @@ use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
     iface::{InterfaceBuilder, Routes},
     socket::{
-        AnySocket, Socket, SocketHandle, SocketSet, TcpSocket, TcpSocketBuffer, UdpPacketMetadata,
-        UdpSocket, UdpSocketBuffer,
+        Socket, SocketHandle, SocketSet, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket,
+        UdpSocketBuffer,
     },
     time::{Duration, Instant},
     wire::{
@@ -108,7 +108,7 @@ pub fn run() -> Result<()> {
 
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
-    let mut resolver = DnsResolver::new(&poll, waker.clone(), Token(RESOLVER));
+    let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
     let mut pool = IdlePool::new(
         config,
         hostname,
@@ -217,16 +217,22 @@ fn do_tun_read(
                 }
                 _ => continue,
             };
-        let (src_port, dst_port, connect) = match protocol {
+        let (src_port, dst_port, length, connect) = match protocol {
             IpProtocol::Udp => {
                 let packet = UdpPacket::new_checked(payload).unwrap();
-                (packet.src_port(), packet.dst_port(), None)
+                (
+                    packet.src_port(),
+                    packet.dst_port(),
+                    packet.payload().len(),
+                    None,
+                )
             }
             IpProtocol::Tcp => {
                 let packet = TcpPacket::new_checked(payload).unwrap();
                 (
                     packet.src_port(),
                     packet.dst_port(),
+                    packet.payload().len(),
                     Some(packet.syn() && !packet.ack()),
                 )
             }
@@ -258,17 +264,17 @@ fn do_tun_read(
                     _ => None,
                 })
             } {
-                tcp_handles.push(handle);
+                if length > 0 {
+                    tcp_handles.push(handle);
+                }
             }
         } else {
-            log::info!("[udp][{}->{}]", src_endpoint, dst_endpoint);
             let handle = sockets.iter().find_map(|socket| match socket {
                 Socket::Udp(socket) if socket.endpoint() == dst_endpoint => Some(socket.handle()),
                 _ => None,
             });
             let handle = match handle {
                 None => {
-                    log::info!("socket not found, create a new one");
                     let mut socket = UdpSocket::new(
                         UdpSocketBuffer::new(vec![UdpPacketMetadata::EMPTY], vec![0; 1500]),
                         UdpSocketBuffer::new(vec![UdpPacketMetadata::EMPTY], vec![0; 1500]),
@@ -283,13 +289,6 @@ fn do_tun_read(
 
         if let Err(err) = sender.try_send(packet.bytes().into()) {
             log::warn!("sender buffer is full:{}", err);
-        } else {
-            log::info!(
-                "[{}->{}][{}]send packet to device",
-                src_endpoint,
-                dst_endpoint,
-                protocol
-            );
         }
     }
 
