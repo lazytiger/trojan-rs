@@ -120,6 +120,8 @@ pub struct Connection {
     send_buffer: BytesMut,
     status: ConnStatus,
     closing: bool,
+    read_client: bool,
+    read_server: bool,
 }
 
 impl Connection {
@@ -130,10 +132,16 @@ impl Connection {
             endpoint,
             index,
             closing: false,
+            read_server: false,
+            read_client: false,
             status: ConnStatus::Connecting,
             recv_buffer: vec![0; MAX_PACKET_SIZE],
             send_buffer: BytesMut::new(),
         }
+    }
+
+    fn writable(&self) -> bool {
+        self.send_buffer.is_empty() && self.alive()
     }
 
     fn setup(&mut self) -> bool {
@@ -169,9 +177,19 @@ impl Connection {
 
     fn do_local(&mut self, poll: &Poll, sockets: &mut SocketSet) {
         let mut socket = sockets.get::<TcpSocket>(self.handle);
-        self.try_recv_client(&mut socket);
+        if self.conn.writable() {
+            self.try_recv_client(&mut socket);
+        } else {
+            self.read_client = true;
+        }
+
         self.try_send_client(&mut socket, &[]);
         std::mem::drop(socket);
+
+        if self.writable() && self.read_server {
+            self.do_recv_server(sockets);
+            self.read_server = false;
+        }
         self.do_check_status(poll, sockets);
     }
 
@@ -228,12 +246,21 @@ impl Connection {
 
     pub(crate) fn ready(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
         if event.is_readable() {
-            self.do_recv_server(sockets);
+            if self.writable() {
+                self.do_recv_server(sockets);
+            } else {
+                self.read_server = true;
+            }
         }
 
         if event.is_writable() {
             self.conn.established();
             self.do_send_server();
+            if self.conn.writable() && self.read_client {
+                let mut socket = sockets.get::<TcpSocket>(self.handle);
+                self.try_recv_client(&mut socket);
+                self.read_client = false;
+            }
         }
 
         self.do_check_status(poll, sockets);
