@@ -112,6 +112,7 @@ impl UdpServer {
             .collect();
 
         for handle in timeouts {
+            log::info!("udp socket:{} removed", handle);
             let _ = self.src_map.remove(&handle);
         }
     }
@@ -329,7 +330,7 @@ impl Connection {
                 }
                 UdpParseResultEndpoint::Packet(packet) => {
                     let payload = &packet.payload[..packet.length];
-                    self.do_send_udp_smoltcp(self.src_endpoint, payload, &mut socket);
+                    self.do_send_udp(self.src_endpoint, payload, &mut socket);
                     //self.do_send_udp(packet.address, payload);
                     buffer = &packet.payload[packet.length..];
                 }
@@ -342,7 +343,7 @@ impl Connection {
         }
     }
 
-    fn do_send_udp_smoltcp(
+    fn do_send_udp(
         &mut self,
         endpoint: IpEndpoint,
         data: &[u8],
