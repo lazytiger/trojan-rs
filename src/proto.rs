@@ -104,6 +104,16 @@ impl<'a> TrojanRequest<'a> {
         buffer.put_u8(b'\r');
         buffer.put_u8(b'\n');
     }
+
+    pub fn generate_endpoint(buffer: &mut BytesMut, cmd: u8, addr: &IpEndpoint) {
+        buffer.extend_from_slice(OPTIONS.get_pass().as_bytes());
+        buffer.put_u8(b'\r');
+        buffer.put_u8(b'\n');
+        buffer.put_u8(cmd);
+        Sock5Address::generate_endpoint(buffer, addr);
+        buffer.put_u8(b'\r');
+        buffer.put_u8(b'\n');
+    }
 }
 
 fn parse_address(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Address)> {

@@ -1,4 +1,5 @@
 #![feature(ip)]
+#![feature(get_mut_unchecked)]
 
 use crate::config::{Mode, OPTIONS};
 

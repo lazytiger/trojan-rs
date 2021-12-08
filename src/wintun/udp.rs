@@ -1,13 +1,10 @@
 use crate::{
-    proto::{TrojanRequest, UdpAssociate, UdpParseResult, UdpParseResultEndpoint, UDP_ASSOCIATE},
+    proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
     proxy::IdlePool,
     resolver::DnsResolver,
     status::StatusProvider,
     tls_conn::TlsConn,
-    wintun::{
-        ip::{get_ipv4, get_ipv6},
-        CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX,
-    },
+    wintun::{CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
 use bytes::BytesMut;
@@ -16,12 +13,23 @@ use smoltcp::{
     socket::{SocketHandle, SocketRef, SocketSet, UdpSocket},
     wire::IpEndpoint,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 pub struct UdpServer {
-    src_map: HashMap<SocketHandle, usize>,
-    conns: HashMap<usize, Connection>,
-    next_index: usize,
+    src_map: HashMap<SocketHandle, Arc<UdpListener>>,
+    conns: HashMap<usize, Arc<UdpListener>>,
+}
+
+fn next_index() -> usize {
+    static mut NEXT_INDEX: usize = MIN_INDEX;
+    unsafe {
+        let index = NEXT_INDEX;
+        NEXT_INDEX += 1;
+        if NEXT_INDEX >= MAX_INDEX {
+            NEXT_INDEX = MIN_INDEX;
+        }
+        index
+    }
 }
 
 impl UdpServer {
@@ -29,17 +37,7 @@ impl UdpServer {
         UdpServer {
             src_map: Default::default(),
             conns: Default::default(),
-            next_index: MIN_INDEX,
         }
-    }
-
-    pub fn next_index(&mut self) -> usize {
-        let index = self.next_index;
-        self.next_index += 1;
-        if self.next_index > MAX_INDEX {
-            self.next_index = MIN_INDEX;
-        }
-        index
     }
 
     pub fn index2token(index: usize) -> Token {
@@ -59,46 +57,119 @@ impl UdpServer {
         sockets: &mut SocketSet,
     ) {
         for handle in handles {
-            let index = if let Some(index) = self.src_map.get_mut(&handle) {
-                *index
-            } else if let Some(mut conn) = pool.get(poll, resolver) {
-                log::info!("handle:{} not found, create new connection", handle);
-                let index = self.next_index();
-                if !conn.reset_index(index, UdpServer::index2token(index), poll) {
-                    conn.check_status(poll);
-                    return;
-                }
-
-                let mut conn = Connection::new(index, conn, handle);
-                if conn.setup() {
-                    let _ = self.src_map.insert(handle, index);
-                    let _ = self.conns.insert(index, conn);
-                    index
-                } else {
-                    conn.conn.check_status(poll);
-                    return;
-                }
+            let listener = if let Some(listener) = self.src_map.get_mut(&handle) {
+                listener
             } else {
-                log::error!("get connection from idle pool failed");
-                return;
+                let endpoint = sockets.get::<UdpSocket>(handle).endpoint();
+                let listener = Arc::new(UdpListener::new(handle, endpoint));
+                self.src_map.insert(handle, listener);
+                self.src_map.get_mut(&handle).unwrap()
             };
-            let conn = self.conns.get_mut(&index).unwrap();
-            conn.do_local(sockets);
+            let mut_listener = unsafe { Arc::get_mut_unchecked(listener) };
+            let indexes = mut_listener.do_local(pool, poll, resolver, sockets);
+            for index in indexes {
+                self.conns.insert(index, listener.clone());
+            }
         }
     }
 
     pub fn do_remote(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
         log::debug!("remote event for token:{}", event.token().0);
         let index = Self::token2index(event.token());
+        if let Some(listener) = self.conns.get_mut(&index) {
+            let listener = unsafe { Arc::get_mut_unchecked(listener) };
+            listener.ready(event, poll, sockets);
+            if listener.src_map.is_empty() {
+                log::info!("remove udp endpoint:{}", listener.endpoint);
+                sockets.remove(listener.handle);
+                let _ = self.src_map.remove(&listener.handle);
+                let _ = self.conns.remove(&index);
+            }
+        } else {
+            log::error!("connection:{} not found in udp server", index);
+        }
+    }
+}
+
+struct UdpListener {
+    handle: SocketHandle,
+    src_map: HashMap<IpEndpoint, Arc<Connection>>,
+    conns: HashMap<usize, Arc<Connection>>,
+    endpoint: IpEndpoint,
+}
+
+impl UdpListener {
+    fn new(handle: SocketHandle, endpoint: IpEndpoint) -> Self {
+        Self {
+            handle,
+            endpoint,
+            src_map: HashMap::new(),
+            conns: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn do_local(
+        &mut self,
+        pool: &mut IdlePool,
+        poll: &Poll,
+        resolver: &DnsResolver,
+        sockets: &mut SocketSet,
+    ) -> Vec<usize> {
+        let mut socket = sockets.get::<UdpSocket>(self.handle);
+        let mut indexes = Vec::new();
+        while socket.can_recv() {
+            match socket.recv() {
+                Ok((payload, src)) => {
+                    log::info!("receive {} bytes request from {}", payload.len(), src);
+                    let conn = if let Some(conn) = self.src_map.get_mut(&src) {
+                        conn
+                    } else if let Some(mut conn) = pool.get(poll, resolver) {
+                        log::info!("handle:{} not found, create new connection", self.handle);
+                        let index = next_index();
+                        if !conn.reset_index(index, UdpServer::index2token(index), poll) {
+                            conn.check_status(poll);
+                            continue;
+                        }
+
+                        let mut conn = Connection::new(index, conn, self.handle, src);
+                        if conn.setup() {
+                            let conn = Arc::new(conn);
+                            let _ = self.src_map.insert(src, conn.clone());
+                            let _ = self.conns.insert(index, conn.clone());
+                            indexes.push(index);
+                            self.conns.get_mut(&index).unwrap()
+                        } else {
+                            conn.conn.check_status(poll);
+                            continue;
+                        }
+                    } else {
+                        log::error!("get connection from idle pool failed");
+                        continue;
+                    };
+                    let conn = unsafe { Arc::get_mut_unchecked(conn) };
+                    conn.send_request(payload, self.endpoint);
+                }
+                Err(err) => {
+                    log::info!("read from udp socket failed:{}", err);
+                    break;
+                }
+            }
+        }
+        indexes
+    }
+
+    fn ready(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
+        let index = UdpServer::token2index(event.token());
         if let Some(conn) = self.conns.get_mut(&index) {
+            let conn = unsafe { Arc::get_mut_unchecked(conn) };
             conn.ready(event, poll, sockets);
             if conn.destroyed() {
-                let _ = self.src_map.remove(&conn.handle);
+                let _ = self.src_map.remove(&conn.src_endpoint);
                 let _ = self.conns.remove(&index);
                 log::info!("connection:{} removed", index);
             }
         } else {
-            log::error!("connection:{} not found in udp server", index);
+            log::warn!("connection:{} not found", index);
         }
     }
 }
@@ -113,32 +184,19 @@ struct Connection {
 }
 
 impl Connection {
-    fn new(index: usize, conn: TlsConn, handle: SocketHandle) -> Connection {
+    fn new(
+        index: usize,
+        conn: TlsConn,
+        handle: SocketHandle,
+        src_endpoint: IpEndpoint,
+    ) -> Connection {
         Connection {
             index,
             conn,
             handle,
-            src_endpoint: IpEndpoint::default(),
+            src_endpoint,
             send_buffer: Default::default(),
             recv_buffer: Default::default(),
-        }
-    }
-
-    pub(crate) fn do_local(&mut self, sockets: &mut SocketSet) {
-        let mut socket = sockets.get::<UdpSocket>(self.handle);
-        let endpoint = socket.endpoint();
-        while socket.can_recv() {
-            match socket.recv() {
-                Ok((payload, src)) => {
-                    log::info!("receive {} bytes request from {}", payload.len(), src);
-                    self.send_request(payload, endpoint);
-                    self.src_endpoint = src;
-                }
-                Err(err) => {
-                    log::info!("read from udp socket failed:{}", err);
-                    break;
-                }
-            }
         }
     }
 
