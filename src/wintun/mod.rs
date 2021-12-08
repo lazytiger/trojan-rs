@@ -85,7 +85,6 @@ pub fn run() -> Result<()> {
 
     let index = adapter.get_adapter_index(OPTIONS.wintun_args().guid)?;
     add_route("8.8.8.8", "255.255.255.255", index);
-    add_route("47.91.176.188", "255.255.255.255", index);
 
     let hostname = OPTIONS.wintun_args().hostname.as_str().try_into()?;
 
@@ -217,22 +216,17 @@ fn do_tun_read(
                 }
                 _ => continue,
             };
-        let (src_port, dst_port, length, connect) = match protocol {
+        let (src_port, dst_port, notify, connect) = match protocol {
             IpProtocol::Udp => {
                 let packet = UdpPacket::new_checked(payload).unwrap();
-                (
-                    packet.src_port(),
-                    packet.dst_port(),
-                    packet.payload().len(),
-                    None,
-                )
+                (packet.src_port(), packet.dst_port(), true, None)
             }
             IpProtocol::Tcp => {
                 let packet = TcpPacket::new_checked(payload).unwrap();
                 (
                     packet.src_port(),
                     packet.dst_port(),
-                    packet.payload().len(),
+                    !packet.payload().is_empty() || packet.fin(),
                     Some(packet.syn() && !packet.ack()),
                 )
             }
@@ -264,7 +258,7 @@ fn do_tun_read(
                     _ => None,
                 })
             } {
-                if length > 0 {
+                if notify {
                     tcp_handles.push(handle);
                 }
             }

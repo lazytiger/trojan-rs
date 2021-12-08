@@ -150,14 +150,19 @@ impl Connection {
         self.conn.write_session(request.as_ref())
     }
 
-    fn do_check_status(&mut self, poll: &Poll, sockets: &mut SocketSet) {
+    fn try_close(&mut self, sockets: &mut SocketSet) {
         let mut socket = sockets.get::<TcpSocket>(self.handle);
         if self.closing || matches!(socket.state(), TcpState::CloseWait) {
+            log::info!("client is closed:{}", socket.state());
             socket.close();
             self.closing = false;
+            std::mem::drop(socket);
+            sockets.remove(self.handle);
         }
-        std::mem::drop(socket);
+    }
 
+    fn do_check_status(&mut self, poll: &Poll, sockets: &mut SocketSet) {
+        self.try_close(sockets);
         if self.is_shutdown() {
             self.conn.peer_closed();
         }
@@ -166,9 +171,7 @@ impl Connection {
         }
         self.check_status(poll);
         self.conn.check_status(poll);
-        if self.deregistered() {
-            sockets.remove(self.handle);
-        }
+        self.try_close(sockets);
     }
 
     fn destroyed(&self) -> bool {
