@@ -5,7 +5,6 @@ use std::{
 };
 
 use clap::Parser;
-use clap_num::maybe_hex;
 use crypto::{digest::Digest, sha2::Sha224};
 
 #[derive(Parser)]
@@ -71,16 +70,24 @@ pub enum Mode {
 #[derive(Parser, Debug)]
 pub struct WintunArgs {
     /// Native wintun.dll file location
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "wintun/bin/amd64/wintun.dll")]
     pub wintun: String,
+
+    /// White ip list which will not go through this device, so the netmask are inverse.
+    #[clap(short, long, default_value = "ipset/ipset.txt")]
+    pub white_ip_list: String,
+
+    /// Flag to add white ip list
+    #[clap(long)]
+    pub add_white_list: bool,
+
+    /// Default gateway for white ips
+    #[clap(short, long)]
+    pub default_gateway: String,
 
     /// Tunnel device name
     #[clap(short, long)]
     pub name: String,
-
-    /// GUID for adapter
-    #[clap(short, long, parse(try_from_str=maybe_hex))]
-    pub guid: Option<u128>,
 
     /// Max packet count in buffer for network
     #[clap(short, long, default_value = "1024000")]
@@ -103,7 +110,7 @@ pub struct WintunArgs {
     pub mtu: usize,
 
     /// Metadata size for UDP RX buffer
-    #[clap(long, default_value = "10")]
+    #[clap(long, default_value = "200")]
     pub udp_rx_meta_size: usize,
 
     /// Data size for UDP RX buffer
@@ -119,7 +126,7 @@ pub struct WintunArgs {
     pub udp_tx_buffer_size: usize,
 
     /// Data size for TCP RX buffer
-    #[clap(long, default_value = "10240")]
+    #[clap(long, default_value = "102400")]
     pub tcp_rx_buffer_size: usize,
 
     /// Data size for TCP TX buffer

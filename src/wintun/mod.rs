@@ -1,4 +1,11 @@
-use std::{collections::BTreeMap, convert::TryInto, process::Command, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    convert::TryInto,
+    fs::File,
+    io::{BufRead, BufReader},
+    process::Command,
+    sync::Arc,
+};
 
 use crossbeam::channel::Sender;
 use mio::{Events, Poll, Token, Waker};
@@ -44,7 +51,7 @@ const CHANNEL_UDP: usize = 1;
 /// channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
 
-fn add_route(address: &str, netmask: &str, index: u32) {
+fn add_route_with_if(address: &str, netmask: &str, index: u32) {
     if let Err(err) = Command::new("route")
         .args([
             "add",
@@ -63,20 +70,21 @@ fn add_route(address: &str, netmask: &str, index: u32) {
     }
 }
 
+fn add_route_with_gw(address: &str, netmask: &str, gateway: &str) {
+    if let Err(err) = Command::new("route")
+        .args(["add", address, "mask", netmask, gateway, "METRIC", "1"])
+        .output()
+    {
+        log::error!("route add {} failed:{}", address, err);
+    }
+}
+
 pub fn run() -> Result<()> {
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let adapter = match Adapter::open(&wintun, OPTIONS.wintun_args().name.as_str()) {
         Ok(a) => a,
-        Err(_) => Adapter::create(
-            &wintun,
-            "trojan",
-            OPTIONS.wintun_args().name.as_str(),
-            OPTIONS.wintun_args().guid,
-        )?,
+        Err(_) => Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?,
     };
-
-    let index = adapter.get_adapter_index()?;
-    add_route("0.0.0.0", "0.0.0.0", index);
 
     let hostname = OPTIONS.wintun_args().hostname.as_str().try_into()?;
 
@@ -137,6 +145,16 @@ pub fn run() -> Result<()> {
     let mut last_udp_check_time = std::time::Instant::now();
     let mut last_tcp_check_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(10, 0);
+
+    let index = adapter.get_adapter_index()?;
+    add_route_with_if("0.0.0.0", "0.0.0.0", index);
+    if OPTIONS.wintun_args().add_white_list {
+        add_ipset(
+            OPTIONS.wintun_args().white_ip_list.as_str(),
+            OPTIONS.wintun_args().default_gateway.as_str(),
+        )?;
+        log::warn!("white list added");
+    }
 
     let mut now = Instant::now();
     loop {
@@ -301,4 +319,16 @@ fn do_tun_read(
     }
 
     Ok((udp_handles, tcp_handles))
+}
+
+fn add_ipset(config: &str, gw: &str) -> Result<()> {
+    let file = File::open(config)?;
+    let buffer = BufReader::new(file);
+    buffer.lines().for_each(|line| {
+        let line = line.unwrap();
+        let line: Vec<_> = line.split('/').collect();
+        log::warn!("route add {} mask {}", line[0], line[1]);
+        add_route_with_gw(line[0], line[1], gw);
+    });
+    Ok(())
 }
