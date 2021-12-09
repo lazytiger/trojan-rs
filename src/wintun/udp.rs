@@ -330,7 +330,7 @@ impl Connection {
     }
 
     fn do_send_tun(&mut self, mut buffer: &[u8], sockets: &mut SocketSet) {
-        let mut socket = sockets.get_socket::<UdpSocket>(self.handle);
+        let socket = sockets.get_socket::<UdpSocket>(self.handle);
         loop {
             match UdpAssociate::parse_endpoint(buffer) {
                 UdpParseResultEndpoint::Continued => {
@@ -339,9 +339,12 @@ impl Connection {
                 }
                 UdpParseResultEndpoint::Packet(packet) => {
                     let payload = &packet.payload[..packet.length];
-                    self.do_send_udp(self.src_endpoint, payload, &mut socket);
-                    //self.do_send_udp(packet.address, payload);
-                    buffer = &packet.payload[packet.length..];
+                    if self.do_send_udp(self.src_endpoint, payload, socket) {
+                        buffer = &packet.payload[packet.length..];
+                    } else {
+                        self.send_buffer.extend_from_slice(buffer);
+                        return;
+                    }
                 }
                 UdpParseResultEndpoint::InvalidProtocol => {
                     log::error!("connection:{} got invalid protocol", self.index);
@@ -352,14 +355,17 @@ impl Connection {
         }
     }
 
-    fn do_send_udp(&mut self, endpoint: IpEndpoint, data: &[u8], socket: &mut UdpSocket) {
+    fn do_send_udp(&mut self, endpoint: IpEndpoint, data: &[u8], socket: &mut UdpSocket) -> bool {
         log::info!("send response to:{}", endpoint);
         if socket.can_send() {
             if let Err(err) = socket.send_slice(data, endpoint) {
                 log::error!("send to local failed:{}", err);
+            } else {
+                return true;
             }
         } else {
-            log::warn!("udp socket buffer is full");
+            log::warn!("udp socket buffer is full to:{}", endpoint);
         }
+        false
     }
 }

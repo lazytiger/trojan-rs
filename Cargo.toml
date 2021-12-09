@@ -31,7 +31,7 @@ crossbeam = "0.8"
 smoltcp = {git = "https://github.com/smoltcp-rs/smoltcp.git"}
 
 [target.'cfg(windows)'.dependencies]
-wintun = {git = "https://github.com/lazytiger/wintun.git", features = ["panic_on_unsent_packets"]}
+wintun = "0.2"
 
 [dependencies.fern]
 version = "0.6"

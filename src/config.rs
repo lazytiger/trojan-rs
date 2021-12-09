@@ -101,6 +101,30 @@ pub struct WintunArgs {
     /// Maximum transmit unit
     #[clap(short, long, default_value = "1500")]
     pub mtu: usize,
+
+    /// Metadata size for UDP RX buffer
+    #[clap(long, default_value = "10")]
+    pub udp_rx_meta_size: usize,
+
+    /// Data size for UDP RX buffer
+    #[clap(long, default_value = "10240")]
+    pub udp_rx_buffer_size: usize,
+
+    /// Metadata size for UDP TX buffer
+    #[clap(long, default_value = "10000")]
+    pub udp_tx_meta_size: usize,
+
+    /// Data size for UDP TX buffer
+    #[clap(long, default_value = "1024000")]
+    pub udp_tx_buffer_size: usize,
+
+    /// Data size for TCP RX buffer
+    #[clap(long, default_value = "10240")]
+    pub tcp_rx_buffer_size: usize,
+
+    /// Data size for TCP TX buffer
+    #[clap(long, default_value = "1024000")]
+    pub tcp_tx_buffer_size: usize,
 }
 
 #[derive(Parser)]

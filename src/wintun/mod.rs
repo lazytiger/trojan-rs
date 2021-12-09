@@ -75,8 +75,8 @@ pub fn run() -> Result<()> {
         )?,
     };
 
-    let index = adapter.get_adapter_index(OPTIONS.wintun_args().guid)?;
-    add_route("8.8.8.8", "255.255.255.255", index);
+    let index = adapter.get_adapter_index()?;
+    add_route("0.0.0.0", "0.0.0.0", index);
 
     let hostname = OPTIONS.wintun_args().hostname.as_str().try_into()?;
 
@@ -136,10 +136,17 @@ pub fn run() -> Result<()> {
 
     let mut last_udp_check_time = std::time::Instant::now();
     let mut last_tcp_check_time = std::time::Instant::now();
-    let check_duration = std::time::Duration::new(1, 0);
+    let check_duration = std::time::Duration::new(10, 0);
 
     loop {
         let now = Instant::now();
+        let (udp_handles, tcp_handles) = do_tun_read(&session, &sender, &mut interface)?;
+        if let Err(err) = interface.poll(now) {
+            log::info!("interface error:{}", err);
+        }
+        udp_server.do_local(&mut pool, &poll, &resolver, udp_handles, &mut interface);
+        tcp_server.do_local(&mut pool, &poll, &resolver, tcp_handles, &mut interface);
+
         let timeout = interface.poll_delay(now).or(timeout);
         poll.poll(
             &mut events,
@@ -163,12 +170,6 @@ pub fn run() -> Result<()> {
                 }
             }
         }
-        let (udp_handles, tcp_handles) = do_tun_read(&session, &sender, &mut interface)?;
-        if let Err(err) = interface.poll(now) {
-            log::info!("interface error:{}", err);
-        }
-        udp_server.do_local(&mut pool, &poll, &resolver, udp_handles, &mut interface);
-        tcp_server.do_local(&mut pool, &poll, &resolver, tcp_handles, &mut interface);
 
         let now = std::time::Instant::now();
         if now - last_tcp_check_time > check_duration {
@@ -248,8 +249,8 @@ fn do_tun_read(
         if let Some(connect) = connect {
             if let Some(handle) = if connect {
                 let mut socket = TcpSocket::new(
-                    TcpSocketBuffer::new(vec![0; 10240]),
-                    TcpSocketBuffer::new(vec![0; 10240]),
+                    TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_rx_buffer_size]),
+                    TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_tx_buffer_size]),
                 );
                 socket.listen(dst_endpoint).unwrap();
                 Some(sockets.add_socket(socket))
@@ -276,8 +277,14 @@ fn do_tun_read(
             let handle = match handle {
                 None => {
                     let mut socket = UdpSocket::new(
-                        UdpSocketBuffer::new(vec![UdpPacketMetadata::EMPTY], vec![0; 1500]),
-                        UdpSocketBuffer::new(vec![UdpPacketMetadata::EMPTY], vec![0; 1500]),
+                        UdpSocketBuffer::new(
+                            vec![UdpPacketMetadata::EMPTY; OPTIONS.wintun_args().udp_rx_meta_size],
+                            vec![0; OPTIONS.wintun_args().udp_rx_buffer_size],
+                        ),
+                        UdpSocketBuffer::new(
+                            vec![UdpPacketMetadata::EMPTY; OPTIONS.wintun_args().udp_rx_meta_size],
+                            vec![0; OPTIONS.wintun_args().udp_tx_buffer_size],
+                        ),
                     );
                     socket.bind(dst_endpoint)?;
                     sockets.add_socket(socket)

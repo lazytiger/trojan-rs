@@ -1079,7 +1079,8 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 [[package]]
 name = "wintun"
 version = "0.2.1"
-source = "git+https://github.com/lazytiger/wintun.git#bb6dc926c111d39e009717d62594143e37b0e18e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "094235c21dfb805c6870b00d0d80f65b727d8296ab88ae6b506e827e4b4116de"
 dependencies = [
  "itertools",
  "libloading",

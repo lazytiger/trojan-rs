@@ -94,7 +94,7 @@ impl TcpServer {
             }
         }
         for (handle, index) in destroyed {
-            self.remove_conn(handle, index);
+            self.remove_conn(handle, index, sockets);
         }
     }
 
@@ -106,14 +106,18 @@ impl TcpServer {
             if conn.destroyed() {
                 let handle = conn.handle;
                 let index = conn.index;
-                self.remove_conn(handle, index);
+                self.remove_conn(handle, index, sockets);
             }
         } else {
             log::warn!("connection:{} not found in tcp sockets", index);
         }
     }
-    fn remove_conn(&mut self, handle: SocketHandle, index: usize) {
+    fn remove_conn(&mut self, handle: SocketHandle, index: usize, sockets: &mut SocketSet) {
+        if !self.conns.contains_key(&index) {
+            return;
+        }
         log::info!("connection:{}-{} removed", handle, index);
+        sockets.remove_socket(handle);
         let _ = self.conns.remove(&index);
         let _ = self.src_map.remove(&handle);
     }
@@ -178,9 +182,9 @@ impl Connection {
         let socket = sockets.get_socket::<TcpSocket>(self.handle);
         if self.closing || matches!(socket.state(), TcpState::CloseWait) {
             log::info!("client is closed:{}", socket.state());
+            self.shutdown();
             socket.close();
             self.closing = false;
-            sockets.remove_socket(self.handle);
         }
     }
 
@@ -203,14 +207,14 @@ impl Connection {
 
     fn do_local(&mut self, poll: &Poll, sockets: &mut SocketSet) {
         self.last_active_time = Instant::now();
-        let mut socket = sockets.get_socket::<TcpSocket>(self.handle);
+        let socket = sockets.get_socket::<TcpSocket>(self.handle);
         if self.conn.writable() {
-            self.try_recv_client(&mut socket);
+            self.try_recv_client(socket);
         } else {
             self.read_client = true;
         }
 
-        self.try_send_client(&mut socket, &[]);
+        self.try_send_client(socket, &[]);
 
         if self.writable() && self.read_server {
             self.do_recv_server(sockets);
@@ -284,8 +288,8 @@ impl Connection {
             self.conn.established();
             self.do_send_server();
             if self.conn.writable() && self.read_client {
-                let mut socket = sockets.get_socket::<TcpSocket>(self.handle);
-                self.try_recv_client(&mut socket);
+                let socket = sockets.get_socket::<TcpSocket>(self.handle);
+                self.try_recv_client(socket);
                 self.read_client = false;
             }
         }
@@ -295,8 +299,8 @@ impl Connection {
 
     fn do_recv_server(&mut self, sockets: &mut SocketSet) {
         if let Some(data) = self.conn.do_read() {
-            let mut socket = sockets.get_socket::<TcpSocket>(self.handle);
-            self.try_send_client(&mut socket, data.as_slice());
+            let socket = sockets.get_socket::<TcpSocket>(self.handle);
+            self.try_send_client(socket, data.as_slice());
         }
     }
 
