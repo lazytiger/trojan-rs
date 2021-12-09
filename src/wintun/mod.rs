@@ -138,8 +138,8 @@ pub fn run() -> Result<()> {
     let mut last_tcp_check_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(10, 0);
 
+    let mut now = Instant::now();
     loop {
-        let now = Instant::now();
         let (udp_handles, tcp_handles) = do_tun_read(&session, &sender, &mut interface)?;
         if let Err(err) = interface.poll(now) {
             log::info!("interface error:{}", err);
@@ -147,6 +147,7 @@ pub fn run() -> Result<()> {
         udp_server.do_local(&mut pool, &poll, &resolver, udp_handles, &mut interface);
         tcp_server.do_local(&mut pool, &poll, &resolver, tcp_handles, &mut interface);
 
+        now = Instant::now();
         let timeout = interface.poll_delay(now).or(timeout);
         poll.poll(
             &mut events,
