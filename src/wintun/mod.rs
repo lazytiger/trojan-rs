@@ -187,7 +187,7 @@ pub fn run() -> Result<()> {
         }
 
         if now - last_udp_check_time > OPTIONS.udp_idle_duration {
-            udp_server.check_timeout(now);
+            udp_server.check_timeout(now, &mut sockets);
             last_udp_check_time = now;
         }
     }
