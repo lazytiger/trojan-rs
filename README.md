@@ -142,6 +142,10 @@ ip route flush cache
 
 You can get more about iptables rules in [PRINCIPLE.md](https://github.com/lazytiger/trojan-rs/blob/master/PRINCIPLE.md)
 
+## Windows
+For Windows users, wintun mode may supply a virtual device operating on ip layer base on Wintun and Smoltcp library.  
+You can check ```trojan help wintun``` for more detail.
+
 ## Special Thanks for ![Jetbrains](https://github.com/lazytiger/trojan-rs/blob/master/jetbrains.png?raw=true)
 
 Thanks [Jetbrains](https://www.jetbrains.com/?from=trojan-rs) open source license project. Clion is a great IDE which
