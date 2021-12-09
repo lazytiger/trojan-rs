@@ -4,15 +4,12 @@ use crate::{
     resolver::DnsResolver,
     status::StatusProvider,
     tls_conn::TlsConn,
-    wintun::{CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
+    wintun::{SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
-use smoltcp::{
-    socket::{SocketHandle, SocketRef, SocketSet, UdpSocket},
-    wire::IpEndpoint,
-};
+use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
 pub struct UdpServer {
@@ -60,7 +57,7 @@ impl UdpServer {
             let listener = if let Some(listener) = self.src_map.get_mut(&handle) {
                 listener
             } else {
-                let endpoint = sockets.get::<UdpSocket>(handle).endpoint();
+                let endpoint = sockets.get_socket::<UdpSocket>(handle).endpoint();
                 let listener = Arc::new(UdpListener::new(handle, endpoint));
                 self.src_map.insert(handle, listener);
                 self.src_map.get_mut(&handle).unwrap()
@@ -117,7 +114,7 @@ impl UdpServer {
         for handle in timeouts {
             log::info!("udp socket:{} removed", handle);
             let _ = self.src_map.remove(&handle);
-            let _ = sockets.remove(handle);
+            let _ = sockets.remove_socket(handle);
         }
     }
 }
@@ -146,7 +143,7 @@ impl UdpListener {
         resolver: &DnsResolver,
         sockets: &mut SocketSet,
     ) -> (Vec<usize>, Vec<usize>) {
-        let mut socket = sockets.get::<UdpSocket>(self.handle);
+        let socket = sockets.get_socket::<UdpSocket>(self.handle);
         let mut inserts = Vec::new();
         let mut removes = Vec::new();
         while socket.can_recv() {
@@ -333,7 +330,7 @@ impl Connection {
     }
 
     fn do_send_tun(&mut self, mut buffer: &[u8], sockets: &mut SocketSet) {
-        let mut socket = sockets.get::<UdpSocket>(self.handle);
+        let mut socket = sockets.get_socket::<UdpSocket>(self.handle);
         loop {
             match UdpAssociate::parse_endpoint(buffer) {
                 UdpParseResultEndpoint::Continued => {
@@ -355,12 +352,7 @@ impl Connection {
         }
     }
 
-    fn do_send_udp(
-        &mut self,
-        endpoint: IpEndpoint,
-        data: &[u8],
-        socket: &mut SocketRef<UdpSocket>,
-    ) {
+    fn do_send_udp(&mut self, endpoint: IpEndpoint, data: &[u8], socket: &mut UdpSocket) {
         log::info!("send response to:{}", endpoint);
         if socket.can_send() {
             if let Err(err) = socket.send_slice(data, endpoint) {

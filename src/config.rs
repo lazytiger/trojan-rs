@@ -17,36 +17,29 @@ use crypto::{digest::Digest, sha2::Sha224};
 pub struct Opts {
     #[clap(subcommand)]
     pub mode: Mode,
-    #[clap(short, long, about = "log file path")]
+
+    /// Log file path
+    #[clap(short, long)]
     pub log_file: Option<String>,
-    #[clap(
-        short = 'a',
-        long,
-        about = "listen address for server, format like 0.0.0.0:443"
-    )]
+
+    /// Listen address for server, format like 0.0.0.0:443
+    #[clap(short = 'a', long)]
+
+    /// passwords for negotiation
     pub local_addr: String,
-    #[clap(short, long, about = "passwords for negotiation")]
+    #[clap(short, long)]
     password: String,
-    #[clap(
-        short = 'L',
-        long,
-        default_value = "2",
-        about = "log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off"
-    )]
+
+    /// Log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off
+    #[clap(short = 'L', long, default_value = "2")]
     pub log_level: u8,
-    #[clap(
-        short,
-        long,
-        default_value = "60",
-        about = "time in seconds before closing an inactive udp connection"
-    )]
+
+    /// Time in seconds before closing an inactive udp connection
+    #[clap(short, long, default_value = "60")]
     pub udp_idle_timeout: u64,
-    #[clap(
-        short,
-        long,
-        default_value = "600",
-        about = "time in seconds before closing an inactive tcp connection"
-    )]
+
+    /// Time in seconds before closing an inactive tcp connection
+    #[clap(short, long, default_value = "600")]
     pub tcp_idle_timeout: u64,
 
     #[clap(skip)]
@@ -77,94 +70,78 @@ pub enum Mode {
 
 #[derive(Parser, Debug)]
 pub struct WintunArgs {
-    #[clap(short, long, about = "native wintun.dll file location")]
+    /// Native wintun.dll file location
+    #[clap(short, long)]
     pub wintun: String,
 
-    #[clap(short, long, about = "tunnel device name")]
+    /// Tunnel device name
+    #[clap(short, long)]
     pub name: String,
 
-    #[clap(short, long, parse(try_from_str=maybe_hex), about = "guid for adapter")]
+    /// GUID for adapter
+    #[clap(short, long, parse(try_from_str=maybe_hex))]
     pub guid: Option<u128>,
 
-    #[clap(short, long, about = "delete current adapter")]
-    pub delete: bool,
-
-    #[clap(
-        short,
-        long,
-        default_value = "1024000",
-        about = "max packet count in buffer for network"
-    )]
+    /// Max packet count in buffer for network
+    #[clap(short, long, default_value = "1024000")]
     pub buffer_size: usize,
 
-    #[clap(short = 'H', long, about = "trojan server hostname")]
+    /// Trojan server hostname
+    #[clap(short = 'H', long)]
     pub hostname: String,
 
-    #[clap(short = 'o', long, default_value = "443", about = "trojan server port")]
+    /// Trojan server port
+    #[clap(short = 'o', long, default_value = "443")]
     pub port: u16,
-    #[clap(
-        short = 'P',
-        long,
-        default_value = "0",
-        about = "pool size, 0 for disable"
-    )]
+
+    /// Pool size, 0 for disable
+    #[clap(short = 'P', long, default_value = "0")]
     pub pool_size: usize,
 
-    #[clap(short, long, default_value = "1500", about = "maximum transmit unit")]
+    /// Maximum transmit unit
+    #[clap(short, long, default_value = "1500")]
     pub mtu: usize,
 }
 
 #[derive(Parser)]
 pub struct ProxyArgs {
-    #[clap(short = 'H', long, about = "trojan server hostname")]
+    /// Trojan server hostname
+    #[clap(short = 'H', long)]
     pub hostname: String,
-    #[clap(short = 'o', long, default_value = "443", about = "trojan server port")]
+
+    /// Trojan server port
+    #[clap(short = 'o', long, default_value = "443")]
     pub port: u16,
-    #[clap(
-        short = 'P',
-        long,
-        default_value = "0",
-        about = "pool size, 0 for disable"
-    )]
+
+    /// Pool size, 0 for disable
+    #[clap(short = 'P', long, default_value = "0")]
     pub pool_size: usize,
 }
 
 #[derive(Parser)]
 pub struct ServerArgs {
-    #[clap(
-        short,
-        long,
-        about = "certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA"
-    )]
+    /// Certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA
+    #[clap(short, long)]
     pub cert: String,
 
-    #[clap(
-        short,
-        long,
-        about = "private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format."
-    )]
+    /// Private key file path,  This should be a RSA private key or PKCS8-encoded private key, in PEM format.
+    #[clap(short, long)]
     pub key: String,
 
-    #[clap(
-        short,
-        long,
-        default_value = "127.0.0.1:80",
-        about = "http backend server address"
-    )]
+    /// Http backend server address
+    #[clap(short, long, default_value = "127.0.0.1:80")]
     pub remote_addr: String,
 
-    #[clap(
-        short,
-        long,
-        default_value = "300",
-        about = "time in seconds for dns query cache"
-    )]
+    /// Time in seconds for dns query cache
+    #[clap(short, long, default_value = "300")]
     pub dns_cache_time: u64,
 
-    #[clap(short, long, about = "check client auth")]
+    /// Check client auth
+    #[clap(short, long)]
     pub check_auth: bool,
 
-    #[clap(short = 'n', long, about = "alpn protocol supported")]
+    /// ALPN protocol supported
+    #[clap(short = 'n', long)]
     pub alpn: Vec<String>,
 }
 

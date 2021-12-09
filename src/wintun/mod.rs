@@ -4,11 +4,8 @@ use crossbeam::channel::Sender;
 use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
-    iface::{InterfaceBuilder, Routes},
-    socket::{
-        Socket, SocketHandle, SocketSet, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket,
-        UdpSocketBuffer,
-    },
+    iface::{Interface, InterfaceBuilder, Routes, SocketHandle},
+    socket::{Socket, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer},
     time::{Duration, Instant},
     wire::{
         IpAddress, IpCidr, IpEndpoint, IpProtocol, IpVersion, Ipv4Address, Ipv4Packet, Ipv6Packet,
@@ -32,6 +29,8 @@ use crate::{
 mod ip;
 mod tcp;
 mod udp;
+
+pub(crate) type SocketSet<'a> = Interface<'a, TunInterface>;
 
 /// Token used for dns resolver
 const RESOLVER: usize = 1;
@@ -75,13 +74,6 @@ pub fn run() -> Result<()> {
             OPTIONS.wintun_args().guid,
         )?,
     };
-
-    if OPTIONS.wintun_args().delete {
-        if let Ok(adapter) = Arc::try_unwrap(adapter) {
-            adapter.delete()?;
-        }
-        return Ok(());
-    }
 
     let index = adapter.get_adapter_index(OPTIONS.wintun_args().guid)?;
     add_route("8.8.8.8", "255.255.255.255", index);
@@ -128,17 +120,15 @@ pub fn run() -> Result<()> {
     routes
         .add_default_ipv4_route(Ipv4Address::new(0, 0, 0, 1))
         .unwrap();
-    let mut interface = InterfaceBuilder::new(TunInterface::new(
-        session.clone(),
-        receiver,
-        OPTIONS.wintun_args().mtu,
-    ))
+    let mut interface = InterfaceBuilder::new(
+        TunInterface::new(session.clone(), receiver, OPTIONS.wintun_args().mtu),
+        [],
+    )
     .any_ip(true)
     .ip_addrs(ip_addrs)
     .routes(routes)
     .finalize();
 
-    let mut sockets = SocketSet::new([]);
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
     let mut udp_server = UdpServer::new();
@@ -150,7 +140,7 @@ pub fn run() -> Result<()> {
 
     loop {
         let now = Instant::now();
-        let timeout = interface.poll_delay(&sockets, now).or(timeout);
+        let timeout = interface.poll_delay(now).or(timeout);
         poll.poll(
             &mut events,
             timeout.map(|d| std::time::Duration::from_millis(d.total_millis())),
@@ -166,28 +156,28 @@ pub fn run() -> Result<()> {
                     pool.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.do_remote(event, &poll, &mut sockets);
+                    udp_server.do_remote(event, &poll, &mut interface);
                 }
                 _ => {
-                    tcp_server.do_remote(event, &poll, &mut sockets);
+                    tcp_server.do_remote(event, &poll, &mut interface);
                 }
             }
         }
-        let (udp_handles, tcp_handles) = do_tun_read(&session, &sender, &mut sockets)?;
-        if let Err(err) = interface.poll(&mut sockets, now) {
+        let (udp_handles, tcp_handles) = do_tun_read(&session, &sender, &mut interface)?;
+        if let Err(err) = interface.poll(now) {
             log::info!("interface error:{}", err);
         }
-        udp_server.do_local(&mut pool, &poll, &resolver, udp_handles, &mut sockets);
-        tcp_server.do_local(&mut pool, &poll, &resolver, tcp_handles, &mut sockets);
+        udp_server.do_local(&mut pool, &poll, &resolver, udp_handles, &mut interface);
+        tcp_server.do_local(&mut pool, &poll, &resolver, tcp_handles, &mut interface);
 
         let now = std::time::Instant::now();
         if now - last_tcp_check_time > check_duration {
-            tcp_server.check_timeout(&poll, now, &mut sockets);
+            tcp_server.check_timeout(&poll, now, &mut interface);
             last_tcp_check_time = now;
         }
 
         if now - last_udp_check_time > OPTIONS.udp_idle_duration {
-            udp_server.check_timeout(now, &mut sockets);
+            udp_server.check_timeout(now, &mut interface);
             last_udp_check_time = now;
         }
     }
@@ -262,14 +252,14 @@ fn do_tun_read(
                     TcpSocketBuffer::new(vec![0; 10240]),
                 );
                 socket.listen(dst_endpoint).unwrap();
-                Some(sockets.add(socket))
+                Some(sockets.add_socket(socket))
             } else {
-                sockets.iter().find_map(|socket| match socket {
+                sockets.sockets().find_map(|(handle, socket)| match socket {
                     Socket::Tcp(socket)
                         if socket.local_endpoint() == dst_endpoint
                             && socket.remote_endpoint() == src_endpoint =>
                     {
-                        Some(socket.handle())
+                        Some(handle)
                     }
                     _ => None,
                 })
@@ -279,8 +269,8 @@ fn do_tun_read(
                 }
             }
         } else {
-            let handle = sockets.iter().find_map(|socket| match socket {
-                Socket::Udp(socket) if socket.endpoint() == dst_endpoint => Some(socket.handle()),
+            let handle = sockets.sockets().find_map(|(handle, socket)| match socket {
+                Socket::Udp(socket) if socket.endpoint() == dst_endpoint => Some(handle),
                 _ => None,
             });
             let handle = match handle {
@@ -290,7 +280,7 @@ fn do_tun_read(
                         UdpSocketBuffer::new(vec![UdpPacketMetadata::EMPTY], vec![0; 1500]),
                     );
                     socket.bind(dst_endpoint)?;
-                    sockets.add(socket)
+                    sockets.add_socket(socket)
                 }
                 Some(handle) => handle,
             };

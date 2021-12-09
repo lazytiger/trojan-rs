@@ -4,13 +4,14 @@ use crate::{
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     tls_conn::TlsConn,
-    wintun::{CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
+    wintun::{SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
 use smoltcp::{
-    socket::{SocketHandle, SocketRef, SocketSet, TcpSocket, TcpState},
+    iface::SocketHandle,
+    socket::{TcpSocket, TcpState},
     wire::IpEndpoint,
 };
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -72,7 +73,7 @@ impl TcpServer {
                     conn.check_status(poll);
                     continue;
                 }
-                let socket = sockets.get::<TcpSocket>(handle);
+                let socket = sockets.get_socket::<TcpSocket>(handle);
                 let mut conn = Connection::new(conn, handle, index, socket.local_endpoint());
                 if !conn.setup() {
                     conn.conn.check_status(poll);
@@ -174,13 +175,12 @@ impl Connection {
     }
 
     fn try_close(&mut self, sockets: &mut SocketSet) {
-        let mut socket = sockets.get::<TcpSocket>(self.handle);
+        let socket = sockets.get_socket::<TcpSocket>(self.handle);
         if self.closing || matches!(socket.state(), TcpState::CloseWait) {
             log::info!("client is closed:{}", socket.state());
             socket.close();
             self.closing = false;
-            std::mem::drop(socket);
-            sockets.remove(self.handle);
+            sockets.remove_socket(self.handle);
         }
     }
 
@@ -203,7 +203,7 @@ impl Connection {
 
     fn do_local(&mut self, poll: &Poll, sockets: &mut SocketSet) {
         self.last_active_time = Instant::now();
-        let mut socket = sockets.get::<TcpSocket>(self.handle);
+        let mut socket = sockets.get_socket::<TcpSocket>(self.handle);
         if self.conn.writable() {
             self.try_recv_client(&mut socket);
         } else {
@@ -211,7 +211,6 @@ impl Connection {
         }
 
         self.try_send_client(&mut socket, &[]);
-        std::mem::drop(socket);
 
         if self.writable() && self.read_server {
             self.do_recv_server(sockets);
@@ -220,7 +219,7 @@ impl Connection {
         self.do_check_status(poll, sockets);
     }
 
-    fn try_recv_client(&mut self, socket: &mut SocketRef<TcpSocket>) {
+    fn try_recv_client(&mut self, socket: &mut TcpSocket) {
         let buffer = self.recv_buffer.as_mut_slice();
         while socket.may_recv() {
             match socket.recv_slice(buffer) {
@@ -239,7 +238,7 @@ impl Connection {
         self.do_send_server();
     }
 
-    fn try_send_client(&mut self, socket: &mut SocketRef<TcpSocket>, data: &[u8]) {
+    fn try_send_client(&mut self, socket: &mut TcpSocket, data: &[u8]) {
         if socket.may_send() {
             self.established();
             if self.send_buffer.is_empty() {
@@ -254,7 +253,7 @@ impl Connection {
         }
     }
 
-    fn do_send_client(&mut self, socket: &mut SocketRef<TcpSocket>, data: &[u8]) {
+    fn do_send_client(&mut self, socket: &mut TcpSocket, data: &[u8]) {
         if data.is_empty() {
             return;
         }
@@ -285,7 +284,7 @@ impl Connection {
             self.conn.established();
             self.do_send_server();
             if self.conn.writable() && self.read_client {
-                let mut socket = sockets.get::<TcpSocket>(self.handle);
+                let mut socket = sockets.get_socket::<TcpSocket>(self.handle);
                 self.try_recv_client(&mut socket);
                 self.read_client = false;
             }
@@ -296,7 +295,7 @@ impl Connection {
 
     fn do_recv_server(&mut self, sockets: &mut SocketSet) {
         if let Some(data) = self.conn.do_read() {
-            let mut socket = sockets.get::<TcpSocket>(self.handle);
+            let mut socket = sockets.get_socket::<TcpSocket>(self.handle);
             self.try_send_client(&mut socket, data.as_slice());
         }
     }
