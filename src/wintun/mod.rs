@@ -5,9 +5,10 @@ use std::{
     io::{BufRead, BufReader},
     process::Command,
     sync::Arc,
+    thread::sleep,
 };
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{unbounded, Sender};
 use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
@@ -26,6 +27,8 @@ use crate::{
     resolver::DnsResolver,
     types::Result,
     wintun::{
+        adapter::get_adapter_ip,
+        dns::DnsServer,
         ip::{is_private, TunInterface},
         tcp::TcpServer,
         udp::UdpServer,
@@ -33,22 +36,33 @@ use crate::{
     OPTIONS,
 };
 
+mod adapter;
+mod dns;
 mod ip;
 mod tcp;
 mod udp;
 
 pub(crate) type SocketSet<'a> = Interface<'a, TunInterface>;
 
-/// Token used for dns resolver
+/// Token used for DNS resolver
 const RESOLVER: usize = 1;
+/// Token for trusted DNS server
+const DNS_TRUSTED: usize = 2;
+/// Token for poisoned DNS server
+const DNS_POISONED: usize = 3;
+/// Token for local DNS server
+const DNS_LOCAL: usize = 4;
+/// Minimum index
 const MIN_INDEX: usize = 2;
+/// Maximum index
 const MAX_INDEX: usize = usize::MAX / CHANNEL_CNT;
+/// Channel count for index
 const CHANNEL_CNT: usize = 3;
-/// channel index  for `IdlePool`
+/// Channel index  for `IdlePool`
 const CHANNEL_IDLE: usize = 0;
-/// channel index for client `UdpConnection`
+/// Channel index for client `UdpConnection`
 const CHANNEL_UDP: usize = 1;
-/// channel index for remote tcp connection
+/// Channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
 
 fn add_route_with_if(address: &str, netmask: &str, index: u32) {
@@ -70,6 +84,7 @@ fn add_route_with_if(address: &str, netmask: &str, index: u32) {
     }
 }
 
+#[allow(dead_code)]
 fn add_route_with_gw(address: &str, netmask: &str, gateway: &str) {
     if let Err(err) = Command::new("route")
         .args(["add", address, "mask", netmask, gateway, "METRIC", "1"])
@@ -137,24 +152,41 @@ pub fn run() -> Result<()> {
     .routes(routes)
     .finalize();
 
+    let index = adapter.get_adapter_index()?;
+
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
     let mut udp_server = UdpServer::new();
     let mut tcp_server = TcpServer::new();
 
+    let (ip_sender, ip_receiver) = unbounded::<String>();
+    let _ = std::thread::spawn(move || {
+        log::error!("add route started");
+        while let Ok(ip) = ip_receiver.recv() {
+            log::warn!("add ip {} to route table", ip);
+            add_route_with_if(ip.as_str(), "255.255.255.255", index);
+            log::warn!("add ip {} done", ip);
+        }
+        log::error!("add route quit");
+    });
+
+    let mut dns_server = DnsServer::new(ip_sender);
+    dns_server.setup(&poll);
+
     let mut last_udp_check_time = std::time::Instant::now();
     let mut last_tcp_check_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(10, 0);
 
-    let index = adapter.get_adapter_index()?;
-    add_route_with_if("0.0.0.0", "0.0.0.0", index);
-    if OPTIONS.wintun_args().add_white_list {
-        add_ipset(
-            OPTIONS.wintun_args().white_ip_list.as_str(),
-            OPTIONS.wintun_args().default_gateway.as_str(),
-        )?;
-        log::warn!("white list added");
+    while get_adapter_ip(OPTIONS.wintun_args().name.as_str()).is_none() {
+        sleep(std::time::Duration::new(1, 0));
     }
+    log::error!("server started");
+
+    add_route_with_if(
+        OPTIONS.wintun_args().trusted_dns.as_str(),
+        "255.255.255.255",
+        index,
+    );
 
     let mut now = Instant::now();
     loop {
@@ -177,6 +209,9 @@ pub fn run() -> Result<()> {
                     resolver.consume(|_, ip| {
                         pool.resolve(ip);
                     });
+                }
+                i if i < 5 => {
+                    dns_server.ready(event);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_IDLE => {
                     pool.ready(event, &poll);
@@ -321,6 +356,7 @@ fn do_tun_read(
     Ok((udp_handles, tcp_handles))
 }
 
+#[allow(dead_code)]
 fn add_ipset(config: &str, gw: &str) -> Result<()> {
     let file = File::open(config)?;
     let buffer = BufReader::new(file);

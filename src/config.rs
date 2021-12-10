@@ -73,18 +73,21 @@ pub struct WintunArgs {
     #[clap(short, long, default_value = "wintun/bin/amd64/wintun.dll")]
     pub wintun: String,
 
-    /// White ip list which will not go through this device, so the netmask are inverse.
-    #[clap(short, long, default_value = "ipset/ipset.txt")]
-    pub white_ip_list: String,
+    /// Domain list which should be resolved through safe DNS
+    #[clap(long, default_value = "ipset/domain.txt")]
+    pub blocked_domain_list: String,
 
-    /// Flag to add white ip list
-    #[clap(long)]
-    pub add_white_list: bool,
+    /// Trusted DNS server
+    #[clap(long, default_value = "8.8.8.8")]
+    pub trusted_dns: String,
 
-    /// Default gateway for white ips
-    #[clap(short, long)]
-    pub default_gateway: String,
+    /// Poisoned DNS server
+    #[clap(long, default_value = "114.114.114.114")]
+    pub poisoned_dns: String,
 
+    /// DNS cache timeout
+    #[clap(long, default_value = "600")]
+    pub dns_cache_time: u64,
     /// Tunnel device name
     #[clap(short, long)]
     pub name: String,
