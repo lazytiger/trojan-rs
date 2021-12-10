@@ -11,7 +11,7 @@ use std::{
     io::{BufRead, BufReader, ErrorKind},
     net::SocketAddr,
     str::FromStr,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use trust_dns_proto::{
     op::{Message, MessageType, Query, ResponseCode},
@@ -33,7 +33,7 @@ pub struct DnsServer {
 struct QueryResult {
     addresses: Vec<SocketAddr>,
     response: Vec<u8>,
-    update_time: Instant,
+    expire_time: Instant,
 }
 
 impl DnsServer {
@@ -138,10 +138,7 @@ impl DnsServer {
                             log::warn!("found query for:{}", name);
                             let key = Self::get_message_key(&message);
                             if let Some(result) = self.store.get(&key) {
-                                if !result.response.is_empty()
-                                    && (now - result.update_time).as_secs()
-                                        < OPTIONS.wintun_args().dns_cache_time
-                                {
+                                if !result.response.is_empty() && result.expire_time > now {
                                     log::warn!("query found in cache, send now");
                                     if let Err(err) =
                                         self.listener.send_to(result.response.as_slice(), from)
@@ -207,16 +204,23 @@ impl DnsServer {
                                     log::warn!("send response to {}", address);
                                 }
                             }
+                            let mut timeout = 0;
                             for record in message.answers() {
+                                timeout = record.ttl();
                                 if let Some(addr) = record.rdata().to_ip_addr() {
                                     if let Err(err) = sender.try_send(addr.to_string()) {
                                         log::error!("send to add route thread failed:{}", err);
                                     } else {
-                                        log::warn!("got response {} -> {}", name, addr);
+                                        log::warn!(
+                                            "got response {} -> {}, expire in {} seconds",
+                                            name,
+                                            addr,
+                                            timeout,
+                                        );
                                     }
                                 }
                             }
-                            result.update_time = now;
+                            result.expire_time = now + Duration::new(timeout as u64, 0);
                             result.addresses.clear();
                             result.response.clear();
                             result.response.extend_from_slice(data);
@@ -270,7 +274,8 @@ impl DnsServer {
                 QueryResult {
                     addresses: vec![],
                     response: vec![],
-                    update_time: Instant::now(),
+                    expire_time: Instant::now()
+                        + Duration::new(OPTIONS.wintun_args().dns_cache_time, 0),
                 },
             );
             self.store.get_mut(&name).unwrap()
