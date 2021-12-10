@@ -136,7 +136,8 @@ impl DnsServer {
                                 continue;
                             }
                             log::warn!("found query for:{}", name);
-                            if let Some(result) = self.store.get(&name) {
+                            let key = Self::get_message_key(&message);
+                            if let Some(result) = self.store.get(&key) {
                                 if !result.response.is_empty()
                                     && (now - result.update_time).as_secs()
                                         < OPTIONS.wintun_args().dns_cache_time
@@ -157,7 +158,7 @@ impl DnsServer {
                                 log::info!("domain:{} is not blocked", name);
                                 self.poisoned.send(data).unwrap();
                             }
-                            self.add_request(name, from);
+                            self.add_request(key, from);
                         } else {
                             log::error!(
                                 "query count:{} found in message:{:?}",
@@ -178,6 +179,12 @@ impl DnsServer {
         }
     }
 
+    fn get_message_key(message: &Message) -> String {
+        let query = &message.queries()[0];
+        let name = query.name().to_utf8();
+        name + "|" + query.query_type().to_string().as_str()
+    }
+
     fn dispatch_server(
         recv_socket: &UdpSocket,
         send_socket: &UdpSocket,
@@ -191,7 +198,7 @@ impl DnsServer {
                 Ok((length, from)) => {
                     let data = &buffer[..length];
                     if let Ok(message) = Message::from_bytes(data) {
-                        let name = message.queries()[0].name().to_utf8();
+                        let name = Self::get_message_key(&message);
                         if let Some(result) = store.get_mut(&name) {
                             for address in &result.addresses {
                                 if let Err(err) = send_socket.send_to(data, *address) {
@@ -213,6 +220,8 @@ impl DnsServer {
                             result.addresses.clear();
                             result.response.clear();
                             result.response.extend_from_slice(data);
+                        } else {
+                            log::error!("key:{} not found in store", name);
                         }
                     } else {
                         log::error!("invalid dns message received from {}", from);
