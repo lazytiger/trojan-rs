@@ -42,7 +42,15 @@ impl DnsServer {
 
         Self {
             sender,
-            listener: UdpSocket::bind("127.0.0.1:53".parse().unwrap()).unwrap(),
+            listener: UdpSocket::bind(
+                OPTIONS
+                    .wintun_args()
+                    .dns_listen_address
+                    .as_str()
+                    .parse()
+                    .unwrap(),
+            )
+            .unwrap(),
             trusted: UdpSocket::bind(default_ip.as_str().parse().unwrap()).unwrap(),
             poisoned: UdpSocket::bind(default_ip.as_str().parse().unwrap()).unwrap(),
             buffer: vec![0; MAX_PACKET_SIZE],
@@ -84,7 +92,16 @@ impl DnsServer {
         message.set_recursion_available(true);
         message.set_response_code(ResponseCode::NoError);
         let mut query = Query::new();
-        let name = Name::from_str("1.0.0.127.in-addr.arpa.").unwrap();
+        let address: String = self
+            .listener
+            .local_addr()
+            .unwrap()
+            .ip()
+            .to_string()
+            .chars()
+            .rev()
+            .collect();
+        let name = Name::from_str((address + ".in-addr.arpa.").as_str()).unwrap();
         query.set_name(name.clone());
         query.set_query_type(RecordType::PTR);
         query.set_query_class(DNSClass::IN);
@@ -94,27 +111,27 @@ impl DnsServer {
         record.set_record_type(RecordType::PTR);
         record.set_dns_class(DNSClass::IN);
         record.set_ttl(20567);
-        record.set_rdata(RData::PTR(Name::from_str("localhost").unwrap()));
+        record.set_rdata(RData::PTR(Name::from_str("trojan.dns").unwrap()));
         message.add_answer(record);
         self.arp_data = message.to_vec().unwrap();
     }
 
-    pub fn ready(&mut self, event: &Event) {
+    pub fn ready(&mut self, event: &Event, poll: &Poll) {
         match event.token() {
             Token(DNS_LOCAL) => {
-                self.dispatch_local();
+                self.dispatch_local(poll);
             }
             Token(DNS_TRUSTED) => {
-                self.dispatch_trusted();
+                self.dispatch_trusted(poll);
             }
             Token(DNS_POISONED) => {
-                self.dispatch_poisoned();
+                self.dispatch_poisoned(poll);
             }
             _ => unreachable!(),
         }
     }
 
-    fn dispatch_local(&mut self) {
+    fn dispatch_local(&mut self, poll: &Poll) {
         let now = Instant::now();
         loop {
             match self.listener.recv_from(self.buffer.as_mut_slice()) {
@@ -170,6 +187,9 @@ impl DnsServer {
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                 Err(err) => {
                     log::error!("dns listener recv failed:{}", err);
+                    poll.registry()
+                        .reregister(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
+                        .unwrap();
                     break;
                 }
             }
@@ -188,7 +208,7 @@ impl DnsServer {
         buffer: &mut [u8],
         store: &mut HashMap<String, QueryResult>,
         sender: &Sender<String>,
-    ) {
+    ) -> bool {
         let now = Instant::now();
         loop {
             match recv_socket.recv_from(buffer) {
@@ -234,30 +254,39 @@ impl DnsServer {
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                 Err(err) => {
                     log::error!("dns listener recv failed:{}", err);
-                    break;
+                    return false;
                 }
             }
         }
+        true
     }
 
-    fn dispatch_trusted(&mut self) {
-        Self::dispatch_server(
+    fn dispatch_trusted(&mut self, poll: &Poll) {
+        if !Self::dispatch_server(
             &self.trusted,
             &self.listener,
             self.buffer.as_mut_slice(),
             &mut self.store,
             &self.sender,
-        );
+        ) {
+            poll.registry()
+                .reregister(&mut self.trusted, Token(DNS_TRUSTED), Interest::READABLE)
+                .unwrap();
+        }
     }
 
-    fn dispatch_poisoned(&mut self) {
-        Self::dispatch_server(
+    fn dispatch_poisoned(&mut self, poll: &Poll) {
+        if !Self::dispatch_server(
             &self.poisoned,
             &self.listener,
             self.buffer.as_mut_slice(),
             &mut self.store,
             &self.sender,
-        );
+        ) {
+            poll.registry()
+                .reregister(&mut self.poisoned, Token(DNS_POISONED), Interest::READABLE)
+                .unwrap();
+        }
     }
 
     fn is_blocked(&self, name: &String) -> bool {

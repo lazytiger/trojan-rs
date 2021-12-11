@@ -77,6 +77,10 @@ pub struct WintunArgs {
     #[clap(long, default_value = "ipset/domain.txt")]
     pub blocked_domain_list: String,
 
+    /// Listen address for DNS server, like 127.0.0.1:53
+    #[clap(long, default_value = "127.0.0.1:53")]
+    pub dns_listen_address: String,
+
     /// Trusted DNS server
     #[clap(long, default_value = "8.8.8.8")]
     pub trusted_dns: String,

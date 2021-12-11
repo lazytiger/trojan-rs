@@ -211,7 +211,7 @@ pub fn run() -> Result<()> {
                     });
                 }
                 i if i < 5 => {
-                    dns_server.ready(event);
+                    dns_server.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_IDLE => {
                     pool.ready(event, &poll);
