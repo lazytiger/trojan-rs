@@ -1085,6 +1085,7 @@ dependencies = [
  "derive_more",
  "dns-lookup",
  "fern",
+ "itertools",
  "lazy_static",
  "libc",
  "libloading",

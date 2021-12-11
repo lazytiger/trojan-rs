@@ -31,6 +31,7 @@ crossbeam = "0.8"
 trust-dns-proto = "0.20"
 winapi = "0.3"
 widestring = "0.5"
+itertools = "0.10"
 smoltcp = {git = "https://github.com/smoltcp-rs/smoltcp.git"}
 
 [target.'cfg(windows)'.dependencies]

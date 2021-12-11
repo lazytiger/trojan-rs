@@ -4,6 +4,7 @@ use crate::{
     OPTIONS,
 };
 use crossbeam::channel::Sender;
+use itertools::Itertools;
 use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use std::{
     collections::HashMap,
@@ -28,6 +29,7 @@ pub struct DnsServer {
     blocked_domains: Vec<String>,
     store: HashMap<String, QueryResult>,
     sender: Sender<String>,
+    ptr_name: String,
 }
 
 struct QueryResult {
@@ -57,6 +59,7 @@ impl DnsServer {
             blocked_domains: vec![],
             arp_data: vec![],
             store: HashMap::new(),
+            ptr_name: String::new(),
         }
     }
 
@@ -98,10 +101,12 @@ impl DnsServer {
             .unwrap()
             .ip()
             .to_string()
-            .chars()
+            .split('.')
             .rev()
-            .collect();
-        let name = Name::from_str((address + ".in-addr.arpa.").as_str()).unwrap();
+            .join(".");
+        let name = address + ".in-addr.arpa.";
+        self.ptr_name = name.clone();
+        let name = Name::from_str(name.as_str()).unwrap();
         query.set_name(name.clone());
         query.set_query_type(RecordType::PTR);
         query.set_query_class(DNSClass::IN);
@@ -141,9 +146,7 @@ impl DnsServer {
                         if message.query_count() == 1 {
                             let query = &message.queries()[0];
                             let name = query.name().to_utf8();
-                            if query.query_type() == RecordType::PTR
-                                && name == "1.0.0.127.in-addr.arpa."
-                            {
+                            if query.query_type() == RecordType::PTR && name == self.ptr_name {
                                 log::warn!("found ptr query");
                                 if let Err(err) =
                                     self.listener.send_to(self.arp_data.as_slice(), from)
