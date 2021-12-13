@@ -1,9 +1,9 @@
 use crate::{
     proto::MAX_PACKET_SIZE,
-    wintun::{DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
+    wintun::{adapter::get_adapter_ip, add_route_with_gw, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
     OPTIONS,
 };
-use crossbeam::channel::Sender;
+use crossbeam::channel::{unbounded, Sender};
 use itertools::Itertools;
 use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use std::{
@@ -39,8 +39,24 @@ struct QueryResult {
 }
 
 impl DnsServer {
-    pub fn new(sender: Sender<String>) -> Self {
+    pub fn new() -> Self {
         let default_ip = "0.0.0.0:0".to_owned();
+        let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
+        add_route_with_gw(
+            OPTIONS.wintun_args().trusted_dns.as_str(),
+            "255.255.255.255",
+            gateway.as_str(),
+        );
+        let (sender, receiver) = unbounded::<String>();
+        let _ = std::thread::spawn(move || {
+            log::error!("add route started");
+            while let Ok(ip) = receiver.recv() {
+                log::warn!("add ip {} to route table", ip);
+                add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
+                log::warn!("add ip {} done", ip);
+            }
+            log::error!("add route quit");
+        });
 
         Self {
             sender,

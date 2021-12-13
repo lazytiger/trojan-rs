@@ -8,7 +8,7 @@ use std::{
     thread::sleep,
 };
 
-use crossbeam::channel::{unbounded, Sender};
+use crossbeam::channel::Sender;
 use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
@@ -169,25 +169,7 @@ pub fn run() -> Result<()> {
     }
     log::error!("server started");
 
-    let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
-    add_route_with_gw(
-        OPTIONS.wintun_args().trusted_dns.as_str(),
-        "255.255.255.255",
-        gateway.as_str(),
-    );
-
-    let (ip_sender, ip_receiver) = unbounded::<String>();
-    let _ = std::thread::spawn(move || {
-        log::error!("add route started");
-        while let Ok(ip) = ip_receiver.recv() {
-            log::warn!("add ip {} to route table", ip);
-            add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
-            log::warn!("add ip {} done", ip);
-        }
-        log::error!("add route quit");
-    });
-
-    let mut dns_server = DnsServer::new(ip_sender);
+    let mut dns_server = DnsServer::new();
     dns_server.setup(&poll);
 
     let mut now = Instant::now();
