@@ -347,7 +347,7 @@ fn add_ipset(config: &str, gw: &str) -> Result<()> {
     buffer.lines().for_each(|line| {
         let line = line.unwrap();
         let line: Vec<_> = line.split('/').collect();
-        log::warn!("route add {} mask {}", line[0], line[1]);
+        log::info!("route add {} mask {}", line[0], line[1]);
         add_route_with_gw(line[0], line[1], gw);
     });
     Ok(())

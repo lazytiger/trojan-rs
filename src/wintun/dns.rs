@@ -49,11 +49,10 @@ impl DnsServer {
         );
         let (sender, receiver) = unbounded::<String>();
         let _ = std::thread::spawn(move || {
-            log::error!("add route started");
+            log::debug!("add route started");
             while let Ok(ip) = receiver.recv() {
-                log::warn!("add ip {} to route table", ip);
                 add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
-                log::warn!("add ip {} done", ip);
+                log::info!("add ip {} to route table", ip);
             }
             log::error!("add route quit");
         });
@@ -163,19 +162,19 @@ impl DnsServer {
                             let query = &message.queries()[0];
                             let name = query.name().to_utf8();
                             if query.query_type() == RecordType::PTR && name == self.ptr_name {
-                                log::warn!("found ptr query");
+                                log::debug!("found ptr query");
                                 if let Err(err) =
                                     self.listener.send_to(self.arp_data.as_slice(), from)
                                 {
-                                    log::error!("send data to {} failed:{}", from, err);
+                                    log::error!("send response to {} failed:{}", from, err);
                                 }
                                 continue;
                             }
-                            log::warn!("found query for:{}", name);
+                            log::debug!("found query for:{}", name);
                             let key = Self::get_message_key(&message);
                             if let Some(result) = self.store.get(&key) {
                                 if !result.response.is_empty() && result.expire_time > now {
-                                    log::warn!("query found in cache, send now");
+                                    log::debug!("query found in cache, send now");
                                     if let Err(err) =
                                         self.listener.send_to(result.response.as_slice(), from)
                                     {
@@ -186,7 +185,7 @@ impl DnsServer {
                             }
                             if self.is_blocked(&name) {
                                 self.trusted.send(data).unwrap();
-                                log::warn!("domain:{} is blocked", name);
+                                log::info!("domain:{} is blocked", name);
                             } else {
                                 log::info!("domain:{} is not blocked", name);
                                 self.poisoned.send(data).unwrap();
@@ -200,12 +199,12 @@ impl DnsServer {
                             );
                         }
                     } else {
-                        log::error!("invalid dns message received from {}", from);
+                        log::error!("invalid request message received from {}", from);
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                 Err(err) => {
-                    log::error!("dns listener recv failed:{}", err);
+                    log::error!("dns request recv failed:{}", err);
                     poll.registry()
                         .reregister(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
                         .unwrap();
@@ -240,7 +239,7 @@ impl DnsServer {
                                 if let Err(err) = send_socket.send_to(data, *address) {
                                     log::error!("send to {} failed:{}", address, err);
                                 } else {
-                                    log::warn!("send response to {}", address);
+                                    log::debug!("send response to {}", address);
                                 }
                             }
                             let mut timeout = 0;
@@ -250,7 +249,7 @@ impl DnsServer {
                                     if let Err(err) = sender.try_send(addr.to_string()) {
                                         log::error!("send to add route thread failed:{}", err);
                                     } else {
-                                        log::warn!(
+                                        log::debug!(
                                             "got response {} -> {}, expire in {} seconds",
                                             name,
                                             addr,
@@ -267,12 +266,16 @@ impl DnsServer {
                             log::error!("key:{} not found in store", name);
                         }
                     } else {
-                        log::error!("invalid dns message received from {}", from);
+                        log::error!("invalid response message received from {}", from);
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                 Err(err) => {
-                    log::error!("dns listener recv failed:{}", err);
+                    log::error!(
+                        "dns response from:{:?} recv failed:{}",
+                        recv_socket.local_addr(),
+                        err
+                    );
                     return false;
                 }
             }

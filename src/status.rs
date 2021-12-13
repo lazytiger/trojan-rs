@@ -64,7 +64,7 @@ pub trait StatusProvider {
                 self.close_conn();
                 self.set_status(ConnStatus::Shutdown);
             }
-            ConnStatus::Shutdown => {}
+            ConnStatus::Shutdown | ConnStatus::Deregistered => {}
             _ => {
                 log::warn!(
                     "invalid status change from:{:?} to {:?}",
