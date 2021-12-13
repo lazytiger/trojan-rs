@@ -1,6 +1,6 @@
 use crate::{
+    dns::{adapter::get_adapter_ip, add_route_with_gw, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
     proto::MAX_PACKET_SIZE,
-    wintun::{adapter::get_adapter_ip, add_route_with_gw, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
     OPTIONS,
 };
 use crossbeam::channel::{unbounded, Sender};
@@ -40,10 +40,10 @@ struct QueryResult {
 
 impl DnsServer {
     pub fn new() -> Self {
-        let default_ip = "0.0.0.0:0".to_owned();
-        let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
+        let default_addr = "0.0.0.0:0".to_owned();
+        let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
         add_route_with_gw(
-            OPTIONS.wintun_args().trusted_dns.as_str(),
+            OPTIONS.dns_args().trusted_dns.as_str(),
             "255.255.255.255",
             gateway.as_str(),
         );
@@ -61,15 +61,15 @@ impl DnsServer {
             sender,
             listener: UdpSocket::bind(
                 OPTIONS
-                    .wintun_args()
+                    .dns_args()
                     .dns_listen_address
                     .as_str()
                     .parse()
                     .unwrap(),
             )
             .unwrap(),
-            trusted: UdpSocket::bind(default_ip.as_str().parse().unwrap()).unwrap(),
-            poisoned: UdpSocket::bind(default_ip.as_str().parse().unwrap()).unwrap(),
+            trusted: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
+            poisoned: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
             buffer: vec![0; MAX_PACKET_SIZE],
             blocked_domains: vec![],
             arp_data: vec![],
@@ -79,8 +79,8 @@ impl DnsServer {
     }
 
     pub fn setup(&mut self, poll: &Poll) {
-        let trusted_dns = OPTIONS.wintun_args().trusted_dns.clone() + ":53";
-        let poisoned_dns = OPTIONS.wintun_args().poisoned_dns.clone() + ":53";
+        let trusted_dns = OPTIONS.dns_args().trusted_dns.clone() + ":53";
+        let poisoned_dns = OPTIONS.dns_args().poisoned_dns.clone() + ":53";
         self.trusted
             .connect(trusted_dns.as_str().parse().unwrap())
             .unwrap();
@@ -97,7 +97,7 @@ impl DnsServer {
             .register(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
             .unwrap();
 
-        let file = File::open(OPTIONS.wintun_args().blocked_domain_list.as_str()).unwrap();
+        let file = File::open(OPTIONS.dns_args().blocked_domain_list.as_str()).unwrap();
         let reader = BufReader::new(file);
         reader
             .lines()
@@ -326,7 +326,7 @@ impl DnsServer {
                     addresses: vec![],
                     response: vec![],
                     expire_time: Instant::now()
-                        + Duration::new(OPTIONS.wintun_args().dns_cache_time, 0),
+                        + Duration::new(OPTIONS.dns_args().dns_cache_time, 0),
                 },
             );
             self.store.get_mut(&name).unwrap()

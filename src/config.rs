@@ -23,9 +23,9 @@ pub struct Opts {
 
     /// Listen address for server, format like 0.0.0.0:443
     #[clap(short = 'a', long)]
+    pub local_addr: String,
 
     /// passwords for negotiation
-    pub local_addr: String,
     #[clap(short, long)]
     password: String,
 
@@ -65,6 +65,8 @@ pub enum Mode {
     Server(ServerArgs),
     #[clap(version, name = "wintun", about = "run in windows tun mode")]
     Wintun(WintunArgs),
+    #[clap(version, name = "dns", about = "run in dns mode")]
+    Dns(DnsArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -73,29 +75,6 @@ pub struct WintunArgs {
     #[clap(short, long, default_value = "wintun/bin/amd64/wintun.dll")]
     pub wintun: String,
 
-    /// Add white ip list
-    #[clap(long)]
-    pub white_ip_list: Option<String>,
-
-    /// Domain list which should be resolved through safe DNS
-    #[clap(long, default_value = "ipset/domain.txt")]
-    pub blocked_domain_list: String,
-
-    /// Listen address for DNS server, like 127.0.0.1:53
-    #[clap(long, default_value = "127.0.0.1:53")]
-    pub dns_listen_address: String,
-
-    /// Trusted DNS server
-    #[clap(long, default_value = "8.8.8.8")]
-    pub trusted_dns: String,
-
-    /// Poisoned DNS server
-    #[clap(long, default_value = "114.114.114.114")]
-    pub poisoned_dns: String,
-
-    /// DNS cache timeout
-    #[clap(long, default_value = "600")]
-    pub dns_cache_time: u64,
     /// Tunnel device name
     #[clap(short, long)]
     pub name: String,
@@ -161,6 +140,37 @@ pub struct ProxyArgs {
 }
 
 #[derive(Parser)]
+pub struct DnsArgs {
+    /// Tunnel name used for transparent proxy
+    #[clap(short = 'n', long)]
+    pub tun_name: String,
+
+    /// Add white ip list
+    #[clap(long)]
+    pub white_ip_list: Option<String>,
+
+    /// Domain list which should be resolved through safe DNS
+    #[clap(long, default_value = "ipset/domain.txt")]
+    pub blocked_domain_list: String,
+
+    /// Listen address for DNS server, like 127.0.0.1:53
+    #[clap(long, default_value = "127.0.0.1:53")]
+    pub dns_listen_address: String,
+
+    /// Trusted DNS server
+    #[clap(long, default_value = "8.8.8.8")]
+    pub trusted_dns: String,
+
+    /// Poisoned DNS server
+    #[clap(long, default_value = "114.114.114.114")]
+    pub poisoned_dns: String,
+
+    /// DNS cache timeout
+    #[clap(long, default_value = "600")]
+    pub dns_cache_time: u64,
+}
+
+#[derive(Parser)]
 pub struct ServerArgs {
     /// Certificate file path, This should contain PEM-format certificates in the right order (the first certificate should certify KEYFILE, the last should be a root CA
     #[clap(short, long)]
@@ -209,6 +219,13 @@ impl Opts {
         }
     }
 
+    pub fn dns_args(&self) -> &DnsArgs {
+        match self.mode {
+            Mode::Dns(ref args) => args,
+            _ => panic!("not in dns mode"),
+        }
+    }
+
     fn resolve(&mut self, hostname: String, port: u16) {
         for i in 0..10 {
             if let Ok(response) = dns_lookup::lookup_host(hostname.as_str()) {
@@ -249,13 +266,16 @@ impl Opts {
                 let port = args.port;
                 self.resolve(hostname, port);
             }
+            Mode::Dns(_) => {}
         }
-        let empty_addr = if self.back_addr.as_ref().unwrap().is_ipv4() {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
-        } else {
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
-        };
-        self.empty_addr.replace(empty_addr);
+        if self.back_addr.is_some() {
+            let empty_addr = if self.back_addr.as_ref().unwrap().is_ipv4() {
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+            } else {
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
+            };
+            self.empty_addr.replace(empty_addr);
+        }
         self.udp_idle_duration = Duration::new(self.udp_idle_timeout, 0);
         self.tcp_idle_duration = Duration::new(self.tcp_idle_timeout, 0);
         self.digest_pass();

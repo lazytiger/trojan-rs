@@ -1,12 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    convert::TryInto,
-    fs::File,
-    io::{BufRead, BufReader},
-    process::Command,
-    sync::Arc,
-    thread::sleep,
-};
+use std::{collections::BTreeMap, convert::TryInto, sync::Arc};
 
 use crossbeam::channel::Sender;
 use mio::{Events, Poll, Token, Waker};
@@ -27,8 +19,6 @@ use crate::{
     resolver::DnsResolver,
     types::Result,
     wintun::{
-        adapter::{get_adapter_ip, get_main_adapter_ip},
-        dns::DnsServer,
         ip::{is_private, TunInterface},
         tcp::TcpServer,
         udp::UdpServer,
@@ -36,8 +26,6 @@ use crate::{
     OPTIONS,
 };
 
-mod adapter;
-mod dns;
 mod ip;
 mod tcp;
 mod udp;
@@ -46,12 +34,6 @@ pub(crate) type SocketSet<'a> = Interface<'a, TunInterface>;
 
 /// Token used for DNS resolver
 const RESOLVER: usize = 1;
-/// Token for trusted DNS server
-const DNS_TRUSTED: usize = 2;
-/// Token for poisoned DNS server
-const DNS_POISONED: usize = 3;
-/// Token for local DNS server
-const DNS_LOCAL: usize = 4;
 /// Minimum index
 const MIN_INDEX: usize = 2;
 /// Maximum index
@@ -65,47 +47,12 @@ const CHANNEL_UDP: usize = 1;
 /// Channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
 
-#[allow(dead_code)]
-fn add_route_with_if(address: &str, netmask: &str, index: u32) {
-    if let Err(err) = Command::new("route")
-        .args([
-            "add",
-            address,
-            "mask",
-            netmask,
-            "0.0.0.0",
-            "METRIC",
-            "1",
-            "IF",
-            index.to_string().as_str(),
-        ])
-        .output()
-    {
-        log::error!("route add {} failed:{}", address, err);
-    }
-}
-
-#[allow(dead_code)]
-fn add_route_with_gw(address: &str, netmask: &str, gateway: &str) {
-    if let Err(err) = Command::new("route")
-        .args(["add", address, "mask", netmask, gateway, "METRIC", "1"])
-        .output()
-    {
-        log::error!("route add {} failed:{}", address, err);
-    }
-}
-
 pub fn run() -> Result<()> {
-    if let Some(list) = &OPTIONS.wintun_args().white_ip_list {
-        let gateway = get_main_adapter_ip().unwrap();
-        return add_ipset(list.as_str(), gateway.as_str());
-    }
-
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let adapter = Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?;
+    let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
 
     let hostname = OPTIONS.wintun_args().hostname.as_str().try_into()?;
-
     let mut root_store = RootCertStore::empty();
     root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
         OwnedTrustAnchor::from_subject_spki_name_constraints(
@@ -138,8 +85,6 @@ pub fn run() -> Result<()> {
 
     let (sender, receiver) = crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
 
-    let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
-
     let ip_addrs = [IpCidr::new(IpAddress::v4(0, 0, 0, 1), 0)];
 
     let mut routes = Routes::new(BTreeMap::new());
@@ -164,14 +109,6 @@ pub fn run() -> Result<()> {
     let mut last_tcp_check_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(10, 0);
 
-    while get_adapter_ip(OPTIONS.wintun_args().name.as_str()).is_none() {
-        sleep(std::time::Duration::new(1, 0));
-    }
-    log::error!("server started");
-
-    let mut dns_server = DnsServer::new();
-    dns_server.setup(&poll);
-
     let mut now = Instant::now();
     loop {
         let (udp_handles, tcp_handles) = do_tun_read(&session, &sender, &mut interface)?;
@@ -193,9 +130,6 @@ pub fn run() -> Result<()> {
                     resolver.consume(|_, ip| {
                         pool.resolve(ip);
                     });
-                }
-                i if i < 5 => {
-                    dns_server.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_IDLE => {
                     pool.ready(event, &poll);
@@ -338,17 +272,4 @@ fn do_tun_read(
     }
 
     Ok((udp_handles, tcp_handles))
-}
-
-#[allow(dead_code)]
-fn add_ipset(config: &str, gw: &str) -> Result<()> {
-    let file = File::open(config)?;
-    let buffer = BufReader::new(file);
-    buffer.lines().for_each(|line| {
-        let line = line.unwrap();
-        let line: Vec<_> = line.split('/').collect();
-        log::info!("route add {} mask {}", line[0], line[1]);
-        add_route_with_gw(line[0], line[1], gw);
-    });
-    Ok(())
 }

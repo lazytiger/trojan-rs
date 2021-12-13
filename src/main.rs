@@ -4,6 +4,8 @@
 use crate::config::{Mode, OPTIONS};
 
 mod config;
+#[cfg(target_os = "windows")]
+mod dns;
 mod idle_pool;
 mod proto;
 mod proxy;
@@ -32,6 +34,11 @@ fn main() {
         Mode::Wintun(_) => {
             log::warn!("trojan started in wintun mode");
             wintun::run()
+        }
+        #[cfg(target_os = "windows")]
+        Mode::Dns(_) => {
+            log::warn!("trojan started in dns mode");
+            dns::run()
         }
         #[cfg(not(target_os = "windows"))]
         Mode::Wintun(_) => {

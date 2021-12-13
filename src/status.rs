@@ -65,13 +65,6 @@ pub trait StatusProvider {
                 self.set_status(ConnStatus::Shutdown);
             }
             ConnStatus::Shutdown | ConnStatus::Deregistered => {}
-            _ => {
-                log::warn!(
-                    "invalid status change from:{:?} to {:?}",
-                    self.get_status(),
-                    ConnStatus::Shutdown
-                );
-            }
         }
     }
     fn deregister(&mut self, poll: &Poll);
