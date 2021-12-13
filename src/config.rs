@@ -73,6 +73,10 @@ pub struct WintunArgs {
     #[clap(short, long, default_value = "wintun/bin/amd64/wintun.dll")]
     pub wintun: String,
 
+    /// Add white ip list
+    #[clap(long)]
+    pub white_ip_list: Option<String>,
+
     /// Domain list which should be resolved through safe DNS
     #[clap(long, default_value = "ipset/domain.txt")]
     pub blocked_domain_list: String,
