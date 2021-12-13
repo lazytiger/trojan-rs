@@ -1,9 +1,9 @@
 use crate::{
     proto::MAX_PACKET_SIZE,
-    wintun::{adapter::get_adapter_ip, add_route_with_gw, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
+    wintun::{DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
     OPTIONS,
 };
-use crossbeam::channel::{unbounded, Sender};
+use crossbeam::channel::Sender;
 use itertools::Itertools;
 use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use std::{
@@ -39,23 +39,8 @@ struct QueryResult {
 }
 
 impl DnsServer {
-    pub fn new() -> Self {
+    pub fn new(sender: Sender<String>) -> Self {
         let default_ip = "0.0.0.0:0".to_owned();
-        let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
-        add_route_with_gw(
-            OPTIONS.wintun_args().trusted_dns.as_str(),
-            "255.255.255.255",
-            gateway.as_str(),
-        );
-        let (sender, receiver) = unbounded::<String>();
-        let _ = std::thread::spawn(move || {
-            log::debug!("add route started");
-            while let Ok(ip) = receiver.recv() {
-                add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
-                log::info!("add ip {} to route table", ip);
-            }
-            log::error!("add route quit");
-        });
 
         Self {
             sender,
@@ -162,19 +147,19 @@ impl DnsServer {
                             let query = &message.queries()[0];
                             let name = query.name().to_utf8();
                             if query.query_type() == RecordType::PTR && name == self.ptr_name {
-                                log::debug!("found ptr query");
+                                log::warn!("found ptr query");
                                 if let Err(err) =
                                     self.listener.send_to(self.arp_data.as_slice(), from)
                                 {
-                                    log::error!("send response to {} failed:{}", from, err);
+                                    log::error!("send data to {} failed:{}", from, err);
                                 }
                                 continue;
                             }
-                            log::debug!("found query for:{}", name);
+                            log::warn!("found query for:{}", name);
                             let key = Self::get_message_key(&message);
                             if let Some(result) = self.store.get(&key) {
                                 if !result.response.is_empty() && result.expire_time > now {
-                                    log::debug!("query found in cache, send now");
+                                    log::warn!("query found in cache, send now");
                                     if let Err(err) =
                                         self.listener.send_to(result.response.as_slice(), from)
                                     {
@@ -185,7 +170,7 @@ impl DnsServer {
                             }
                             if self.is_blocked(&name) {
                                 self.trusted.send(data).unwrap();
-                                log::info!("domain:{} is blocked", name);
+                                log::warn!("domain:{} is blocked", name);
                             } else {
                                 log::info!("domain:{} is not blocked", name);
                                 self.poisoned.send(data).unwrap();
@@ -199,12 +184,12 @@ impl DnsServer {
                             );
                         }
                     } else {
-                        log::error!("invalid request message received from {}", from);
+                        log::error!("invalid dns message received from {}", from);
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                 Err(err) => {
-                    log::error!("dns request recv failed:{}", err);
+                    log::error!("dns listener recv failed:{}", err);
                     poll.registry()
                         .reregister(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
                         .unwrap();
@@ -239,7 +224,7 @@ impl DnsServer {
                                 if let Err(err) = send_socket.send_to(data, *address) {
                                     log::error!("send to {} failed:{}", address, err);
                                 } else {
-                                    log::debug!("send response to {}", address);
+                                    log::warn!("send response to {}", address);
                                 }
                             }
                             let mut timeout = 0;
@@ -249,7 +234,7 @@ impl DnsServer {
                                     if let Err(err) = sender.try_send(addr.to_string()) {
                                         log::error!("send to add route thread failed:{}", err);
                                     } else {
-                                        log::debug!(
+                                        log::warn!(
                                             "got response {} -> {}, expire in {} seconds",
                                             name,
                                             addr,
@@ -266,16 +251,12 @@ impl DnsServer {
                             log::error!("key:{} not found in store", name);
                         }
                     } else {
-                        log::error!("invalid response message received from {}", from);
+                        log::error!("invalid dns message received from {}", from);
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                 Err(err) => {
-                    log::error!(
-                        "dns response from:{:?} recv failed:{}",
-                        recv_socket.local_addr(),
-                        err
-                    );
+                    log::error!("dns listener recv failed:{}", err);
                     return false;
                 }
             }

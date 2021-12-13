@@ -8,7 +8,7 @@ use std::{
     thread::sleep,
 };
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{unbounded, Sender};
 use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
@@ -27,7 +27,7 @@ use crate::{
     resolver::DnsResolver,
     types::Result,
     wintun::{
-        adapter::{get_adapter_ip, get_main_adapter_ip},
+        adapter::get_adapter_ip,
         dns::DnsServer,
         ip::{is_private, TunInterface},
         tcp::TcpServer,
@@ -65,7 +65,6 @@ const CHANNEL_UDP: usize = 1;
 /// Channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
 
-#[allow(dead_code)]
 fn add_route_with_if(address: &str, netmask: &str, index: u32) {
     if let Err(err) = Command::new("route")
         .args([
@@ -96,11 +95,6 @@ fn add_route_with_gw(address: &str, netmask: &str, gateway: &str) {
 }
 
 pub fn run() -> Result<()> {
-    if let Some(list) = &OPTIONS.wintun_args().white_ip_list {
-        let gateway = get_main_adapter_ip().unwrap();
-        return add_ipset(list.as_str(), gateway.as_str());
-    }
-
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let adapter = Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?;
 
@@ -155,10 +149,26 @@ pub fn run() -> Result<()> {
     .routes(routes)
     .finalize();
 
+    let index = adapter.get_adapter_index()?;
+
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
     let mut udp_server = UdpServer::new();
     let mut tcp_server = TcpServer::new();
+
+    let (ip_sender, ip_receiver) = unbounded::<String>();
+    let _ = std::thread::spawn(move || {
+        log::error!("add route started");
+        while let Ok(ip) = ip_receiver.recv() {
+            log::warn!("add ip {} to route table", ip);
+            add_route_with_if(ip.as_str(), "255.255.255.255", index);
+            log::warn!("add ip {} done", ip);
+        }
+        log::error!("add route quit");
+    });
+
+    let mut dns_server = DnsServer::new(ip_sender);
+    dns_server.setup(&poll);
 
     let mut last_udp_check_time = std::time::Instant::now();
     let mut last_tcp_check_time = std::time::Instant::now();
@@ -169,8 +179,11 @@ pub fn run() -> Result<()> {
     }
     log::error!("server started");
 
-    let mut dns_server = DnsServer::new();
-    dns_server.setup(&poll);
+    add_route_with_if(
+        OPTIONS.wintun_args().trusted_dns.as_str(),
+        "255.255.255.255",
+        index,
+    );
 
     let mut now = Instant::now();
     loop {
@@ -347,7 +360,7 @@ fn add_ipset(config: &str, gw: &str) -> Result<()> {
     buffer.lines().for_each(|line| {
         let line = line.unwrap();
         let line: Vec<_> = line.split('/').collect();
-        log::info!("route add {} mask {}", line[0], line[1]);
+        log::warn!("route add {} mask {}", line[0], line[1]);
         add_route_with_gw(line[0], line[1], gw);
     });
     Ok(())
