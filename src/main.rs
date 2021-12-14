@@ -33,19 +33,23 @@ fn main() {
             server::run()
         }
         Mode::Wintun(_) => {
-            if cfg!(target_os = "windows") {
-                log::warn!("trojan started in wintun mode");
-                wintun::run()
-            } else {
-                panic!("trojan in wintun mode not supported on non-windows platform");
+            cfg_if::cfg_if! {
+                if #[cfg(windows)] {
+                    log::warn!("trojan started in wintun mode");
+                    wintun::run()
+                } else {
+                    panic!("trojan in wintun mode not supported on non-windows platform");
+                }
             }
         }
         Mode::Dns(_) => {
-            if cfg!(target_os = "windows") {
-                log::warn!("trojan started in dns mode");
-                dns::run()
-            } else {
-                panic!("trojan in dns mode not supported on non-windows platform");
+            cfg_if::cfg_if! {
+                if #[cfg(windows)] {
+                    log::warn!("trojan started in dns mode");
+                    dns::run()
+                } else {
+                    panic!("trojan in dns mode not supported on non-windows platform");
+                }
             }
         }
     } {
