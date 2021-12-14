@@ -4,8 +4,12 @@
 use crate::config::{Mode, OPTIONS};
 
 mod config;
-#[cfg(target_os = "windows")]
-mod dns;
+cfg_if::cfg_if! {
+    if #[cfg(windows)] {
+        mod dns;
+        mod wintun;
+    }
+}
 mod idle_pool;
 mod proto;
 mod proxy;
@@ -16,8 +20,6 @@ mod sys;
 mod tcp_util;
 mod tls_conn;
 mod types;
-#[cfg(target_os = "windows")]
-mod wintun;
 
 fn main() {
     config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);
@@ -30,20 +32,21 @@ fn main() {
             log::warn!("trojan started in server mode");
             server::run()
         }
-        #[cfg(target_os = "windows")]
         Mode::Wintun(_) => {
-            log::warn!("trojan started in wintun mode");
-            wintun::run()
+            if cfg!(target_os = "windows") {
+                log::warn!("trojan started in wintun mode");
+                wintun::run()
+            } else {
+                panic!("trojan in wintun mode not supported on non-windows platform");
+            }
         }
-        #[cfg(target_os = "windows")]
         Mode::Dns(_) => {
-            log::warn!("trojan started in dns mode");
-            dns::run()
-        }
-        #[cfg(not(target_os = "windows"))]
-        Mode::Wintun(_) => {
-            log::warn!("trojan can't start in wintun mode on a non-windows platform");
-            Err(crate::types::TrojanError::NonWindowsPlatform)
+            if cfg!(target_os = "windows") {
+                log::warn!("trojan started in dns mode");
+                dns::run()
+            } else {
+                panic!("trojan in dns mode not supported on non-windows platform");
+            }
         }
     } {
         log::error!("trojan exited with error:{:?}", err);
