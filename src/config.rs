@@ -212,6 +212,7 @@ impl Opts {
         }
     }
 
+    #[allow(dead_code)]
     pub fn wintun_args(&self) -> &WintunArgs {
         match self.mode {
             Mode::Wintun(ref args) => args,
@@ -219,6 +220,7 @@ impl Opts {
         }
     }
 
+    #[allow(dead_code)]
     pub fn dns_args(&self) -> &DnsArgs {
         match self.mode {
             Mode::Dns(ref args) => args,
