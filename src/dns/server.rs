@@ -1,5 +1,8 @@
 use crate::{
-    dns::{adapter::get_adapter_ip, add_route_with_gw, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
+    dns::{
+        adapter::get_adapter_ip, add_route_with_gw, domain::DomainMap, DNS_LOCAL, DNS_POISONED,
+        DNS_TRUSTED,
+    },
     proto::MAX_PACKET_SIZE,
     OPTIONS,
 };
@@ -26,7 +29,7 @@ pub struct DnsServer {
     poisoned: UdpSocket,
     buffer: Vec<u8>,
     arp_data: Vec<u8>,
-    blocked_domains: Vec<String>,
+    blocked_domains: DomainMap,
     store: HashMap<String, QueryResult>,
     sender: Sender<String>,
     ptr_name: String,
@@ -71,7 +74,7 @@ impl DnsServer {
             trusted: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
             poisoned: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
             buffer: vec![0; MAX_PACKET_SIZE],
-            blocked_domains: vec![],
+            blocked_domains: DomainMap::new(),
             arp_data: vec![],
             store: HashMap::new(),
             ptr_name: String::new(),
@@ -97,11 +100,14 @@ impl DnsServer {
             .register(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
             .unwrap();
 
+        let mut domain_map = DomainMap::new();
         let file = File::open(OPTIONS.dns_args().blocked_domain_list.as_str()).unwrap();
         let reader = BufReader::new(file);
-        reader
-            .lines()
-            .for_each(|line| self.blocked_domains.push(line.unwrap() + "."));
+        reader.lines().for_each(|line| {
+            if let Ok(line) = line {
+                domain_map.add_domain(line.as_str());
+            }
+        });
 
         let mut message = Message::new();
         message.set_message_type(MessageType::Response);
@@ -312,9 +318,7 @@ impl DnsServer {
     }
 
     fn is_blocked(&self, name: &String) -> bool {
-        self.blocked_domains
-            .iter()
-            .any(|domain| name.ends_with(domain))
+        self.blocked_domains.contains(name.as_str())
     }
     fn add_request(&mut self, name: String, address: SocketAddr) {
         let result = if let Some(result) = self.store.get_mut(&name) {

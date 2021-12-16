@@ -16,6 +16,7 @@ use crate::{
 };
 
 mod adapter;
+mod domain;
 mod server;
 
 /// Token for trusted DNS server
