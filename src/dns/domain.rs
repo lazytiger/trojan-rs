@@ -54,12 +54,19 @@ impl DomainMap {
     }
 }
 
-#[allow(unused_imports)]
 mod tests {
+    #![allow(unused_imports)]
+    extern crate test;
+
     use crate::dns::domain::DomainMap;
+    use std::{
+        fs::File,
+        io::{BufRead, BufReader},
+    };
+    use test::Bencher;
 
     #[test]
-    fn test() {
+    fn test_contains() {
         let mut domain_map = DomainMap::new();
         domain_map.add_domain("talk.google.com.");
         domain_map.add_domain("github.com.");
@@ -67,5 +74,20 @@ mod tests {
         assert!(domain_map.contains("google.com."));
         assert!(domain_map.contains("google.com."));
         assert!(!domain_map.contains("babeltime.com."));
+    }
+
+    #[bench]
+    fn bench_contains(b: &mut Bencher) {
+        let mut domain_map = DomainMap::new();
+        let file = File::open("ipset/domain.txt").unwrap();
+        let reader = BufReader::new(file);
+        reader.lines().for_each(|line| {
+            if let Ok(line) = line {
+                domain_map.add_domain(line.as_str());
+            }
+        });
+        b.iter(|| {
+            domain_map.contains("google.com");
+        });
     }
 }
