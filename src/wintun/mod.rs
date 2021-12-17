@@ -49,6 +49,7 @@ const CHANNEL_UDP: usize = 1;
 const CHANNEL_TCP: usize = 2;
 
 pub fn run() -> Result<()> {
+    log::info!("dll:{}", OPTIONS.wintun_args().wintun);
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let adapter = Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?;
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
@@ -72,30 +73,35 @@ pub fn run() -> Result<()> {
         let _ = thread::spawn(|| {
             let program = std::env::current_exe().unwrap();
             let args = OPTIONS.wintun_args();
+            let log_file = if !OPTIONS.log_file.is_empty() {
+                OPTIONS.log_file.clone() + ".dns"
+            } else {
+                "".into()
+            };
             if let Err(err) = Command::new(program.clone())
                 .args([
-                    "--log_file",
-                    OPTIONS.log_file.as_str(),
-                    "--local_addr",
+                    "--log-file",
+                    log_file.as_str(),
+                    "--local-addr",
                     OPTIONS.local_addr.as_str(),
                     "--password",
                     OPTIONS.password.as_str(),
-                    "--log_level",
+                    "--log-level",
                     OPTIONS.log_level.to_string().as_str(),
-                    "--udp_idle_timeout",
+                    "--udp-idle-timeout",
                     OPTIONS.udp_idle_timeout.to_string().as_str(),
-                    "--tcp_idle_timeout",
+                    "--tcp-idle-timeout",
                     OPTIONS.tcp_idle_timeout.to_string().as_str(),
                     "dns",
                     "-n",
                     args.name.as_str(),
-                    "--blocked_domain_list",
+                    "--blocked-domain-list",
                     args.blocked_domain_list.as_str(),
-                    "--dns_listen_address",
+                    "--dns-listen-address",
                     args.dns_listen_address.as_str(),
-                    "--trusted_dns",
+                    "--trusted-dns",
                     args.trusted_dns.as_str(),
-                    "--poisoned_dns",
+                    "--poisoned-dns",
                     args.poisoned_dns.as_str(),
                 ])
                 .output()
@@ -104,6 +110,7 @@ pub fn run() -> Result<()> {
             } else {
                 log::error!("{:?} exit", program);
             }
+            std::process::exit(-1);
         });
     }
 

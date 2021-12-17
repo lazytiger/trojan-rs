@@ -352,7 +352,7 @@ pub fn setup_logger(logfile: &str, level: u8) {
             ))
         })
         .level(level);
-    if logfile != "" {
+    if !logfile.is_empty() {
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 let path = std::path::Path::new(logfile);

@@ -32,7 +32,8 @@ trust-dns-proto = "0.20"
 winapi = "0.3"
 widestring = "0.5"
 itertools = "0.10"
-smoltcp = {git = "https://github.com/smoltcp-rs/smoltcp.git"}
+#smoltcp = {git = "https://github.com/smoltcp-rs/smoltcp.git"}
+smoltcp = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.2"
