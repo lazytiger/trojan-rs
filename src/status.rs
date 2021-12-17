@@ -29,7 +29,7 @@ pub trait StatusProvider {
     fn get_status(&self) -> ConnStatus;
     fn peer_closed(&mut self) {
         match self.get_status() {
-            ConnStatus::Established => {
+            ConnStatus::Established | ConnStatus::Connecting => {
                 self.set_status(ConnStatus::PeerClosed);
             }
             ConnStatus::PeerClosed => {}
@@ -47,7 +47,7 @@ pub trait StatusProvider {
             ConnStatus::Connecting => {
                 self.set_status(ConnStatus::Established);
             }
-            ConnStatus::Established => {}
+            ConnStatus::Established | ConnStatus::PeerClosed => {}
             _ => {
                 log::warn!(
                     "invalid status change from:{:?} to {:?}",
