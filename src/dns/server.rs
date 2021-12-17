@@ -38,8 +38,8 @@ pub struct DnsServer {
 }
 
 struct QueryResult {
-    addresses: Vec<SocketAddr>,
-    response: Vec<u8>,
+    addresses: Vec<(SocketAddr, u16)>,
+    response: Option<Message>,
     expire_time: Instant,
 }
 
@@ -84,6 +84,8 @@ impl DnsServer {
     }
 
     pub fn setup(&mut self, poll: &Poll) {
+        //self.trusted.connect(self.trusted_addr).unwrap();
+        //self.poisoned.connect(self.poisoned_addr).unwrap();
         poll.registry()
             .register(&mut self.trusted, Token(DNS_TRUSTED), Interest::READABLE)
             .unwrap();
@@ -171,19 +173,27 @@ impl DnsServer {
                                 }
                                 continue;
                             }
-                            log::debug!("found query for:{}", name);
                             let key = Self::get_message_key(&message);
-                            if let Some(result) = self.store.get(&key) {
-                                if !result.response.is_empty() && result.expire_time > now {
-                                    log::debug!("query found in cache, send now");
-                                    if let Err(err) =
-                                        self.listener.send_to(result.response.as_slice(), from)
-                                    {
+                            if let Some(result) = self.store.get_mut(&key) {
+                                if result.response.is_some() && result.expire_time > now {
+                                    log::info!("query:{} found in cache", key);
+                                    result.response.as_mut().unwrap().set_id(message.id());
+                                    if let Err(err) = self.listener.send_to(
+                                        result
+                                            .response
+                                            .as_ref()
+                                            .unwrap()
+                                            .to_vec()
+                                            .unwrap()
+                                            .as_slice(),
+                                        from,
+                                    ) {
                                         log::error!("send response to {} failed:{}", from, err);
                                     }
                                     continue;
                                 }
                             }
+                            log::info!("query:{} not cached", key);
                             if self.is_blocked(&name) {
                                 self.trusted.send_to(data, self.trusted_addr).unwrap();
                                 log::info!("domain:{} is blocked", name);
@@ -191,7 +201,7 @@ impl DnsServer {
                                 self.poisoned.send_to(data, self.poisoned_addr).unwrap();
                                 log::info!("domain:{} is not blocked", name);
                             }
-                            self.add_request(key, from);
+                            self.add_request(key, from, message.id());
                         } else {
                             log::error!(
                                 "query count:{} found in message:{:?}",
@@ -235,11 +245,15 @@ impl DnsServer {
             match recv_socket.recv_from(buffer) {
                 Ok((length, from)) => {
                     let data = &buffer[..length];
-                    if let Ok(message) = Message::from_bytes(data) {
+                    if let Ok(mut message) = Message::from_bytes(data) {
+                        log::debug!("response:{:?}", message);
                         let name = Self::get_message_key(&message);
                         if let Some(result) = store.get_mut(&name) {
-                            for address in &result.addresses {
-                                if let Err(err) = send_socket.send_to(data, *address) {
+                            for (address, id) in &result.addresses {
+                                message.set_id(*id);
+                                if let Err(err) = send_socket
+                                    .send_to(message.to_vec().unwrap().as_slice(), *address)
+                                {
                                     log::error!("send to {} failed:{}", address, err);
                                 } else {
                                     log::debug!("send response to {}", address);
@@ -249,7 +263,7 @@ impl DnsServer {
                             for record in message.answers() {
                                 timeout = record.ttl();
                                 if let Some(addr) = record.rdata().to_ip_addr() {
-                                    if blocked {
+                                    if blocked && addr.is_ipv4() {
                                         if let Err(err) = sender.try_send(addr.to_string()) {
                                             log::error!("send to add route thread failed:{}", err);
                                         }
@@ -264,8 +278,7 @@ impl DnsServer {
                             }
                             result.expire_time = now + Duration::new(timeout as u64, 0);
                             result.addresses.clear();
-                            result.response.clear();
-                            result.response.extend_from_slice(data);
+                            result.response.replace(message);
                         } else {
                             log::error!("key:{} not found in store", name);
                         }
@@ -321,7 +334,7 @@ impl DnsServer {
     fn is_blocked(&self, name: &str) -> bool {
         self.blocked_domains.contains(name)
     }
-    fn add_request(&mut self, name: String, address: SocketAddr) {
+    fn add_request(&mut self, name: String, address: SocketAddr, id: u16) {
         let result = if let Some(result) = self.store.get_mut(&name) {
             result
         } else {
@@ -329,13 +342,13 @@ impl DnsServer {
                 name.clone(),
                 QueryResult {
                     addresses: vec![],
-                    response: vec![],
+                    response: None,
                     expire_time: Instant::now()
                         + Duration::new(OPTIONS.dns_args().dns_cache_time, 0),
                 },
             );
             self.store.get_mut(&name).unwrap()
         };
-        result.addresses.push(address);
+        result.addresses.push((address, id));
     }
 }

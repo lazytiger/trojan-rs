@@ -71,7 +71,7 @@ impl TlsConn {
             match self.session.read_tls(&mut self.stream) {
                 Ok(size) => {
                     if size == 0 {
-                        log::warn!(
+                        log::info!(
                             "connection:{} read from server failed with eof",
                             self.index()
                         );
@@ -113,7 +113,7 @@ impl TlsConn {
         let mut buffer = Vec::new();
         if let Err(err) = self.session.reader().read_to_end(&mut buffer) {
             if err.kind() != ErrorKind::WouldBlock {
-                log::warn!(
+                log::info!(
                     "connection:{} read from session failed:{}",
                     self.index(),
                     err
