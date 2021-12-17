@@ -15,7 +15,6 @@ use std::{
     io::{BufRead, BufReader, ErrorKind},
     net::SocketAddr,
     str::FromStr,
-    thread,
     time::{Duration, Instant},
 };
 use trust_dns_proto::{
@@ -48,20 +47,8 @@ impl DnsServer {
     pub fn new() -> Self {
         let default_addr = "0.0.0.0:0".to_owned();
         let (sender, receiver) = unbounded::<String>();
+        let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
         let _ = std::thread::spawn(move || {
-            while get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).is_none() {
-                thread::sleep(Duration::new(1, 0));
-            }
-            let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
-            log::error!("gateway is:{}", gateway);
-            thread::sleep(Duration::new(1, 0));
-
-            add_route_with_gw(
-                OPTIONS.dns_args().trusted_dns.as_str(),
-                "255.255.255.255",
-                gateway.as_str(),
-            );
-
             while let Ok(ip) = receiver.recv() {
                 add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
             }
@@ -217,8 +204,9 @@ impl DnsServer {
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+                Err(err) if err.kind() == ErrorKind::ConnectionReset => continue,
                 Err(err) => {
-                    log::error!("dns request recv failed:{}", err);
+                    log::error!("dns request recv failed:{}, kind:{:?}", err, err.kind());
                     poll.registry()
                         .reregister(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
                         .unwrap();
@@ -286,6 +274,7 @@ impl DnsServer {
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+                Err(err) if err.kind() == ErrorKind::ConnectionReset => continue,
                 Err(err) => {
                     log::error!(
                         "dns response from:{:?} recv failed:{}",

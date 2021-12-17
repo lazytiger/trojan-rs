@@ -18,8 +18,8 @@ pub struct Opts {
     pub mode: Mode,
 
     /// Log file path
-    #[clap(short, long)]
-    pub log_file: Option<String>,
+    #[clap(short, long, default_value = "")]
+    pub log_file: String,
 
     /// Listen address for server, format like 0.0.0.0:443
     #[clap(short = 'a', long)]
@@ -27,7 +27,7 @@ pub struct Opts {
 
     /// passwords for negotiation
     #[clap(short, long)]
-    password: String,
+    pub password: String,
 
     /// Log level, 0 for trace, 1 for debug, 2 for info, 3 for warning, 4 for error, 5 for off
     #[clap(short = 'L', long, default_value = "2")]
@@ -122,6 +122,26 @@ pub struct WintunArgs {
     /// Data size for TCP TX buffer
     #[clap(long, default_value = "1024000")]
     pub tcp_tx_buffer_size: usize,
+
+    /// Flag for dns support
+    #[clap(long)]
+    pub with_dns: bool,
+
+    /// Domain list which should be resolved through safe DNS
+    #[clap(long, default_value = "ipset/domain.txt")]
+    pub blocked_domain_list: String,
+
+    /// Listen address for DNS server, like 127.0.0.1:53
+    #[clap(long, default_value = "127.0.0.1:53")]
+    pub dns_listen_address: String,
+
+    /// Trusted DNS server
+    #[clap(long, default_value = "8.8.8.8")]
+    pub trusted_dns: String,
+
+    /// Poisoned DNS server
+    #[clap(long, default_value = "114.114.114.114")]
+    pub poisoned_dns: String,
 }
 
 #[derive(Parser)]
@@ -311,7 +331,7 @@ impl Opts {
     }
 }
 
-pub fn setup_logger(logfile: &Option<String>, level: u8) {
+pub fn setup_logger(logfile: &str, level: u8) {
     let level = match level {
         0x00 => log::LevelFilter::Trace,
         0x01 => log::LevelFilter::Debug,
@@ -332,13 +352,13 @@ pub fn setup_logger(logfile: &Option<String>, level: u8) {
             ))
         })
         .level(level);
-    if logfile.is_some() {
+    if logfile != "" {
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
-                let path = std::path::Path::new(logfile.as_ref().unwrap().as_str());
+                let path = std::path::Path::new(logfile);
                 builder = builder.chain(fern::log_reopen(path, Some(libc::SIGUSR2)).unwrap());
             } else {
-                builder = builder.chain(fern::log_file(logfile.as_ref().unwrap()).unwrap());
+                builder = builder.chain(fern::log_file(logfile).unwrap());
             }
         }
     } else {
