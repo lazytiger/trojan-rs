@@ -68,12 +68,14 @@ mod tests {
     #[test]
     fn test_contains() {
         let mut domain_map = DomainMap::new();
-        domain_map.add_domain("talk.google.com.");
-        domain_map.add_domain("github.com.");
-        domain_map.add_domain("gmail.com.");
-        assert!(domain_map.contains("google.com."));
-        assert!(domain_map.contains("google.com."));
-        assert!(!domain_map.contains("babeltime.com."));
+        let file = File::open("ipset/domain.txt").unwrap();
+        let reader = BufReader::new(file);
+        reader.lines().for_each(|line| {
+            if let Ok(line) = line {
+                domain_map.add_domain(line.as_str());
+            }
+        });
+        assert!(domain_map.contains("www.youtube.com."));
     }
 
     #[bench]

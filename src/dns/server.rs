@@ -15,6 +15,7 @@ use std::{
     io::{BufRead, BufReader, ErrorKind},
     net::SocketAddr,
     str::FromStr,
+    thread,
     time::{Duration, Instant},
 };
 use trust_dns_proto::{
@@ -33,6 +34,8 @@ pub struct DnsServer {
     store: HashMap<String, QueryResult>,
     sender: Sender<String>,
     ptr_name: String,
+    trusted_addr: SocketAddr,
+    poisoned_addr: SocketAddr,
 }
 
 struct QueryResult {
@@ -44,24 +47,36 @@ struct QueryResult {
 impl DnsServer {
     pub fn new() -> Self {
         let default_addr = "0.0.0.0:0".to_owned();
-        let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
-        add_route_with_gw(
-            OPTIONS.dns_args().trusted_dns.as_str(),
-            "255.255.255.255",
-            gateway.as_str(),
-        );
         let (sender, receiver) = unbounded::<String>();
         let _ = std::thread::spawn(move || {
-            log::debug!("add route started");
+            while get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).is_none() {
+                thread::sleep(Duration::new(1, 0));
+            }
+            let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
+            log::error!("gateway is:{}", gateway);
+            thread::sleep(Duration::new(1, 0));
+
+            add_route_with_gw(
+                OPTIONS.dns_args().trusted_dns.as_str(),
+                "255.255.255.255",
+                gateway.as_str(),
+            );
+
             while let Ok(ip) = receiver.recv() {
                 add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
-                log::info!("add ip {} to route table", ip);
             }
             log::error!("add route quit");
         });
 
+        let trusted_dns_addr = OPTIONS.dns_args().trusted_dns.clone() + ":53";
+        let poisoned_dns_addr = OPTIONS.dns_args().poisoned_dns.clone() + ":53";
+        let trusted_addr = trusted_dns_addr.as_str().parse().unwrap();
+        let poisoned_addr = poisoned_dns_addr.as_str().parse().unwrap();
+
         Self {
             sender,
+            trusted_addr,
+            poisoned_addr,
             listener: UdpSocket::bind(
                 OPTIONS
                     .dns_args()
@@ -82,14 +97,6 @@ impl DnsServer {
     }
 
     pub fn setup(&mut self, poll: &Poll) {
-        let trusted_dns = OPTIONS.dns_args().trusted_dns.clone() + ":53";
-        let poisoned_dns = OPTIONS.dns_args().poisoned_dns.clone() + ":53";
-        self.trusted
-            .connect(trusted_dns.as_str().parse().unwrap())
-            .unwrap();
-        self.poisoned
-            .connect(poisoned_dns.as_str().parse().unwrap())
-            .unwrap();
         poll.registry()
             .register(&mut self.trusted, Token(DNS_TRUSTED), Interest::READABLE)
             .unwrap();
@@ -108,6 +115,7 @@ impl DnsServer {
                 domain_map.add_domain(line.as_str());
             }
         });
+        self.blocked_domains = domain_map;
 
         let mut message = Message::new();
         message.set_message_type(MessageType::Response);
@@ -190,11 +198,11 @@ impl DnsServer {
                                 }
                             }
                             if self.is_blocked(&name) {
-                                self.trusted.send(data).unwrap();
+                                self.trusted.send_to(data, self.trusted_addr).unwrap();
                                 log::info!("domain:{} is blocked", name);
                             } else {
+                                self.poisoned.send_to(data, self.poisoned_addr).unwrap();
                                 log::info!("domain:{} is not blocked", name);
-                                self.poisoned.send(data).unwrap();
                             }
                             self.add_request(key, from);
                         } else {
@@ -232,6 +240,7 @@ impl DnsServer {
         buffer: &mut [u8],
         store: &mut HashMap<String, QueryResult>,
         sender: &Sender<String>,
+        blocked: bool,
     ) -> bool {
         let now = Instant::now();
         loop {
@@ -252,17 +261,18 @@ impl DnsServer {
                             for record in message.answers() {
                                 timeout = record.ttl();
                                 if let Some(addr) = record.rdata().to_ip_addr() {
-                                    if let Err(err) = sender.try_send(addr.to_string()) {
-                                        log::error!("send to add route thread failed:{}", err);
-                                    } else {
-                                        log::debug!(
-                                            "got response {} -> {}, expire in {} seconds",
-                                            name,
-                                            addr,
-                                            timeout,
-                                        );
+                                    if blocked {
+                                        if let Err(err) = sender.try_send(addr.to_string()) {
+                                            log::error!("send to add route thread failed:{}", err);
+                                        }
                                     }
                                 }
+                                log::info!(
+                                    "got response {} -> {}, expire in {} seconds",
+                                    name,
+                                    record.to_string(),
+                                    timeout,
+                                );
                             }
                             result.expire_time = now + Duration::new(timeout as u64, 0);
                             result.addresses.clear();
@@ -296,6 +306,7 @@ impl DnsServer {
             self.buffer.as_mut_slice(),
             &mut self.store,
             &self.sender,
+            true,
         ) {
             poll.registry()
                 .reregister(&mut self.trusted, Token(DNS_TRUSTED), Interest::READABLE)
@@ -310,6 +321,7 @@ impl DnsServer {
             self.buffer.as_mut_slice(),
             &mut self.store,
             &self.sender,
+            false,
         ) {
             poll.registry()
                 .reregister(&mut self.poisoned, Token(DNS_POISONED), Interest::READABLE)
@@ -317,8 +329,8 @@ impl DnsServer {
         }
     }
 
-    fn is_blocked(&self, name: &String) -> bool {
-        self.blocked_domains.contains(name.as_str())
+    fn is_blocked(&self, name: &str) -> bool {
+        self.blocked_domains.contains(name)
     }
     fn add_request(&mut self, name: String, address: SocketAddr) {
         let result = if let Some(result) = self.store.get_mut(&name) {
