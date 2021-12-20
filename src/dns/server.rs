@@ -10,7 +10,7 @@ use crossbeam::channel::{unbounded, Sender};
 use itertools::Itertools;
 use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     io::{BufRead, BufReader, ErrorKind},
     net::SocketAddr,
@@ -49,8 +49,13 @@ impl DnsServer {
         let (sender, receiver) = unbounded::<String>();
         let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
         let _ = std::thread::spawn(move || {
+            let mut set = HashSet::new();
             while let Ok(ip) = receiver.recv() {
+                if set.contains(&ip) {
+                    continue;
+                }
                 add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
+                set.insert(ip);
             }
             log::error!("add route quit");
         });
