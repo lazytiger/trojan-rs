@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc};
+use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, sync::Arc};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Poll, Token};
@@ -17,8 +17,8 @@ use crate::{
 
 pub struct UdpServer {
     udp_listener: UdpSocket,
-    conns: HashMap<usize, Connection>,
-    src_map: HashMap<SocketAddr, usize>,
+    conns: HashMap<usize, Arc<Connection>>,
+    src_map: HashMap<SocketAddr, Arc<Connection>>,
     next_id: usize,
     recv_buffer: Vec<u8>,
 }
@@ -81,13 +81,13 @@ impl UdpServer {
             src_addr,
             dst_addr
         );
-        let index = if let Some(index) = self.src_map.get(&src_addr) {
+        let mut conn = if let Some(conn) = self.src_map.get(&src_addr) {
             log::debug!(
                 "connection:{} already exists for address{}",
-                index,
+                conn.index,
                 src_addr
             );
-            *index
+            conn.clone()
         } else {
             log::debug!(
                 "address:{} not found, connecting to {}",
@@ -103,10 +103,11 @@ impl UdpServer {
                     }
                     let mut conn = Connection::new(index, conn, src_addr, socket);
                     if conn.setup() {
-                        let _ = self.conns.insert(index, conn);
-                        self.src_map.insert(src_addr, index);
+                        let conn = Arc::new(conn);
+                        let _ = self.conns.insert(index, conn.clone());
+                        self.src_map.insert(src_addr, conn.clone());
                         log::debug!("connection:{} is ready", index);
-                        index
+                        conn
                     } else {
                         conn.check_status(poll);
                         return Ok(());
@@ -121,19 +122,15 @@ impl UdpServer {
                 return Ok(());
             }
         };
-        if let Some(conn) = self.conns.get_mut(&index) {
-            let payload = &self.recv_buffer.as_slice()[..size];
-            conn.send_request(payload, &dst_addr, poll);
-        } else {
-            log::error!("impossible, connection should be found now");
-        }
+        let payload = &self.recv_buffer.as_slice()[..size];
+        unsafe { Arc::get_mut_unchecked(&mut conn) }.send_request(payload, &dst_addr, poll);
         Ok(())
     }
 
     pub fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {
         let index = Connection::token2index(event.token());
         if let Some(conn) = self.conns.get_mut(&index) {
-            conn.ready(event, poll, udp_cache);
+            unsafe { Arc::get_mut_unchecked(conn) }.ready(event, poll, udp_cache);
             if conn.destroyed() {
                 let src_addr = conn.src_addr;
                 self.conns.remove(&index);
