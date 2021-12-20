@@ -108,10 +108,22 @@ impl TcpServer {
     }
 
     pub fn check_timeout(&mut self, poll: &Poll, now: Instant) {
-        for conn in self.conns.values_mut() {
-            if conn.timeout(now) {
-                conn.destroy(poll);
-            }
+        let list: Vec<_> = self
+            .conns
+            .iter_mut()
+            .filter_map(|(index, conn)| {
+                if conn.destroyed() {
+                    Some(*index)
+                } else {
+                    if conn.timeout(now) {
+                        conn.destroy(poll);
+                    }
+                    None
+                }
+            })
+            .collect();
+        for index in list {
+            let _ = self.conns.remove(&index);
         }
     }
 }

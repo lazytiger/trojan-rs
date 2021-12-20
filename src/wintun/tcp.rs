@@ -1,3 +1,13 @@
+use std::{collections::HashMap, sync::Arc, time::Instant};
+
+use bytes::BytesMut;
+use mio::{event::Event, Poll, Token};
+use smoltcp::{
+    iface::SocketHandle,
+    socket::{TcpSocket, TcpState},
+    wire::IpEndpoint,
+};
+
 use crate::{
     idle_pool::IdlePool,
     proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
@@ -7,14 +17,6 @@ use crate::{
     wintun::{SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
-use bytes::BytesMut;
-use mio::{event::Event, Poll, Token};
-use smoltcp::{
-    iface::SocketHandle,
-    socket::{TcpSocket, TcpState},
-    wire::IpEndpoint,
-};
-use std::{collections::HashMap, sync::Arc, time::Instant};
 
 fn next_index() -> usize {
     static mut NEXT_INDEX: usize = MIN_INDEX;
@@ -42,9 +44,22 @@ impl TcpServer {
     }
 
     pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, sockets: &mut SocketSet) {
-        self.conns.iter_mut().for_each(|(_, conn)| unsafe {
-            Arc::get_mut_unchecked(conn).check_timeout(poll, now, sockets)
-        });
+        let list: Vec<_> = self
+            .conns
+            .iter_mut()
+            .filter_map(|(index, conn)| unsafe {
+                if conn.destroyed() {
+                    Some((*index, conn.handle))
+                } else {
+                    Arc::get_mut_unchecked(conn).check_timeout(poll, now, sockets);
+                    None
+                }
+            })
+            .collect();
+
+        for (index, handle) in list {
+            self.remove_conn(handle, index, sockets);
+        }
     }
 
     pub fn index2token(index: usize) -> Token {
