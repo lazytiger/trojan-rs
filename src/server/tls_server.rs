@@ -132,8 +132,9 @@ impl TlsServer {
     pub fn check_timeout(&mut self, check_active_time: Instant, poll: &Poll) {
         let mut list = Vec::new();
         for (index, conn) in &mut self.conns {
-            if conn.timeout(check_active_time) {
+            if conn.destroyed() {
                 list.push(*index);
+            } else if conn.timeout(check_active_time) {
                 log::warn!("connection:{} timeout, close now", index);
                 conn.destroy(poll)
             }
