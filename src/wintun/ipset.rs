@@ -18,11 +18,20 @@ struct CIDR {
 
 impl CIDR {
     fn new(ip: u32, prefix: u32) -> Self {
-        let ip = ip & !((1 << (32 - prefix)) - 1);
-        Self { ip, prefix }
+        let mut item = Self { ip, prefix };
+        item.ip &= item.mask();
+        item
     }
     fn range(&self) -> (u32, u32) {
-        (self.ip, self.ip + ((1 << (32 - self.prefix)) - 1))
+        (self.ip, self.ip + !self.mask())
+    }
+    fn mask(&self) -> u32 {
+        !((1 << (32 - self.prefix)) - 1)
+    }
+    fn ip_mask(&self) -> (Ipv4Addr, Ipv4Addr) {
+        let ip = Ipv4Addr::from(self.ip);
+        let mask = Ipv4Addr::from(!((1 << (32 - self.prefix)) - 1));
+        (ip, mask)
     }
 }
 
@@ -105,8 +114,7 @@ impl IPSet {
             if item.prefix > 28 {
                 continue;
             }
-            let ip = Ipv4Addr::from(item.ip);
-            let mask = Ipv4Addr::from(!((1 << (32 - item.prefix)) - 1));
+            let (ip, mask) = item.ip_mask();
             add_route_with_if(ip.to_string().as_str(), mask.to_string().as_str(), index);
         }
     }
@@ -143,14 +151,19 @@ fn range_to_cidr(left: u32, mut right: u32) -> Vec<CIDR> {
         right &= !((1 << shift) - 1);
         if left <= right {
             cidrs.push(CIDR::new(right, prefix));
+            if left == right {
+                break;
+            }
             right -= 1;
         } else {
             break;
         }
     }
-    let shift = left.trailing_zeros();
-    let prefix = 32 - shift;
-    cidrs.push(CIDR::new(left, prefix));
+    if left != right {
+        let shift = left.trailing_zeros();
+        let prefix = 32 - shift;
+        cidrs.push(CIDR::new(left, prefix));
+    }
     cidrs
 }
 
@@ -158,17 +171,54 @@ fn range_to_cidr(left: u32, mut right: u32) -> Vec<CIDR> {
 #[allow(unused_imports)]
 mod tests {
     use crate::wintun::ipset::{range_to_cidr, IPSet};
+    use std::{fs::File, io::Write, net::Ipv4Addr};
 
     #[test]
     fn test_ipset_create() {
         let ipset = IPSet::with_file("ipset/ipset_cidr.txt").unwrap();
+        let mut file = File::create("route1.bat").unwrap();
+        for item in &ipset.data {
+            let (left, right) = item.range();
+            let ip = Ipv4Addr::from(item.ip);
+            let mask = Ipv4Addr::from(!((1 << (32 - item.prefix)) - 1));
+            write!(
+                file,
+                "{} - {}, {} {} {}\r\n",
+                left, right, ip, mask, item.prefix
+            )
+            .unwrap();
+        }
         let ipset = !ipset;
-        ipset.add_route(7);
+        let mut last = 0;
+        for item in &ipset.data {
+            let (left, right) = item.range();
+            assert!(last < left);
+            last = right;
+        }
+        let mut file = File::create("route2.bat").unwrap();
+        for item in &ipset.data {
+            let (left, right) = item.range();
+            let ip = Ipv4Addr::from(item.ip);
+            let mask = Ipv4Addr::from(!((1 << (32 - item.prefix)) - 1));
+            write!(
+                file,
+                "{} - {}, {} {} {}\r\n",
+                left, right, ip, mask, item.prefix
+            )
+            .unwrap();
+        }
+    }
+
+    fn my_range_to_cidr(left: u32, right: u32) {
+        println!("{} - {}", Ipv4Addr::from(left), Ipv4Addr::from(right));
+        for item in range_to_cidr(left, right) {
+            let (ip, mask) = item.ip_mask();
+            println!("{} {} {}", ip, mask, item.prefix);
+        }
     }
 
     #[test]
     fn test_iprange() {
-        range_to_cidr(247987951, 247987989);
-        range_to_cidr(28966912, 29097983);
+        my_range_to_cidr(16777216, 16777471);
     }
 }
