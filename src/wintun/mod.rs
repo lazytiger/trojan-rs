@@ -20,15 +20,17 @@ use crate::{
     resolver::DnsResolver,
     types::Result,
     wintun::{
-        ip::{is_private, TunInterface},
+        ipset::IPSet,
         tcp::TcpServer,
+        tun::{is_private, TunInterface},
         udp::UdpServer,
     },
     OPTIONS,
 };
 
-mod ip;
+mod ipset;
 mod tcp;
+mod tun;
 mod udp;
 
 pub(crate) type SocketSet<'a> = Interface<'a, TunInterface>;
@@ -54,10 +56,21 @@ pub fn run() -> Result<()> {
     let adapter = Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?;
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
 
-    log::error!(
-        "program {} started",
-        std::env::current_exe().unwrap().display()
-    );
+    if let Some(file) = &OPTIONS.wintun_args().route_ipset {
+        let mut ipset = IPSet::with_file(file.as_str())?;
+        if OPTIONS.wintun_args().inverse_route {
+            ipset = !ipset;
+        }
+        ipset.to_file("route.bat", adapter.get_adapter_index()?)?;
+        let output = Command::new("cmd").args("route.bat").output()?;
+        if !output.status.success() {
+            log::error!(
+                "command failed:{}",
+                String::from_utf8(output.stderr).unwrap()
+            );
+            panic!("route add failed");
+        }
+    }
 
     while get_adapter_ip(OPTIONS.wintun_args().name.as_str()).is_none() {
         thread::sleep(std::time::Duration::new(1, 0));

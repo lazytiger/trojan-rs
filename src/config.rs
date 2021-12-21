@@ -123,6 +123,14 @@ pub struct WintunArgs {
     #[clap(long, default_value = "1024000")]
     pub tcp_tx_buffer_size: usize,
 
+    /// Ip set in CIDR format to route through this tunnel
+    #[clap(long)]
+    pub route_ipset: Option<String>,
+
+    /// Should reverse the ipset
+    #[clap(long)]
+    pub inverse_route: bool,
+
     /// Flag for dns support
     #[clap(long)]
     pub with_dns: bool,
@@ -165,10 +173,6 @@ pub struct DnsArgs {
     #[clap(short = 'n', long)]
     pub tun_name: String,
 
-    /// Add white ip list
-    #[clap(long)]
-    pub white_ip_list: Option<String>,
-
     /// Domain list which should be resolved through safe DNS
     #[clap(long, default_value = "ipset/domain.txt")]
     pub blocked_domain_list: String,
@@ -188,6 +192,10 @@ pub struct DnsArgs {
     /// DNS cache timeout
     #[clap(long, default_value = "600")]
     pub dns_cache_time: u64,
+
+    /// Flag for adding route table for resolved IPs
+    #[clap(long)]
+    pub add_route: bool,
 }
 
 #[derive(Parser)]

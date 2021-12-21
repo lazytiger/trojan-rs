@@ -9,7 +9,7 @@ use std::{
 use mio::{Events, Poll};
 use server::DnsServer;
 
-use crate::{dns::adapter::get_main_adapter_ip, types::Result, OPTIONS};
+use crate::{types::Result, OPTIONS};
 
 pub use crate::dns::adapter::get_adapter_ip;
 
@@ -25,8 +25,8 @@ const DNS_POISONED: usize = 3;
 const DNS_LOCAL: usize = 4;
 
 #[allow(dead_code)]
-pub fn add_route_with_if(address: &str, netmask: &str, index: u32) {
-    if let Err(err) = Command::new("route")
+pub fn add_route_with_if(address: &str, netmask: &str, index: u32) -> bool {
+    match Command::new("route")
         .args([
             "add",
             address,
@@ -40,49 +40,66 @@ pub fn add_route_with_if(address: &str, netmask: &str, index: u32) {
         ])
         .output()
     {
-        log::error!("route add {} failed:{}", address, err);
-    } else {
-        log::info!(
-            "route add {} mask {} 0.0.0.0 metric 1 if {}",
-            address,
-            netmask,
-            index
-        );
+        Ok(output) => {
+            if output.status.success() {
+                log::info!(
+                    "route add {} mask {} 0.0.0.0 metric 1 if {}",
+                    address,
+                    netmask,
+                    index
+                );
+                return true;
+            } else {
+                log::info!(
+                    "route add {} mask {} 0.0.0.0 metric 1 if {} failed:{}",
+                    address,
+                    netmask,
+                    index,
+                    String::from_utf8(output.stderr).unwrap(),
+                );
+            }
+        }
+        Err(err) => {
+            log::error!("route add {} failed:{}", address, err);
+        }
     }
+    false
 }
 
 #[allow(dead_code)]
-fn add_route_with_gw(address: &str, netmask: &str, gateway: &str) {
-    if let Err(err) = Command::new("route")
+fn add_route_with_gw(address: &str, netmask: &str, gateway: &str) -> bool {
+    match Command::new("route")
         .args(["add", address, "mask", netmask, gateway, "METRIC", "1"])
         .output()
     {
-        log::error!("route add {} failed:{}", address, err);
-    } else {
-        log::info!(
-            "route add {} mask {} {} metric 1",
-            address,
-            netmask,
-            gateway
-        );
+        Ok(output) => {
+            if output.status.success() {
+                log::info!(
+                    "route add {} mask {} {} metric 1",
+                    address,
+                    netmask,
+                    gateway
+                );
+                return true;
+            } else {
+                log::error!(
+                    "route add {} mask {} {} metric 1 failed:{}",
+                    address,
+                    netmask,
+                    gateway,
+                    String::from_utf8(output.stderr).unwrap(),
+                );
+            }
+        }
+        Err(err) => log::error!("route add {} failed:{}", address, err),
     }
+    false
 }
 
 pub fn run() -> Result<()> {
-    if let Some(list) = &OPTIONS.dns_args().white_ip_list {
-        let gateway = get_main_adapter_ip().unwrap();
-        return add_ipset(list.as_str(), gateway.as_str());
-    }
-
     while get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).is_none() {
         thread::sleep(Duration::new(1, 0));
     }
-    let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
-    add_route_with_gw(
-        OPTIONS.dns_args().trusted_dns.as_str(),
-        "255.255.255.255",
-        gateway.as_str(),
-    );
 
     let mut poll = Poll::new()?;
     let mut events = Events::with_capacity(1024);

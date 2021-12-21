@@ -47,18 +47,21 @@ impl DnsServer {
     pub fn new() -> Self {
         let default_addr = "0.0.0.0:0".to_owned();
         let (sender, receiver) = unbounded::<String>();
-        let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
-        let _ = std::thread::spawn(move || {
-            let mut set = HashSet::new();
-            while let Ok(ip) = receiver.recv() {
-                if set.contains(&ip) {
-                    continue;
+        if OPTIONS.dns_args().add_route {
+            let gateway = get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).unwrap();
+            let mut ipset = HashSet::new();
+            let _ = std::thread::spawn(move || {
+                while let Ok(ip) = receiver.recv() {
+                    if ipset.contains(&ip) {
+                        continue;
+                    }
+                    if add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str()) {
+                        ipset.insert(ip);
+                    }
                 }
-                add_route_with_gw(ip.as_str(), "255.255.255.255", gateway.as_str());
-                set.insert(ip);
-            }
-            log::error!("add route quit");
-        });
+                log::error!("add route quit");
+            });
+        }
 
         let trusted_dns_addr = OPTIONS.dns_args().trusted_dns.clone() + ":53";
         let poisoned_dns_addr = OPTIONS.dns_args().poisoned_dns.clone() + ":53";
@@ -268,7 +271,7 @@ impl DnsServer {
                             for record in message.answers() {
                                 timeout = record.ttl();
                                 if let Some(addr) = record.rdata().to_ip_addr() {
-                                    if blocked && addr.is_ipv4() {
+                                    if OPTIONS.dns_args().add_route && blocked && addr.is_ipv4() {
                                         if let Err(err) = sender.try_send(addr.to_string()) {
                                             log::error!("send to add route thread failed:{}", err);
                                         }
