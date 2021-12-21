@@ -143,26 +143,24 @@ impl Not for IPSet {
     }
 }
 
-fn range_to_cidr(left: u32, mut right: u32) -> Vec<CIDR> {
+fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<CIDR> {
     let mut cidrs = Vec::new();
     loop {
         let shift = right.trailing_ones();
         let prefix = 32 - shift;
-        right &= !((1 << shift) - 1);
-        if left <= right {
-            cidrs.push(CIDR::new(right, prefix));
-            if left == right {
-                break;
-            }
-            right -= 1;
+        let r = right & !((1 << shift) - 1);
+        if left <= r {
+            cidrs.push(CIDR::new(r, prefix));
+            right = r - 1;
         } else {
             break;
         }
     }
-    if left != right {
+    while left < right {
         let shift = left.trailing_zeros();
         let prefix = 32 - shift;
         cidrs.push(CIDR::new(left, prefix));
+        left += 1 << shift;
     }
     cidrs
 }
@@ -192,7 +190,10 @@ mod tests {
         let mut last = 0;
         for item in &ipset.data {
             let (left, right) = item.range();
-            assert!(last < left);
+            if left > last && left - last > 1 {
+            } else {
+                println!("{}", Ipv4Addr::from(left));
+            }
             last = right;
         }
         let mut file = File::create("route2.bat").unwrap();
@@ -219,6 +220,6 @@ mod tests {
 
     #[test]
     fn test_iprange() {
-        my_range_to_cidr(16777216, 16777471);
+        my_range_to_cidr(16793600, 16842751);
     }
 }
