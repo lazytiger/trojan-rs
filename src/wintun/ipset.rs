@@ -102,29 +102,6 @@ impl IPSet {
 
     pub fn add_range(&mut self, left: u32, right: u32) {
         let cidrs = range_to_cidr(left, right);
-        let mut failed = false;
-        let mut ll = None;
-        let mut rr = None;
-        for item in &cidrs {
-            let (l, r) = item.range();
-            if ll.is_none() {
-                ll.replace(l);
-            } else if rr.unwrap() + 1 != l {
-                println!("{}, {}", rr.unwrap(), l);
-                failed = true;
-            }
-            rr.replace(r);
-        }
-        if failed || cidrs.is_empty() || rr.unwrap() != right || ll.unwrap() != left {
-            println!(
-                "{}, {} | {} - {}",
-                left,
-                right,
-                Ipv4Addr::from(left),
-                Ipv4Addr::from(right)
-            );
-        }
-
         self.data.extend(cidrs);
     }
 
