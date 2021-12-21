@@ -111,9 +111,6 @@ impl IPSet {
 
     pub fn add_route(&self, index: u32) {
         for item in &self.data {
-            if item.prefix > 28 {
-                continue;
-            }
             let (ip, mask) = item.ip_mask();
             add_route_with_if(ip.to_string().as_str(), mask.to_string().as_str(), index);
         }
