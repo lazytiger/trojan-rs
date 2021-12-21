@@ -1,7 +1,8 @@
+use crate::dns::add_route_with_if;
 use std::{
     cmp::Ordering,
     fs::File,
-    io::{BufRead, BufReader, BufWriter},
+    io::{BufRead, BufReader},
     net::Ipv4Addr,
     ops::Not,
 };
@@ -99,19 +100,15 @@ impl IPSet {
         self.data.sort();
     }
 
-    pub fn to_file(&self, file: &str, index: u32) -> crate::types::Result<()> {
-        let file = File::create(file)?;
-        let writer = BufWriter::new(file);
+    pub fn add_route(&self, index: u32) {
         for item in &self.data {
+            if item.prefix > 28 {
+                continue;
+            }
             let ip = Ipv4Addr::from(item.ip);
             let mask = Ipv4Addr::from(!((1 << (32 - item.prefix)) - 1));
-            write!(
-                writer,
-                "route add {} mask {} 0.0.0.0 METRIC 1 IF {}",
-                ip, mask, index
-            );
+            add_route_with_if(ip.to_string().as_str(), mask.to_string().as_str(), index);
         }
-        Ok(())
     }
 }
 
@@ -124,7 +121,7 @@ impl Not for IPSet {
         let mut r = 0;
         for item in &self.data {
             let (left, right) = item.range();
-            if left == 0 || left - 1 == r || left - r < 16 {
+            if left == 0 || left - 1 == r {
                 r = right;
             } else {
                 if r < u32::MAX {
@@ -138,7 +135,7 @@ impl Not for IPSet {
     }
 }
 
-fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<CIDR> {
+fn range_to_cidr(left: u32, mut right: u32) -> Vec<CIDR> {
     let mut cidrs = Vec::new();
     loop {
         let shift = right.trailing_ones();
@@ -164,9 +161,9 @@ mod tests {
 
     #[test]
     fn test_ipset_create() {
-        let mut ipset = IPSet::with_file("ipset/ipset_cidr.txt").unwrap();
+        let ipset = IPSet::with_file("ipset/ipset_cidr.txt").unwrap();
         let ipset = !ipset;
-        ipset.to_file("test.bat", 7);
+        ipset.add_route(7);
     }
 
     #[test]
