@@ -102,6 +102,29 @@ impl IPSet {
 
     pub fn add_range(&mut self, left: u32, right: u32) {
         let cidrs = range_to_cidr(left, right);
+        let mut failed = false;
+        let mut ll = None;
+        let mut rr = None;
+        for item in &cidrs {
+            let (l, r) = item.range();
+            if ll.is_none() {
+                ll.replace(l);
+            } else if rr.unwrap() + 1 != l {
+                println!("{}, {}", rr.unwrap(), l);
+                failed = true;
+            }
+            rr.replace(r);
+        }
+        if failed || cidrs.is_empty() || rr.unwrap() != right || ll.unwrap() != left {
+            println!(
+                "{}, {} | {} - {}",
+                left,
+                right,
+                Ipv4Addr::from(left),
+                Ipv4Addr::from(right)
+            );
+        }
+
         self.data.extend(cidrs);
     }
 
@@ -145,6 +168,11 @@ impl Not for IPSet {
 
 fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<CIDR> {
     let mut cidrs = Vec::new();
+    if left == right {
+        cidrs.push(CIDR::new(left, 32));
+        return cidrs;
+    }
+
     loop {
         let shift = right.trailing_ones();
         let prefix = 32 - shift;
@@ -156,12 +184,13 @@ fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<CIDR> {
             break;
         }
     }
-    while left < right {
+    while left <= right {
         let shift = left.trailing_zeros();
         let prefix = 32 - shift;
         cidrs.push(CIDR::new(left, prefix));
         left += 1 << shift;
     }
+    cidrs.sort();
     cidrs
 }
 
@@ -190,9 +219,8 @@ mod tests {
         let mut last = 0;
         for item in &ipset.data {
             let (left, right) = item.range();
-            if left > last && left - last > 1 {
-            } else {
-                println!("{}", Ipv4Addr::from(left));
+            if left < last {
+                println!("{}, {} | {}", last, left, Ipv4Addr::from(left));
             }
             last = right;
         }
@@ -211,15 +239,22 @@ mod tests {
     }
 
     fn my_range_to_cidr(left: u32, right: u32) {
-        println!("{} - {}", Ipv4Addr::from(left), Ipv4Addr::from(right));
+        println!(
+            "{}, {}, {} - {}",
+            left,
+            right,
+            Ipv4Addr::from(left),
+            Ipv4Addr::from(right)
+        );
         for item in range_to_cidr(left, right) {
             let (ip, mask) = item.ip_mask();
-            println!("{} {} {}", ip, mask, item.prefix);
+            let (left, right) = item.range();
+            println!("{}, {}, {} {} {}", left, right, ip, mask, item.prefix);
         }
     }
 
     #[test]
     fn test_iprange() {
-        my_range_to_cidr(16793600, 16842751);
+        my_range_to_cidr(190365721, 190365722);
     }
 }
