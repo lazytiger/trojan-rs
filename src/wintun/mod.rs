@@ -62,8 +62,9 @@ pub fn run() -> Result<()> {
         if OPTIONS.wintun_args().inverse_route {
             ipset = !ipset;
         }
+        add_route_with_if("45.33.39.39", "255.255.255.255", index);
         let _ = thread::spawn(move || {
-            ipset.add_route(index);
+            //ipset.add_route(index);
             log::warn!("adding route finished");
         });
     }

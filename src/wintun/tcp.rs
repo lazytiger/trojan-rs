@@ -147,9 +147,10 @@ pub struct Connection {
     send_buffer: BytesMut,
     status: ConnStatus,
     last_active_time: Instant,
-    closing: bool,
+    closed: Option<bool>,
     read_client: bool,
     read_server: bool,
+    socket_state: TcpState,
 }
 
 impl Connection {}
@@ -162,10 +163,11 @@ impl Connection {
             endpoint,
             index,
             last_active_time: Instant::now(),
-            closing: false,
+            closed: None,
             read_server: false,
             read_client: false,
             status: ConnStatus::Connecting,
+            socket_state: TcpState::Established,
             recv_buffer: vec![0; MAX_PACKET_SIZE],
             send_buffer: BytesMut::new(),
         }
@@ -195,25 +197,31 @@ impl Connection {
 
     fn try_close(&mut self, sockets: &mut SocketSet) {
         let socket = sockets.get_socket::<TcpSocket>(self.handle);
-        if self.closing || matches!(socket.state(), TcpState::CloseWait) {
-            log::info!("client is closed:{}", socket.state());
-            self.shutdown();
-            socket.close();
-            self.closing = false;
+        if let Some(closed) = self.closed {
+            if !closed {
+                socket.close();
+                self.socket_state = socket.state();
+                self.closed.replace(true);
+            } else {
+                log::info!("socket already closed");
+            }
         }
     }
 
     fn do_check_status(&mut self, poll: &Poll, sockets: &mut SocketSet) {
-        self.try_close(sockets);
+        let socket = sockets.get_socket::<TcpSocket>(self.handle);
+        self.socket_state = socket.state();
         if self.is_shutdown() {
             self.conn.peer_closed();
         }
         if self.conn.is_shutdown() {
             self.peer_closed();
+            self.check_status(poll);
+            self.try_close(sockets);
         }
         self.check_status(poll);
-        self.conn.check_status(poll);
         self.try_close(sockets);
+        self.conn.check_status(poll);
     }
 
     fn destroyed(&self) -> bool {
@@ -253,6 +261,12 @@ impl Connection {
                     break;
                 }
             }
+        }
+        if matches!(socket.state(), TcpState::CloseWait) {
+            log::info!("client shutdown now");
+            socket.close();
+            self.closed = Some(true);
+            self.shutdown();
         }
         self.do_send_server();
     }
@@ -334,12 +348,16 @@ impl StatusProvider for Connection {
     }
 
     fn close_conn(&mut self) -> bool {
-        self.closing = true;
-        false
+        if self.closed.is_none() {
+            self.closed = Some(false);
+            false
+        } else {
+            self.closed.unwrap()
+        }
     }
 
     fn deregister(&mut self, _poll: &Poll) -> bool {
-        true
+        matches!(self.socket_state, TcpState::Closed | TcpState::TimeWait)
     }
 
     fn finish_send(&mut self) -> bool {
