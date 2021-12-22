@@ -71,6 +71,14 @@ impl UdpServer {
             for index in &removes {
                 self.conns.remove(index);
             }
+            let (rx, tx) = wakers.get_udp_wakers(handle);
+            let socket = sockets.get_socket::<UdpSocket>(handle);
+            if event.readable() {
+                socket.register_recv_waker(rx);
+            }
+            if event.writable() {
+                socket.register_send_waker(tx);
+            }
         }
     }
 
