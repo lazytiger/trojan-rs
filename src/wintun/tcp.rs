@@ -79,8 +79,7 @@ impl TcpServer {
         sockets: &mut SocketSet,
     ) {
         let mut destroyed = Vec::new();
-        let handles = wakers.get_tcp_handles();
-        for (handle, event) in handles.iter() {
+        for (handle, event) in wakers.get_tcp_handles().iter() {
             let handle = *handle;
             log::info!("handle:{}, event:{:?}", handle, event);
             let conn = if let Some(conn) = self.src_map.get_mut(&handle) {
