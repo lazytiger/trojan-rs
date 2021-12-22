@@ -272,17 +272,16 @@ fn do_tun_read(
                 }
                 _ => continue,
             };
-        let (src_port, dst_port, notify, connect) = match protocol {
+        let (src_port, dst_port, connect) = match protocol {
             IpProtocol::Udp => {
                 let packet = UdpPacket::new_checked(payload).unwrap();
-                (packet.src_port(), packet.dst_port(), true, None)
+                (packet.src_port(), packet.dst_port(), None)
             }
             IpProtocol::Tcp => {
                 let packet = TcpPacket::new_checked(payload).unwrap();
                 (
                     packet.src_port(),
                     packet.dst_port(),
-                    !packet.payload().is_empty() || packet.fin(),
                     Some(packet.syn() && !packet.ack()),
                 )
             }
@@ -302,6 +301,8 @@ fn do_tun_read(
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_tx_buffer_size]),
                 );
                 socket.listen(dst_endpoint).unwrap();
+                socket.set_nagle_enabled(false);
+                socket.set_ack_delay(None);
                 Some(sockets.add_socket(socket))
             } else {
                 sockets.sockets().find_map(|(handle, socket)| match socket {
@@ -314,9 +315,7 @@ fn do_tun_read(
                     _ => None,
                 })
             } {
-                if notify {
-                    tcp_handles.push(handle);
-                }
+                tcp_handles.push(handle);
             }
         } else {
             let handle = sockets.sockets().find_map(|(handle, socket)| match socket {

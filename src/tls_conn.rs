@@ -207,12 +207,14 @@ impl StatusProvider for TlsConn {
         self.status
     }
 
-    fn close_conn(&mut self) {
+    fn close_conn(&mut self) -> bool {
         let _ = self.stream.shutdown(Shutdown::Both);
+        true
     }
 
-    fn deregister(&mut self, poll: &Poll) {
+    fn deregister(&mut self, poll: &Poll) -> bool {
         let _ = poll.registry().deregister(&mut self.stream);
+        true
     }
 
     fn finish_send(&mut self) -> bool {

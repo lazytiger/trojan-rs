@@ -57,17 +57,18 @@ pub trait StatusProvider {
             }
         }
     }
-    fn close_conn(&mut self);
+    fn close_conn(&mut self) -> bool;
     fn shutdown(&mut self) {
         match self.get_status() {
             ConnStatus::Established | ConnStatus::PeerClosed | ConnStatus::Connecting => {
-                self.close_conn();
-                self.set_status(ConnStatus::Shutdown);
+                if self.close_conn() {
+                    self.set_status(ConnStatus::Shutdown);
+                }
             }
             ConnStatus::Shutdown | ConnStatus::Deregistered => {}
         }
     }
-    fn deregister(&mut self, poll: &Poll);
+    fn deregister(&mut self, poll: &Poll) -> bool;
     fn finish_send(&mut self) -> bool;
     fn check_status(&mut self, poll: &Poll) {
         loop {
@@ -80,8 +81,9 @@ pub trait StatusProvider {
                     }
                 }
                 ConnStatus::Shutdown => {
-                    self.deregister(poll);
-                    self.set_status(ConnStatus::Deregistered);
+                    if self.deregister(poll) {
+                        self.set_status(ConnStatus::Deregistered);
+                    }
                 }
                 ConnStatus::Deregistered => {}
             }

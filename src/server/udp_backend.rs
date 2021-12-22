@@ -171,10 +171,13 @@ impl StatusProvider for UdpBackend {
         self.status
     }
 
-    fn close_conn(&mut self) {}
+    fn close_conn(&mut self) -> bool {
+        true
+    }
 
-    fn deregister(&mut self, poll: &Poll) {
+    fn deregister(&mut self, poll: &Poll) -> bool {
         let _ = poll.registry().deregister(&mut self.socket);
+        true
     }
 
     fn finish_send(&mut self) -> bool {

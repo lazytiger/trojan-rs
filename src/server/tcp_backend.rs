@@ -81,12 +81,14 @@ impl StatusProvider for TcpBackend {
         self.status
     }
 
-    fn close_conn(&mut self) {
+    fn close_conn(&mut self) -> bool {
         let _ = self.conn.shutdown(Shutdown::Both);
+        true
     }
 
-    fn deregister(&mut self, poll: &Poll) {
+    fn deregister(&mut self, poll: &Poll) -> bool {
         let _ = poll.registry().deregister(&mut self.conn);
+        true
     }
 
     fn finish_send(&mut self) -> bool {

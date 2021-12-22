@@ -314,9 +314,13 @@ impl StatusProvider for Connection {
         self.status
     }
 
-    fn close_conn(&mut self) {}
+    fn close_conn(&mut self) -> bool {
+        true
+    }
 
-    fn deregister(&mut self, _: &Poll) {}
+    fn deregister(&mut self, _: &Poll) -> bool {
+        true
+    }
 
     fn finish_send(&mut self) -> bool {
         self.send_buffer.is_empty()
