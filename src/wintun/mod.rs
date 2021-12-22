@@ -315,8 +315,6 @@ fn do_tun_read(
             socket.set_nagle_enabled(false);
             socket.set_ack_delay(None);
             let (rx, tx) = wakers.get_tcp_wakers(handle);
-            //rx.wake_by_ref();
-            //tx.wake_by_ref();
             socket.register_recv_waker(rx);
             socket.register_send_waker(tx);
         } else if !sockets.sockets().any(|(_, socket)| {
@@ -340,8 +338,6 @@ fn do_tun_read(
             let handle = sockets.add_socket(socket);
             let socket = sockets.get_socket::<UdpSocket>(handle);
             let (rx, tx) = wakers.get_udp_wakers(handle);
-            //rx.wake_by_ref();
-            //tx.wake_by_ref();
             socket.register_recv_waker(rx);
             socket.register_send_waker(tx);
         }

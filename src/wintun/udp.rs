@@ -148,6 +148,31 @@ impl UdpListener {
         let socket = sockets.get_socket::<UdpSocket>(self.handle);
         let mut inserts = Vec::new();
         let mut removes = Vec::new();
+        if event.readable() {
+            self.do_read_client(socket, pool, poll, resolver, &mut inserts, &mut removes);
+        }
+        if event.writable() {
+            self.do_send_client(sockets);
+        }
+
+        (inserts, removes)
+    }
+
+    fn do_send_client(&mut self, sockets: &mut SocketSet) {
+        for (_, conn) in &mut self.conns {
+            unsafe { Arc::get_mut_unchecked(conn) }.send_tun(&[], sockets)
+        }
+    }
+
+    fn do_read_client(
+        &mut self,
+        socket: &mut UdpSocket,
+        pool: &mut IdlePool,
+        poll: &Poll,
+        resolver: &DnsResolver,
+        inserts: &mut Vec<usize>,
+        removes: &mut Vec<usize>,
+    ) {
         while socket.can_recv() {
             match socket.recv() {
                 Ok((payload, src)) => {
@@ -192,7 +217,6 @@ impl UdpListener {
                 }
             }
         }
-        (inserts, removes)
     }
 
     fn remove_conn(&mut self, index: &usize, endpoint: &IpEndpoint) {
@@ -332,6 +356,9 @@ impl Connection {
     }
 
     fn do_send_tun(&mut self, mut buffer: &[u8], sockets: &mut SocketSet) {
+        if buffer.is_empty() {
+            return;
+        }
         let socket = sockets.get_socket::<UdpSocket>(self.handle);
         loop {
             match UdpAssociate::parse_endpoint(buffer) {
