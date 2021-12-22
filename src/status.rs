@@ -32,29 +32,12 @@ pub trait StatusProvider {
             ConnStatus::Established | ConnStatus::Connecting => {
                 self.set_status(ConnStatus::PeerClosed);
             }
-            ConnStatus::PeerClosed => {}
-            _ => {
-                log::warn!(
-                    "invalid status change from:{:?} to {:?}",
-                    self.get_status(),
-                    ConnStatus::PeerClosed
-                );
-            }
+            _ => {}
         }
     }
     fn established(&mut self) {
-        match self.get_status() {
-            ConnStatus::Connecting => {
-                self.set_status(ConnStatus::Established);
-            }
-            ConnStatus::Established | ConnStatus::PeerClosed => {}
-            _ => {
-                log::warn!(
-                    "invalid status change from:{:?} to {:?}",
-                    self.get_status(),
-                    ConnStatus::PeerClosed
-                );
-            }
+        if matches!(self.get_status(), ConnStatus::Connecting) {
+            self.set_status(ConnStatus::Established);
         }
     }
     fn close_conn(&mut self) -> bool;

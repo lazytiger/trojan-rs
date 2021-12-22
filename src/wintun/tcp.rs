@@ -14,7 +14,7 @@ use crate::{
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     tls_conn::TlsConn,
-    wintun::{SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
+    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
 
@@ -75,11 +75,14 @@ impl TcpServer {
         pool: &mut IdlePool,
         poll: &Poll,
         resolver: &DnsResolver,
-        handles: Vec<SocketHandle>,
+        wakers: &mut Wakers,
         sockets: &mut SocketSet,
     ) {
         let mut destroyed = Vec::new();
-        for handle in handles {
+        let handles = wakers.get_tcp_handles();
+        for (handle, event) in handles.iter() {
+            let handle = *handle;
+            log::info!("handle:{}, event:{:?}", handle, event);
             let conn = if let Some(conn) = self.src_map.get_mut(&handle) {
                 conn
             } else if let Some(mut conn) = pool.get(poll, resolver) {
@@ -103,9 +106,18 @@ impl TcpServer {
                 continue;
             };
             let conn = unsafe { Arc::get_mut_unchecked(conn) };
-            conn.do_local(poll, sockets);
+            conn.do_local(event, poll, sockets);
             if conn.destroyed() {
                 destroyed.push((conn.handle, conn.index));
+            } else {
+                let socket = sockets.get_socket::<TcpSocket>(handle);
+                let (rx, tx) = wakers.get_tcp_wakers(handle);
+                if event.readable() {
+                    socket.register_recv_waker(rx);
+                }
+                if event.writable() {
+                    socket.register_send_waker(tx);
+                }
             }
         }
         for (handle, index) in destroyed {
@@ -228,21 +240,30 @@ impl Connection {
         self.deregistered() && self.conn.deregistered()
     }
 
-    fn do_local(&mut self, poll: &Poll, sockets: &mut SocketSet) {
+    fn do_local(
+        &mut self,
+        event: &crate::wintun::waker::Event,
+        poll: &Poll,
+        sockets: &mut SocketSet,
+    ) {
         self.last_active_time = Instant::now();
         let socket = sockets.get_socket::<TcpSocket>(self.handle);
-        if self.conn.writable() {
-            self.try_recv_client(socket);
-        } else {
-            self.read_client = true;
+        if event.readable() {
+            if self.conn.writable() {
+                self.try_recv_client(socket);
+            } else {
+                self.read_client = true;
+            }
         }
 
-        self.try_send_client(socket, &[]);
-
-        if self.writable() && self.read_server {
-            self.do_recv_server(sockets);
-            self.read_server = false;
+        if event.writable() {
+            self.try_send_client(socket, &[]);
+            if self.writable() && self.read_server {
+                self.do_recv_server(sockets);
+                self.read_server = false;
+            }
         }
+
         self.do_check_status(poll, sockets);
     }
 
@@ -292,7 +313,12 @@ impl Connection {
         }
         match socket.send_slice(data) {
             Ok(size) => {
-                log::info!("send {}:{} bytes to client", size, data.len());
+                log::info!(
+                    "connection:{} send {}:{} bytes to client",
+                    self.index,
+                    size,
+                    data.len()
+                );
                 if size != data.len() {
                     self.send_buffer.extend_from_slice(&data[size..])
                 }

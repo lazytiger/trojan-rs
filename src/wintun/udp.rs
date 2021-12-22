@@ -4,7 +4,7 @@ use crate::{
     resolver::DnsResolver,
     status::StatusProvider,
     tls_conn::TlsConn,
-    wintun::{SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
+    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
 use bytes::BytesMut;
@@ -50,10 +50,11 @@ impl UdpServer {
         pool: &mut IdlePool,
         poll: &Poll,
         resolver: &DnsResolver,
-        handles: Vec<SocketHandle>,
+        wakers: &mut Wakers,
         sockets: &mut SocketSet,
     ) {
-        for handle in handles {
+        for (handle, event) in wakers.get_udp_handles().iter() {
+            let handle = *handle;
             let listener = if let Some(listener) = self.src_map.get_mut(&handle) {
                 listener
             } else {
@@ -63,7 +64,7 @@ impl UdpServer {
                 self.src_map.get_mut(&handle).unwrap()
             };
             let mut_listener = unsafe { Arc::get_mut_unchecked(listener) };
-            let (inserts, removes) = mut_listener.do_local(pool, poll, resolver, sockets);
+            let (inserts, removes) = mut_listener.do_local(pool, poll, event, resolver, sockets);
             for index in inserts {
                 self.conns.insert(index, listener.clone());
             }
@@ -140,6 +141,7 @@ impl UdpListener {
         &mut self,
         pool: &mut IdlePool,
         poll: &Poll,
+        event: &crate::wintun::waker::Event,
         resolver: &DnsResolver,
         sockets: &mut SocketSet,
     ) -> (Vec<usize>, Vec<usize>) {
