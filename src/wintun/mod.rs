@@ -309,7 +309,8 @@ fn do_tun_read(
                 sockets.sockets().find_map(|(handle, socket)| match socket {
                     Socket::Tcp(socket)
                         if socket.local_endpoint() == dst_endpoint
-                            && socket.remote_endpoint() == src_endpoint =>
+                            && socket.remote_endpoint() == src_endpoint
+                            || socket.send_queue() > 0 =>
                     {
                         Some(handle)
                     }
