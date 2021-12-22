@@ -116,7 +116,7 @@ pub struct WintunArgs {
     pub udp_tx_buffer_size: usize,
 
     /// Data size for TCP RX buffer
-    #[clap(long, default_value = "1024000")]
+    #[clap(long, default_value = "102400")]
     pub tcp_rx_buffer_size: usize,
 
     /// Data size for TCP TX buffer

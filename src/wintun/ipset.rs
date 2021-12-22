@@ -1,4 +1,5 @@
 use crate::dns::add_route_with_if;
+use smoltcp::wire::{IpAddress, IpEndpoint};
 use std::{
     cmp::Ordering,
     fs::File,
@@ -6,6 +7,23 @@ use std::{
     net::Ipv4Addr,
     ops::Not,
 };
+
+//TODO ipv6
+pub fn is_private(endpoint: IpEndpoint) -> bool {
+    if let IpAddress::Ipv4(ip) = endpoint.addr {
+        ip.is_unspecified() //0.0.0.0/8
+            || ip.0[0] == 10 //10.0.0.0/8
+            || ip.is_loopback() //127.0.0.0/8
+            || ip.is_link_local() //169.254.0.0/16
+            || ip.0[0] == 172 && ip.0[1] &0xf0 == 16 //172.16.0.0/12
+            || ip.0[0] == 192 && ip.0[1] == 168 //192.168.0.0/16
+            || ip.is_multicast() //224.0.0.0/4
+            || ip.0[0] & 0xf0 == 240 // 240.0.0.0/4
+            || ip.is_broadcast() //255.255.255.255/32
+    } else {
+        true
+    }
+}
 
 pub struct IPSet {
     data: Vec<CIDR>,

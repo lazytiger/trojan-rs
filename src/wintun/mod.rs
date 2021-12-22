@@ -20,9 +20,9 @@ use crate::{
     resolver::DnsResolver,
     types::Result,
     wintun::{
-        ipset::IPSet,
+        ipset::{is_private, IPSet},
         tcp::TcpServer,
-        tun::{is_private, TunInterface},
+        tun::TunInterface,
         udp::UdpServer,
     },
     OPTIONS,
@@ -161,7 +161,8 @@ pub fn run() -> Result<()> {
     pool.init(&poll, &resolver);
     pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
 
-    let (sender, receiver) = crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
+    let (rx_sender, rx_receiver) = crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
+    let (tx_sender, tx_receiver) = crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
 
     let ip_addrs = [IpCidr::new(IpAddress::v4(0, 0, 0, 1), 0)];
 
@@ -170,7 +171,7 @@ pub fn run() -> Result<()> {
         .add_default_ipv4_route(Ipv4Address::new(0, 0, 0, 1))
         .unwrap();
     let mut interface = InterfaceBuilder::new(
-        TunInterface::new(session.clone(), receiver, OPTIONS.wintun_args().mtu),
+        TunInterface::new(tx_sender, rx_receiver, OPTIONS.wintun_args().mtu),
         [],
     )
     .any_ip(true)
@@ -187,9 +188,24 @@ pub fn run() -> Result<()> {
     let mut last_tcp_check_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(10, 0);
 
+    let tx_session = session.clone();
+    let _ = thread::spawn(move || {
+        while let Ok(data) = tx_receiver.recv() {
+            match tx_session.allocate_send_packet(data.len() as u16) {
+                Ok(mut packet) => {
+                    packet.bytes_mut().copy_from_slice(data.as_slice());
+                    tx_session.send_packet(packet);
+                }
+                Err(err) => {
+                    log::error!("allocate send packet failed:{:?}", err);
+                }
+            }
+        }
+    });
+
     let mut now = Instant::now();
     loop {
-        let (udp_handles, tcp_handles) = do_tun_read(&session, &sender, &mut interface)?;
+        let (udp_handles, tcp_handles) = do_tun_read(&session, &rx_sender, &mut interface)?;
         if let Err(err) = interface.poll(now) {
             log::info!("interface error:{}", err);
         }
@@ -241,7 +257,7 @@ fn do_tun_read(
 ) -> Result<(Vec<SocketHandle>, Vec<SocketHandle>)> {
     let mut udp_handles = Vec::new();
     let mut tcp_handles = Vec::new();
-    loop {
+    for _ in 0..1024 {
         let packet = session.try_receive()?;
         if packet.is_none() {
             break;
@@ -345,7 +361,7 @@ fn do_tun_read(
         }
 
         if let Err(err) = sender.try_send(packet.bytes().into()) {
-            log::warn!("sender buffer is full:{}", err);
+            log::error!("sender buffer is full:{}", err);
         }
     }
 

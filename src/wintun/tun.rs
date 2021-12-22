@@ -1,40 +1,20 @@
-use crossbeam::channel::Receiver;
-use std::sync::Arc;
+use crossbeam::channel::{Receiver, Sender};
 
 use smoltcp::{
     phy::{Device, DeviceCapabilities, Medium},
     time::Instant,
-    wire::{IpAddress, IpEndpoint},
 };
-use wintun::Session;
-
-//TODO ipv6
-pub fn is_private(endpoint: IpEndpoint) -> bool {
-    if let IpAddress::Ipv4(ip) = endpoint.addr {
-        ip.is_unspecified() //0.0.0.0/8
-            || ip.0[0] == 10 //10.0.0.0/8
-            || ip.is_loopback() //127.0.0.0/8
-            || ip.is_link_local() //169.254.0.0/16
-            || ip.0[0] == 172 && ip.0[1] &0xf0 == 16 //172.16.0.0/12
-            || ip.0[0] == 192 && ip.0[1] == 168 //192.168.0.0/16
-            || ip.is_multicast() //224.0.0.0/4
-            || ip.0[0] & 0xf0 == 240 // 240.0.0.0/4
-            || ip.is_broadcast() //255.255.255.255/32
-    } else {
-        true
-    }
-}
 
 pub struct TunInterface {
-    session: Arc<Session>,
+    sender: Sender<Vec<u8>>,
     receiver: Receiver<Vec<u8>>,
     mtu: usize,
 }
 
 impl TunInterface {
-    pub fn new(session: Arc<Session>, receiver: Receiver<Vec<u8>>, mtu: usize) -> Self {
+    pub fn new(sender: Sender<Vec<u8>>, receiver: Receiver<Vec<u8>>, mtu: usize) -> Self {
         TunInterface {
-            session,
+            sender,
             mtu,
             receiver,
         }
@@ -50,7 +30,7 @@ impl<'d> Device<'d> for TunInterface {
             Ok(packet) => {
                 let rx = RxToken { buffer: packet };
                 let tx = TxToken {
-                    session: self.session.clone(),
+                    sender: self.sender.clone(),
                 };
                 Some((rx, tx))
             }
@@ -60,7 +40,7 @@ impl<'d> Device<'d> for TunInterface {
 
     fn transmit(&'d mut self) -> Option<Self::TxToken> {
         Some(TxToken {
-            session: self.session.clone(),
+            sender: self.sender.clone(),
         })
     }
 
@@ -73,7 +53,7 @@ impl<'d> Device<'d> for TunInterface {
 }
 
 pub struct TxToken {
-    session: Arc<Session>,
+    sender: Sender<Vec<u8>>,
 }
 
 pub struct RxToken {
@@ -94,9 +74,11 @@ impl smoltcp::phy::TxToken for TxToken {
     where
         F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
     {
-        let mut packet = self.session.allocate_send_packet(len as u16).unwrap();
-        let result = f(packet.bytes_mut());
-        self.session.send_packet(packet);
+        let mut buffer = vec![0; len];
+        let result = f(buffer.as_mut_slice());
+        if let Err(err) = self.sender.try_send(buffer) {
+            log::error!("send data to wintun failed:{}", err);
+        }
         result
     }
 }
