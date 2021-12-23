@@ -25,9 +25,25 @@ pub fn get_adapter_ip(name: &str) -> Option<String> {
             } else {
                 false
             }
-        })
+        });
     }
     ret
+}
+
+pub fn get_adapter_index(name: &str) -> Option<u32> {
+    let mut index = None;
+    unsafe {
+        get_adapters(|adapter| {
+            let adapter_name = get_string(&adapter.Description);
+            if adapter_name.contains(name) {
+                index.replace(adapter.Index);
+                true
+            } else {
+                false
+            }
+        });
+    }
+    index
 }
 
 pub fn get_main_adapter_ip() -> Option<String> {

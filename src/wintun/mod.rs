@@ -15,7 +15,7 @@ use smoltcp::{
 use wintun::{Adapter, Session};
 
 use crate::{
-    dns::{add_route_with_if, get_adapter_ip},
+    dns::get_adapter_ip,
     proxy::IdlePool,
     resolver::DnsResolver,
     types::Result,
@@ -28,8 +28,10 @@ use crate::{
     },
     OPTIONS,
 };
+pub use route::route_add_with_if;
 
 mod ipset;
+mod route;
 mod tcp;
 mod tun;
 mod udp;
@@ -64,24 +66,16 @@ pub fn run() -> Result<()> {
         if OPTIONS.wintun_args().inverse_route {
             ipset = !ipset;
         }
-        //add_route_with_if("45.33.39.39", "255.255.255.255", index);
-        let _ = thread::spawn(move || {
-            ipset.add_route(index);
-            log::warn!("adding route finished");
-        });
+        ipset.add_route(index)?;
     }
 
     while get_adapter_ip(OPTIONS.wintun_args().name.as_str()).is_none() {
         thread::sleep(std::time::Duration::new(1, 0));
     }
-    log::warn!("wintun is ready");
+    let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
+    log::warn!("wintun is ready at:{}", gateway);
 
     if OPTIONS.wintun_args().with_dns {
-        add_route_with_if(
-            OPTIONS.wintun_args().trusted_dns.as_str(),
-            "255.255.255.255",
-            index,
-        );
         let _ = thread::spawn(|| {
             let program = std::env::current_exe().unwrap();
             let args = OPTIONS.wintun_args();

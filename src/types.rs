@@ -16,6 +16,8 @@ pub enum TrojanError {
     Smoltcp(smoltcp::Error),
     #[from(ignore)]
     NonWindowsPlatform,
+    #[from(ignore)]
+    Winapi(String),
 }
 
 pub type Result<T> = std::result::Result<T, TrojanError>;

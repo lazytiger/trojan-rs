@@ -1,4 +1,4 @@
-use crate::dns::add_route_with_if;
+use crate::{types::Result, wintun::route::route_add_with_if};
 use smoltcp::wire::{IpAddress, IpEndpoint};
 use std::{
     cmp::Ordering,
@@ -127,11 +127,12 @@ impl IPSet {
         self.data.sort();
     }
 
-    pub fn add_route(&self, index: u32) {
+    pub fn add_route(&self, index: u32) -> Result<()> {
+        route_add_with_if(123434343, !0, index)?;
         for item in &self.data {
-            let (ip, mask) = item.ip_mask();
-            add_route_with_if(ip.to_string().as_str(), mask.to_string().as_str(), index);
+            route_add_with_if(item.ip, item.mask(), index)?;
         }
+        Ok(())
     }
 }
 
