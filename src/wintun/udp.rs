@@ -10,10 +10,15 @@ use crate::{
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
 use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 pub struct UdpServer {
     src_map: HashMap<SocketHandle, Arc<UdpListener>>,
+    sockets: HashSet<IpEndpoint>,
     conns: HashMap<usize, Arc<UdpListener>>,
 }
 
@@ -34,6 +39,7 @@ impl UdpServer {
         UdpServer {
             src_map: Default::default(),
             conns: Default::default(),
+            sockets: Default::default(),
         }
     }
 
@@ -43,6 +49,10 @@ impl UdpServer {
 
     pub fn token2index(token: Token) -> usize {
         token.0 / CHANNEL_CNT
+    }
+
+    pub fn has_socket(&self, endpoint: &IpEndpoint) -> bool {
+        self.sockets.contains(&endpoint)
     }
 
     pub fn do_local(
@@ -61,6 +71,7 @@ impl UdpServer {
                 let endpoint = sockets.get_socket::<UdpSocket>(handle).endpoint();
                 let listener = Arc::new(UdpListener::new(handle, endpoint));
                 self.src_map.insert(handle, listener);
+                self.sockets.insert(endpoint);
                 self.src_map.get_mut(&handle).unwrap()
             };
             let mut_listener = unsafe { Arc::get_mut_unchecked(listener) };
@@ -119,16 +130,17 @@ impl UdpServer {
             .iter()
             .filter_map(|(_, conn)| {
                 if conn.is_empty() {
-                    Some(conn.handle)
+                    Some((conn.handle, conn.endpoint))
                 } else {
                     None
                 }
             })
             .collect();
 
-        for handle in timeouts {
+        for (handle, endpoint) in timeouts {
             log::info!("udp socket:{} removed", handle);
             let _ = self.src_map.remove(&handle);
+            let _ = self.sockets.remove(&endpoint);
             let _ = sockets.remove_socket(handle);
         }
     }

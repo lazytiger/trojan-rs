@@ -5,7 +5,7 @@ use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
     iface::{Interface, InterfaceBuilder, Routes},
-    socket::{Socket, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer},
+    socket::{TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer},
     time::{Duration, Instant},
     wire::{
         IpAddress, IpCidr, IpEndpoint, IpProtocol, IpVersion, Ipv4Address, Ipv4Packet, Ipv6Packet,
@@ -206,7 +206,13 @@ pub fn run() -> Result<()> {
     let mut wakers = Wakers::new();
     loop {
         wakers.clear();
-        do_tun_read(&session, &rx_sender, &mut interface, &mut wakers)?;
+        do_tun_read(
+            &session,
+            &rx_sender,
+            &mut interface,
+            &udp_server,
+            &mut wakers,
+        )?;
         if let Err(err) = interface.poll(now) {
             log::info!("interface error:{}", err);
         }
@@ -255,6 +261,7 @@ fn do_tun_read(
     session: &Arc<Session>,
     sender: &Sender<Vec<u8>>,
     sockets: &mut SocketSet,
+    udp_server: &UdpServer,
     wakers: &mut Wakers,
 ) -> Result<()> {
     for _ in 0..1024 {
@@ -315,13 +322,7 @@ fn do_tun_read(
             socket.register_recv_waker(rx);
             socket.register_send_waker(tx);
             log::info!("handle:{} is tcp", handle);
-        } else if !sockets.sockets().any(|(_, socket)| {
-            if let Socket::Udp(socket) = socket {
-                socket.endpoint() == dst_endpoint
-            } else {
-                false
-            }
-        }) {
+        } else if connect.is_none() && !udp_server.has_socket(&dst_endpoint) {
             let mut socket = UdpSocket::new(
                 UdpSocketBuffer::new(
                     vec![UdpPacketMetadata::EMPTY; OPTIONS.wintun_args().udp_rx_meta_size],
