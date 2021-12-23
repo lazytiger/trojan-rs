@@ -78,7 +78,7 @@ impl TlsConn {
                         self.shutdown();
                         break;
                     }
-                    log::debug!(
+                    log::info!(
                         "connection:{} read {} bytes from server",
                         self.index(),
                         size
@@ -129,17 +129,25 @@ impl TlsConn {
     }
 
     pub fn do_send(&mut self) {
+        if let Err(err) = self.session.writer().flush() {
+            log::error!("flush failed:{}", err);
+            self.shutdown();
+            return;
+        }
+
         if self.is_connecting() {
+            log::info!("connection is not ready");
             return;
         }
         self.writable = true;
         loop {
             if !self.session.wants_write() {
+                log::info!("nothing in session");
                 break;
             }
             match self.session.write_tls(&mut self.stream) {
                 Ok(size) => {
-                    log::debug!("connection:{} write {} bytes to server", self.index(), size);
+                    log::info!("connection:{} write {} bytes to server", self.index(), size);
                     continue;
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
@@ -157,7 +165,10 @@ impl TlsConn {
 
     pub fn write_session(&mut self, data: &[u8]) -> bool {
         match self.session.writer().write_all(data) {
-            Ok(_) => true,
+            Ok(_) => {
+                log::info!("write {} byte to session", data.len());
+                true
+            }
             Err(err) => {
                 self.shutdown();
                 log::warn!(

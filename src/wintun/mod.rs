@@ -66,7 +66,10 @@ pub fn run() -> Result<()> {
         if OPTIONS.wintun_args().inverse_route {
             ipset = !ipset;
         }
-        ipset.add_route(index)?;
+        route_add_with_if(757147431, !0, index)?;
+        route_add_with_if(794538172, !0, index)?;
+        //ipset.add_route(index)?;
+        log::warn!("route add completed");
     }
 
     while get_adapter_ip(OPTIONS.wintun_args().name.as_str()).is_none() {
@@ -227,10 +230,10 @@ pub fn run() -> Result<()> {
                     pool.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.do_remote(event, &poll, &mut interface);
+                    udp_server.do_remote(event, &poll, &mut interface, &mut wakers);
                 }
                 _ => {
-                    tcp_server.do_remote(event, &poll, &mut interface);
+                    tcp_server.do_remote(event, &poll, &mut interface, &mut wakers);
                 }
             }
         }

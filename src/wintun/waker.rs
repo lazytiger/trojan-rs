@@ -39,7 +39,6 @@ struct TunWaker {
 
 impl Wake for TunWaker {
     fn wake(self: Arc<Self>) {
-        log::info!("handle:{} waked", self.handle);
         let mut handles = self.handles.clone();
         let handles = unsafe { Arc::get_mut_unchecked(&mut handles) };
         handles
