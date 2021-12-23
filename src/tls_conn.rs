@@ -129,12 +129,6 @@ impl TlsConn {
     }
 
     pub fn do_send(&mut self) {
-        if let Err(err) = self.session.writer().flush() {
-            log::error!("flush failed:{}", err);
-            self.shutdown();
-            return;
-        }
-
         if self.is_connecting() {
             log::info!("connection is not ready");
             return;

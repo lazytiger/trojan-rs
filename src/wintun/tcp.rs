@@ -111,7 +111,7 @@ impl TcpServer {
             } else {
                 let socket = sockets.get_socket::<TcpSocket>(handle);
                 let (rx, tx) = wakers.get_tcp_wakers(handle);
-                if event.readable() {
+                if event.is_readable() {
                     socket.register_recv_waker(rx);
                 }
                 if !conn.send_buffer.is_empty() {
@@ -254,7 +254,7 @@ impl Connection {
     ) {
         self.last_active_time = Instant::now();
         let socket = sockets.get_socket::<TcpSocket>(self.handle);
-        if event.readable() {
+        if event.is_readable() {
             if self.conn.writable() {
                 self.try_recv_client(socket);
             } else {
@@ -262,7 +262,8 @@ impl Connection {
             }
         }
 
-        if event.writable() {
+        if event.is_writable() {
+            self.established();
             self.try_send_client(socket, &[]);
             if self.writable() && self.read_server {
                 self.do_recv_server(sockets);
@@ -300,7 +301,6 @@ impl Connection {
 
     fn try_send_client(&mut self, socket: &mut TcpSocket, data: &[u8]) {
         if socket.may_send() {
-            self.established();
             if self.send_buffer.is_empty() {
                 self.do_send_client(socket, data);
             } else {

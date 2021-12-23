@@ -17,11 +17,11 @@ impl Event {
         Event(2)
     }
 
-    pub fn readable(&self) -> bool {
+    pub fn is_readable(&self) -> bool {
         self.0 & Self::rx().0 != 0
     }
 
-    pub fn writable(&self) -> bool {
+    pub fn is_writable(&self) -> bool {
         self.0 & Self::tx().0 != 0
     }
 

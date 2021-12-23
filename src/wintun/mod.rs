@@ -66,9 +66,9 @@ pub fn run() -> Result<()> {
         if OPTIONS.wintun_args().inverse_route {
             ipset = !ipset;
         }
-        route_add_with_if(757147431, !0, index)?;
-        route_add_with_if(794538172, !0, index)?;
-        //ipset.add_route(index)?;
+        //route_add_with_if(757147431, !0, index)?;
+        //route_add_with_if(794538172, !0, index)?;
+        ipset.add_route(index)?;
         log::warn!("route add completed");
     }
 

@@ -73,7 +73,7 @@ impl UdpServer {
             }
             let (rx, tx) = wakers.get_udp_wakers(handle);
             let socket = sockets.get_socket::<UdpSocket>(handle);
-            if event.readable() {
+            if event.is_readable() {
                 socket.register_recv_waker(rx);
             }
             if listener.has_data() {
@@ -162,10 +162,10 @@ impl UdpListener {
         let socket = sockets.get_socket::<UdpSocket>(self.handle);
         let mut inserts = Vec::new();
         let mut removes = Vec::new();
-        if event.readable() {
+        if event.is_readable() {
             self.do_read_client(socket, pool, poll, resolver, &mut inserts, &mut removes);
         }
-        if event.writable() {
+        if event.is_writable() {
             self.do_send_client(sockets);
         }
 
