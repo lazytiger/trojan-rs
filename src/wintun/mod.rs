@@ -314,6 +314,7 @@ fn do_tun_read(
             let (rx, tx) = wakers.get_tcp_wakers(handle);
             socket.register_recv_waker(rx);
             socket.register_send_waker(tx);
+            log::info!("handle:{} is tcp", handle);
         } else if !sockets.sockets().any(|(_, socket)| {
             if let Socket::Udp(socket) = socket {
                 socket.endpoint() == dst_endpoint
@@ -333,6 +334,7 @@ fn do_tun_read(
             );
             socket.bind(dst_endpoint)?;
             let handle = sockets.add_socket(socket);
+            log::info!("handle:{} is udp", handle);
             let socket = sockets.get_socket::<UdpSocket>(handle);
             let (rx, tx) = wakers.get_udp_wakers(handle);
             socket.register_recv_waker(rx);

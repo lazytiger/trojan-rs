@@ -87,6 +87,7 @@ impl Wakers {
         }
         let (rx, tx) = self.wakers.get_mut(&handle).unwrap();
         if !Arc::ptr_eq(&rx.handles, &self.udp_handles) {
+            log::info!("handle:{} type changed to udp", handle);
             unsafe { Arc::get_mut_unchecked(rx) }.handles = self.udp_handles.clone();
             unsafe { Arc::get_mut_unchecked(tx) }.handles = self.udp_handles.clone();
         }
@@ -101,6 +102,7 @@ impl Wakers {
         }
         let (rx, tx) = self.wakers.get_mut(&handle).unwrap();
         if !Arc::ptr_eq(&rx.handles, &self.tcp_handles) {
+            log::info!("handle:{} type changed to tcp", handle);
             unsafe { Arc::get_mut_unchecked(rx) }.handles = self.tcp_handles.clone();
             unsafe { Arc::get_mut_unchecked(tx) }.handles = self.tcp_handles.clone();
         }

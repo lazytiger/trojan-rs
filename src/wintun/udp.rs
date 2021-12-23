@@ -357,7 +357,7 @@ impl Connection {
 
         if !self.send_buffer.is_empty() {
             let socket = sockets.get_socket::<UdpSocket>(self.handle);
-            let (_, tx) = wakers.get_tcp_wakers(self.handle);
+            let (_, tx) = wakers.get_udp_wakers(self.handle);
             socket.register_send_waker(tx);
         }
 
