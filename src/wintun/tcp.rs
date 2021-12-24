@@ -148,7 +148,7 @@ impl TcpServer {
         if !self.conns.contains_key(&index) {
             return;
         }
-        log::info!("connection:{}-{} removed", handle, index);
+        log::warn!("connection:{}-{} removed", handle, index);
         sockets.remove_socket(handle);
         let _ = self.conns.remove(&index);
         let _ = self.src_map.remove(&handle);
@@ -164,7 +164,7 @@ pub struct Connection {
     send_buffer: BytesMut,
     status: ConnStatus,
     last_active_time: Instant,
-    closed: Option<bool>,
+    closed: Option<bool>, //None for ok, false for closing, true for closed
     read_client: bool,
     read_server: bool,
     socket_state: TcpState,
@@ -192,9 +192,18 @@ impl Connection {
 
     pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, sockets: &mut SocketSet) {
         if self.timeout(now) {
-            self.shutdown();
+            self.close(sockets);
             self.conn.shutdown();
             self.do_check_status(poll, sockets);
+        }
+    }
+
+    fn close(&mut self, sockets: &mut SocketSet) {
+        if !matches!(self.closed, Some(true)) {
+            let socket = sockets.get_socket::<TcpSocket>(self.handle);
+            socket.abort();
+            self.closed.replace(true);
+            self.shutdown();
         }
     }
 

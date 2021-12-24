@@ -5,7 +5,7 @@ use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
     iface::{Interface, InterfaceBuilder, Routes},
-    socket::{TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer},
+    socket::{Socket, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer},
     time::{Duration, Instant},
     wire::{
         IpAddress, IpCidr, IpEndpoint, IpProtocol, IpVersion, Ipv4Address, Ipv4Packet, Ipv6Packet,
@@ -248,11 +248,27 @@ pub fn run() -> Result<()> {
         if now - last_tcp_check_time > check_duration {
             tcp_server.check_timeout(&poll, now, &mut interface);
             last_tcp_check_time = now;
+            let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {
+                if matches!(socket, Socket::Tcp(_)) {
+                    count + 1
+                } else {
+                    count
+                }
+            });
+            log::warn!("total tcp sockets count:{}", sockets_count);
         }
 
         if now - last_udp_check_time > OPTIONS.udp_idle_duration {
             udp_server.check_timeout(now, &mut interface);
             last_udp_check_time = now;
+            let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {
+                if matches!(socket, Socket::Udp(_)) {
+                    count + 1
+                } else {
+                    count
+                }
+            });
+            log::warn!("total udp sockets count:{}", sockets_count);
         }
     }
 }
@@ -322,9 +338,9 @@ fn do_tun_read(
                 let (rx, tx) = wakers.get_tcp_wakers(handle);
                 socket.register_recv_waker(rx);
                 socket.register_send_waker(tx);
-                log::info!("handle:{} is tcp", handle);
+                log::warn!("handle:{} is tcp", handle);
             }
-            None if udp_server.has_socket(&dst_endpoint) => {
+            None if !udp_server.has_socket(&dst_endpoint) => {
                 let mut socket = UdpSocket::new(
                     UdpSocketBuffer::new(
                         vec![UdpPacketMetadata::EMPTY; OPTIONS.wintun_args().udp_rx_meta_size],
@@ -337,7 +353,7 @@ fn do_tun_read(
                 );
                 socket.bind(dst_endpoint)?;
                 let handle = sockets.add_socket(socket);
-                log::info!("handle:{} is udp", handle);
+                log::warn!("handle:{} is udp", handle);
                 let socket = sockets.get_socket::<UdpSocket>(handle);
                 let (rx, tx) = wakers.get_udp_wakers(handle);
                 socket.register_recv_waker(rx);
