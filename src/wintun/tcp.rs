@@ -305,7 +305,6 @@ impl Connection {
         if matches!(socket.state(), TcpState::CloseWait) {
             log::info!("client shutdown now");
             self.try_close(poll, sockets);
-            self.shutdown();
         }
         self.do_send_server();
     }
