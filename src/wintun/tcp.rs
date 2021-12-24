@@ -224,13 +224,15 @@ impl Connection {
         self.conn.write_session(request.as_ref())
     }
 
-    fn try_close(&mut self, sockets: &mut SocketSet) {
+    fn try_close(&mut self, poll: &Poll, sockets: &mut SocketSet) {
         let socket = sockets.get_socket::<TcpSocket>(self.handle);
         if let Some(closed) = self.closed {
             if !closed {
                 socket.close();
                 self.socket_state = socket.state();
                 self.closed.replace(true);
+                self.shutdown();
+                self.check_status(poll);
             } else {
                 log::info!("socket already closed");
             }
@@ -245,12 +247,10 @@ impl Connection {
         }
         if self.conn.is_shutdown() {
             self.peer_closed();
-            self.check_status(poll); //peer_closed -> closing
-            self.try_close(sockets); //closing -> closed
+            self.try_close(poll, sockets); //closing -> closed
         }
+        self.try_close(poll, sockets); //closing -> closed
         self.check_status(poll); //peer_closed -> closing
-        self.try_close(sockets); //closing -> closed
-        self.check_status(poll); //peer_closed -> shutdown
         self.conn.check_status(poll);
     }
 
@@ -265,10 +265,9 @@ impl Connection {
         sockets: &mut SocketSet,
     ) {
         self.last_active_time = Instant::now();
-        let socket = sockets.get_socket::<TcpSocket>(self.handle);
         if event.is_readable() {
             if self.conn.writable() {
-                self.try_recv_client(socket);
+                self.try_recv_client(poll, sockets);
             } else {
                 self.read_client = true;
             }
@@ -276,7 +275,7 @@ impl Connection {
 
         if event.is_writable() {
             self.established();
-            self.try_send_client(socket, &[]);
+            self.try_send_client(sockets, &[]);
             if self.writable() && self.read_server {
                 self.do_recv_server(sockets);
                 self.read_server = false;
@@ -286,7 +285,8 @@ impl Connection {
         self.do_check_status(poll, sockets);
     }
 
-    fn try_recv_client(&mut self, socket: &mut TcpSocket) {
+    fn try_recv_client(&mut self, poll: &Poll, sockets: &mut SocketSet) {
+        let socket = sockets.get_socket::<TcpSocket>(self.handle);
         let buffer = self.recv_buffer.as_mut_slice();
         while socket.may_recv() {
             match socket.recv_slice(buffer) {
@@ -304,14 +304,14 @@ impl Connection {
         }
         if matches!(socket.state(), TcpState::CloseWait) {
             log::info!("client shutdown now");
-            socket.close();
-            self.closed = Some(true);
+            self.try_close(poll, sockets);
             self.shutdown();
         }
         self.do_send_server();
     }
 
-    fn try_send_client(&mut self, socket: &mut TcpSocket, data: &[u8]) {
+    fn try_send_client(&mut self, sockets: &mut SocketSet, data: &[u8]) {
+        let socket = sockets.get_socket::<TcpSocket>(self.handle);
         if socket.may_send() {
             if self.send_buffer.is_empty() {
                 self.do_send_client(socket, data);
@@ -367,8 +367,7 @@ impl Connection {
             self.conn.established();
             self.do_send_server();
             if self.conn.writable() && self.read_client {
-                let socket = sockets.get_socket::<TcpSocket>(self.handle);
-                self.try_recv_client(socket);
+                self.try_recv_client(poll, sockets);
                 self.read_client = false;
             }
         }
@@ -384,8 +383,7 @@ impl Connection {
 
     fn do_recv_server(&mut self, sockets: &mut SocketSet) {
         if let Some(data) = self.conn.do_read() {
-            let socket = sockets.get_socket::<TcpSocket>(self.handle);
-            self.try_send_client(socket, data.as_slice());
+            self.try_send_client(sockets, data.as_slice());
         }
     }
 
