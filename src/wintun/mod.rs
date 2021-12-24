@@ -186,7 +186,7 @@ fn do_tun_read(
     session: &Arc<Session>,
     sender: &Sender<Vec<u8>>,
     sockets: &mut SocketSet,
-    udp_server: &UdpServer,
+    udp_server: &mut UdpServer,
     wakers: &mut Wakers,
 ) -> Result<()> {
     for _ in 0..1024 {
@@ -270,8 +270,9 @@ fn do_tun_read(
                 socket.listen(dst_endpoint).unwrap();
                 socket.set_nagle_enabled(false);
                 socket.set_ack_delay(None);
-                socket.set_timeout(Some(Duration::from_secs(120)));
-                socket.set_keep_alive(Some(Duration::from_secs(60)));
+                //timeout could cause performance problem
+                //socket.set_timeout(Some(Duration::from_secs(120)));
+                //socket.set_keep_alive(Some(Duration::from_secs(60)));
                 let (rx, tx) = wakers.get_tcp_wakers(handle);
                 socket.register_recv_waker(rx);
                 socket.register_send_waker(tx);
@@ -282,7 +283,7 @@ fn do_tun_read(
                     dst_endpoint
                 );
             }
-            None if !udp_server.has_socket(&dst_endpoint) => {
+            None if udp_server.new_socket(dst_endpoint) => {
                 let mut socket = UdpSocket::new(
                     UdpSocketBuffer::new(
                         vec![UdpPacketMetadata::EMPTY; OPTIONS.wintun_args().udp_rx_meta_size],
@@ -322,10 +323,6 @@ pub fn run() -> Result<()> {
         apply_ipset(file, index)?;
     }
 
-    if OPTIONS.wintun_args().with_dns {
-        start_dns();
-    }
-
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
     let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
@@ -346,6 +343,10 @@ pub fn run() -> Result<()> {
     let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
     log::warn!("wintun is ready at:{}", gateway);
 
+    if OPTIONS.wintun_args().with_dns {
+        start_dns();
+    }
+
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
     let mut last_udp_check_time = std::time::Instant::now();
@@ -359,7 +360,7 @@ pub fn run() -> Result<()> {
             &session,
             &rx_sender,
             &mut interface,
-            &udp_server,
+            &mut udp_server,
             &mut wakers,
         )?;
         if let Err(err) = interface.poll(now) {
