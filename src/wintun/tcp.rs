@@ -48,10 +48,12 @@ impl TcpServer {
             .conns
             .iter_mut()
             .filter_map(|(index, conn)| unsafe {
+                if !conn.destroyed() {
+                    Arc::get_mut_unchecked(conn).check_timeout(poll, now, sockets);
+                }
                 if conn.destroyed() {
                     Some((*index, conn.handle))
                 } else {
-                    Arc::get_mut_unchecked(conn).check_timeout(poll, now, sockets);
                     None
                 }
             })
