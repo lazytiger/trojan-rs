@@ -183,10 +183,16 @@ impl DnsServer {
                             }
                             log::info!("query:{} not cached", key);
                             if self.is_blocked(&name) {
-                                self.trusted.send_to(data, self.trusted_addr).unwrap();
+                                if let Err(err) = self.trusted.send_to(data, self.trusted_addr) {
+                                    log::error!("send to trusted dns failed:{}", err);
+                                    continue;
+                                }
                                 log::info!("domain:{} is blocked", name);
                             } else {
-                                self.poisoned.send_to(data, self.poisoned_addr).unwrap();
+                                if let Err(err) = self.poisoned.send_to(data, self.poisoned_addr) {
+                                    log::error!("send to poisoned dns failed:{}", err);
+                                    continue;
+                                }
                                 log::info!("domain:{} is not blocked", name);
                             }
                             self.add_request(key, from, message.id());

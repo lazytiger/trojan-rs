@@ -20,7 +20,10 @@ pub trait StatusProvider {
         )
     }
     fn is_shutdown(&self) -> bool {
-        matches!(self.get_status(), ConnStatus::Shutdown)
+        matches!(
+            self.get_status(),
+            ConnStatus::Shutdown | ConnStatus::Deregistered
+        )
     }
     fn is_connecting(&self) -> bool {
         matches!(self.get_status(), ConnStatus::Connecting)
