@@ -113,7 +113,7 @@ impl TlsConn {
         let mut buffer = Vec::new();
         if let Err(err) = self.session.reader().read_to_end(&mut buffer) {
             if err.kind() != ErrorKind::WouldBlock {
-                log::info!(
+                log::warn!(
                     "connection:{} read from session failed:{}",
                     self.index(),
                     err

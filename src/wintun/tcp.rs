@@ -201,9 +201,9 @@ impl Connection {
     }
 
     fn close(&mut self, sockets: &mut SocketSet) {
-        if !matches!(self.closed, Some(true)) {
-            let socket = sockets.get_socket::<TcpSocket>(self.handle);
-            socket.abort();
+        let socket = sockets.get_socket::<TcpSocket>(self.handle);
+        socket.abort();
+        if !self.shutdown() {
             self.closed.replace(true);
             self.shutdown();
         }
@@ -303,7 +303,8 @@ impl Connection {
             }
         }
         if matches!(socket.state(), TcpState::CloseWait) {
-            log::info!("client shutdown now");
+            log::warn!("client:{}-{} shutdown now", self.handle, self.index);
+            self.close_conn();
             self.try_close(poll, sockets);
         }
         self.do_send_server();
