@@ -244,6 +244,8 @@ fn do_tun_read(
                 socket.listen(dst_endpoint).unwrap();
                 socket.set_nagle_enabled(false);
                 socket.set_ack_delay(None);
+                socket.set_timeout(Some(Duration::from_secs(60)));
+                socket.set_keep_alive(Some(Duration::from_secs(60)));
                 let (rx, tx) = wakers.get_tcp_wakers(handle);
                 socket.register_recv_waker(rx);
                 socket.register_send_waker(tx);
