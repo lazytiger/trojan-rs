@@ -195,39 +195,49 @@ fn do_tun_read(
             break;
         }
         let packet = packet.unwrap();
-        let (dst_addr, payload, protocol) = match IpVersion::of_packet(packet.bytes()).unwrap() {
-            IpVersion::Ipv4 => {
-                let packet = Ipv4Packet::new_checked(packet.bytes()).unwrap();
-                let dst_addr = packet.dst_addr();
-                (
-                    IpAddress::Ipv4(dst_addr),
-                    packet.payload(),
-                    packet.protocol(),
-                )
-            }
-            IpVersion::Ipv6 => {
-                let packet = Ipv6Packet::new_checked(packet.bytes()).unwrap();
-                let dst_addr = packet.dst_addr();
-                (
-                    IpAddress::Ipv6(dst_addr),
-                    packet.payload(),
-                    packet.next_header(),
-                )
-            }
-            _ => continue,
-        };
-        let (dst_port, connect) = match protocol {
+        let (src_addr, dst_addr, payload, protocol) =
+            match IpVersion::of_packet(packet.bytes()).unwrap() {
+                IpVersion::Ipv4 => {
+                    let packet = Ipv4Packet::new_checked(packet.bytes()).unwrap();
+                    let src_addr = packet.src_addr();
+                    let dst_addr = packet.dst_addr();
+                    (
+                        IpAddress::Ipv4(src_addr),
+                        IpAddress::Ipv4(dst_addr),
+                        packet.payload(),
+                        packet.protocol(),
+                    )
+                }
+                IpVersion::Ipv6 => {
+                    let packet = Ipv6Packet::new_checked(packet.bytes()).unwrap();
+                    let src_addr = packet.src_addr();
+                    let dst_addr = packet.dst_addr();
+                    (
+                        IpAddress::Ipv6(src_addr),
+                        IpAddress::Ipv6(dst_addr),
+                        packet.payload(),
+                        packet.next_header(),
+                    )
+                }
+                _ => continue,
+            };
+        let (src_port, dst_port, connect) = match protocol {
             IpProtocol::Udp => {
                 let packet = UdpPacket::new_checked(payload).unwrap();
-                (packet.dst_port(), None)
+                (packet.src_port(), packet.dst_port(), None)
             }
             IpProtocol::Tcp => {
                 let packet = TcpPacket::new_checked(payload).unwrap();
-                (packet.dst_port(), Some(packet.syn() && !packet.ack()))
+                (
+                    packet.src_port(),
+                    packet.dst_port(),
+                    Some(packet.syn() && !packet.ack()),
+                )
             }
             _ => continue,
         };
 
+        let src_endpoint = IpEndpoint::new(src_addr, src_port);
         let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
         if is_private(dst_endpoint) {
             continue;
@@ -235,6 +245,22 @@ fn do_tun_read(
 
         match connect {
             Some(true) => {
+                // filter syn packet before device is ready
+                /*
+                if sockets.sockets().any(|(_, socket)| {
+                    if let Socket::Tcp(socket) = socket {
+                        if socket.local_endpoint() == dst_endpoint
+                            && socket.remote_endpoint() == src_endpoint
+                        {
+                            return true;
+                        }
+                    }
+                    false
+                }) {
+                    log::warn!("socket:{} ->{} already exists", src_endpoint, dst_endpoint);
+                    continue;
+                }
+                 */
                 let socket = TcpSocket::new(
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_rx_buffer_size]),
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_tx_buffer_size]),
@@ -244,12 +270,17 @@ fn do_tun_read(
                 socket.listen(dst_endpoint).unwrap();
                 socket.set_nagle_enabled(false);
                 socket.set_ack_delay(None);
-                socket.set_timeout(Some(Duration::from_secs(60)));
+                socket.set_timeout(Some(Duration::from_secs(120)));
                 socket.set_keep_alive(Some(Duration::from_secs(60)));
                 let (rx, tx) = wakers.get_tcp_wakers(handle);
                 socket.register_recv_waker(rx);
                 socket.register_send_waker(tx);
-                log::warn!("handle:{} is tcp", handle);
+                log::warn!(
+                    "tcp handle:{} is {} -> {}",
+                    handle,
+                    src_endpoint,
+                    dst_endpoint
+                );
             }
             None if !udp_server.has_socket(&dst_endpoint) => {
                 let mut socket = UdpSocket::new(
@@ -264,7 +295,7 @@ fn do_tun_read(
                 );
                 socket.bind(dst_endpoint)?;
                 let handle = sockets.add_socket(socket);
-                log::warn!("handle:{} is udp", handle);
+                log::warn!("udp handle:{} is {}", handle, dst_endpoint);
                 let socket = sockets.get_socket::<UdpSocket>(handle);
                 let (rx, tx) = wakers.get_udp_wakers(handle);
                 socket.register_recv_waker(rx);
@@ -291,6 +322,10 @@ pub fn run() -> Result<()> {
         apply_ipset(file, index)?;
     }
 
+    if OPTIONS.wintun_args().with_dns {
+        start_dns();
+    }
+
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
     let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
@@ -310,10 +345,6 @@ pub fn run() -> Result<()> {
     }
     let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
     log::warn!("wintun is ready at:{}", gateway);
-
-    if OPTIONS.wintun_args().with_dns {
-        start_dns();
-    }
 
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));

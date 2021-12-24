@@ -29,6 +29,7 @@ pub fn run() -> Result<()> {
     let mut dns_server = DnsServer::new(index);
     dns_server.setup(&poll);
 
+    log::warn!("dns server is ready");
     loop {
         poll.poll(&mut events, None)?;
         for event in &events {

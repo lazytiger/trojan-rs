@@ -203,6 +203,7 @@ impl Connection {
     fn close(&mut self, sockets: &mut SocketSet) {
         let socket = sockets.get_socket::<TcpSocket>(self.handle);
         socket.abort();
+        self.socket_state = socket.state();
         if !self.shutdown() {
             self.closed.replace(true);
             self.shutdown();
@@ -225,17 +226,13 @@ impl Connection {
     }
 
     fn try_close(&mut self, poll: &Poll, sockets: &mut SocketSet) {
-        let socket = sockets.get_socket::<TcpSocket>(self.handle);
-        if let Some(closed) = self.closed {
-            if !closed {
-                socket.close();
-                self.socket_state = socket.state();
-                self.closed.replace(true);
-                self.shutdown();
-                self.check_status(poll);
-            } else {
-                log::info!("socket already closed");
-            }
+        if matches!(self.closed, Some(false)) {
+            let socket = sockets.get_socket::<TcpSocket>(self.handle);
+            socket.close();
+            self.socket_state = socket.state();
+            self.closed.replace(true);
+            self.shutdown();
+            self.check_status(poll);
         }
     }
 
@@ -302,11 +299,13 @@ impl Connection {
                 }
             }
         }
-        if matches!(socket.state(), TcpState::CloseWait) {
+
+        if matches!(socket.state(), TcpState::CloseWait | TcpState::Closed) {
             log::warn!("client:{}-{} shutdown now", self.handle, self.index);
             self.close_conn();
             self.try_close(poll, sockets);
         }
+
         self.do_send_server();
     }
 
