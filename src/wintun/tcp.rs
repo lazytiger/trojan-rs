@@ -245,11 +245,12 @@ impl Connection {
         }
         if self.conn.is_shutdown() {
             self.peer_closed();
-            self.check_status(poll);
-            self.try_close(sockets);
+            self.check_status(poll); //peer_closed -> closing
+            self.try_close(sockets); //closing -> closed
         }
-        self.check_status(poll);
-        self.try_close(sockets);
+        self.check_status(poll); //peer_closed -> closing
+        self.try_close(sockets); //closing -> closed
+        self.check_status(poll); //peer_closed -> shutdown
         self.conn.check_status(poll);
     }
 
