@@ -105,6 +105,7 @@ impl Connection {
                         }
                     }
                     if event.is_writable() {
+                        self.proxy.established();
                         self.try_send_proxy();
                         if self.proxy.writable() && self.read_backend {
                             if let Some(backend) = self.backend.as_mut() {
