@@ -245,38 +245,23 @@ fn do_tun_read(
 
         match connect {
             Some(true) => {
-                // filter syn packet before device is ready
-                /*
-                if sockets.sockets().any(|(_, socket)| {
-                    if let Socket::Tcp(socket) = socket {
-                        if socket.local_endpoint() == dst_endpoint
-                            && socket.remote_endpoint() == src_endpoint
-                        {
-                            return true;
-                        }
-                    }
-                    false
-                }) {
-                    log::warn!("socket:{} ->{} already exists", src_endpoint, dst_endpoint);
-                    continue;
-                }
-                 */
                 let socket = TcpSocket::new(
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_rx_buffer_size]),
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_tx_buffer_size]),
                 );
                 let handle = sockets.add_socket(socket);
                 let socket = sockets.get_socket::<TcpSocket>(handle);
+                let (rx, tx) = wakers.get_tcp_wakers(handle);
+                socket.register_recv_waker(rx);
+                socket.register_send_waker(tx);
                 socket.listen(dst_endpoint).unwrap();
                 socket.set_nagle_enabled(false);
                 socket.set_ack_delay(None);
                 //timeout could cause performance problem
                 //socket.set_timeout(Some(Duration::from_secs(120)));
                 //socket.set_keep_alive(Some(Duration::from_secs(60)));
-                let (rx, tx) = wakers.get_tcp_wakers(handle);
-                socket.register_recv_waker(rx);
-                socket.register_send_waker(tx);
-                log::warn!(
+
+                log::info!(
                     "tcp handle:{} is {} -> {}",
                     handle,
                     src_endpoint,
@@ -296,7 +281,7 @@ fn do_tun_read(
                 );
                 socket.bind(dst_endpoint)?;
                 let handle = sockets.add_socket(socket);
-                log::warn!("udp handle:{} is {}", handle, dst_endpoint);
+                log::info!("udp handle:{} is {}", handle, dst_endpoint);
                 let socket = sockets.get_socket::<UdpSocket>(handle);
                 let (rx, tx) = wakers.get_udp_wakers(handle);
                 socket.register_recv_waker(rx);
@@ -351,7 +336,7 @@ pub fn run() -> Result<()> {
     let timeout = Some(Duration::from_millis(1));
     let mut last_udp_check_time = std::time::Instant::now();
     let mut last_tcp_check_time = std::time::Instant::now();
-    let check_duration = std::time::Duration::new(10, 0);
+    let check_duration = std::time::Duration::new(60, 0);
     let mut now = Instant::now();
     let mut wakers = Wakers::new();
     loop {
@@ -398,8 +383,15 @@ pub fn run() -> Result<()> {
         if now - last_tcp_check_time > check_duration {
             tcp_server.check_timeout(&poll, now, &mut interface);
             last_tcp_check_time = now;
-            let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {
-                if matches!(socket, Socket::Tcp(_)) {
+            let sockets_count = interface.sockets().fold(0, |count, (handle, socket)| {
+                if let Socket::Tcp(socket) = socket {
+                    log::info!(
+                        "tcp socket:{} {} {} <-> {}",
+                        handle,
+                        socket.state(),
+                        socket.remote_endpoint(),
+                        socket.local_endpoint()
+                    );
                     count + 1
                 } else {
                     count
@@ -408,7 +400,7 @@ pub fn run() -> Result<()> {
             log::warn!("total tcp sockets count:{}", sockets_count);
         }
 
-        if now - last_udp_check_time > OPTIONS.udp_idle_duration {
+        if now - last_udp_check_time > check_duration {
             udp_server.check_timeout(now, &mut interface);
             last_udp_check_time = now;
             let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {

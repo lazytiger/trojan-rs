@@ -336,7 +336,7 @@ impl Connection {
     }
 
     fn timeout(&self, now: Instant) -> bool {
-        now - self.last_active_time > OPTIONS.tcp_idle_duration
+        now - self.last_active_time > OPTIONS.udp_idle_duration
     }
 
     pub(crate) fn destroyed(&self) -> bool {

@@ -84,6 +84,16 @@ impl TcpServer {
         for (handle, event) in wakers.get_tcp_handles().iter() {
             let handle = *handle;
             log::info!("handle:{}, event:{:?}", handle, event);
+            let socket = sockets.get_socket::<TcpSocket>(handle);
+            if socket.is_listening() {
+                log::info!(
+                    "socket:{} {} still listening, remove now",
+                    handle,
+                    socket.local_endpoint()
+                );
+                sockets.remove_socket(handle);
+                continue; // Filter unused syn packet
+            }
             let conn = if let Some(conn) = self.src_map.get_mut(&handle) {
                 conn
             } else if let Some(mut conn) = pool.get(poll, resolver) {
@@ -92,7 +102,6 @@ impl TcpServer {
                     conn.check_status(poll);
                     continue;
                 }
-                let socket = sockets.get_socket::<TcpSocket>(handle);
                 let mut conn = Connection::new(conn, handle, index, socket.local_endpoint());
                 if !conn.setup() {
                     conn.conn.check_status(poll);
@@ -150,7 +159,7 @@ impl TcpServer {
         if !self.conns.contains_key(&index) {
             return;
         }
-        log::warn!("connection:{}-{} removed", handle, index);
+        log::info!("connection:{}-{} removed", handle, index);
         sockets.remove_socket(handle);
         let _ = self.conns.remove(&index);
         let _ = self.src_map.remove(&handle);
@@ -172,8 +181,6 @@ pub struct Connection {
     socket_state: TcpState,
 }
 
-impl Connection {}
-
 impl Connection {
     fn new(conn: TlsConn, handle: SocketHandle, index: usize, endpoint: IpEndpoint) -> Self {
         Self {
@@ -193,11 +200,22 @@ impl Connection {
     }
 
     pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, sockets: &mut SocketSet) {
+        let socket = sockets.get_socket::<TcpSocket>(self.handle);
+        log::info!(
+            "socket:{} {}<->{} {} {:?} {:?} {:?}",
+            self.handle,
+            socket.remote_endpoint(),
+            socket.local_endpoint(),
+            socket.state(),
+            self.status,
+            self.conn.get_status(),
+            self.last_active_time.elapsed(),
+        );
         if self.timeout(now) {
             self.close(sockets);
             self.conn.shutdown();
-            self.do_check_status(poll, sockets);
         }
+        self.do_check_status(poll, sockets);
     }
 
     fn close(&mut self, sockets: &mut SocketSet) {
@@ -244,10 +262,10 @@ impl Connection {
         }
         if self.conn.is_shutdown() {
             self.peer_closed();
-            self.try_close(poll, sockets); //closing -> closed
+            self.check_status(poll);
         }
         self.try_close(poll, sockets); //closing -> closed
-        self.check_status(poll); //peer_closed -> closing
+        self.check_status(poll);
         self.conn.check_status(poll);
     }
 
@@ -301,7 +319,7 @@ impl Connection {
         }
 
         if matches!(socket.state(), TcpState::CloseWait | TcpState::Closed) {
-            log::warn!("client:{}-{} shutdown now", self.handle, self.index);
+            log::info!("client:{}-{} shutdown now", self.handle, self.index);
             self.close_conn();
             self.try_close(poll, sockets);
         }

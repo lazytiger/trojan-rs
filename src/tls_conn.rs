@@ -89,7 +89,7 @@ impl TlsConn {
                     break;
                 }
                 Err(err) => {
-                    log::warn!(
+                    log::info!(
                         "connection:{} read from server failed:{}",
                         self.index(),
                         err
@@ -113,7 +113,7 @@ impl TlsConn {
         let mut buffer = Vec::new();
         if let Err(err) = self.session.reader().read_to_end(&mut buffer) {
             if err.kind() != ErrorKind::WouldBlock {
-                log::warn!(
+                log::info!(
                     "connection:{} read from session failed:{}",
                     self.index(),
                     err
@@ -149,7 +149,7 @@ impl TlsConn {
                     self.writable = false;
                 }
                 Err(err) => {
-                    log::warn!("connection:{} write to server failed:{}", self.index(), err);
+                    log::info!("connection:{} write to server failed:{}", self.index(), err);
                     self.shutdown();
                 }
             }
@@ -165,7 +165,7 @@ impl TlsConn {
             }
             Err(err) => {
                 self.shutdown();
-                log::warn!(
+                log::info!(
                     "connection:{} write data to server session failed:{}",
                     self.index(),
                     err
