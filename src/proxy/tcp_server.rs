@@ -112,12 +112,12 @@ impl TcpServer {
             .conns
             .iter_mut()
             .filter_map(|(index, conn)| {
+                if !conn.destroyed() && conn.timeout(now) {
+                    conn.destroy(poll);
+                }
                 if conn.destroyed() {
                     Some(*index)
                 } else {
-                    if conn.timeout(now) {
-                        conn.destroy(poll);
-                    }
                     None
                 }
             })

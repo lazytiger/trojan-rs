@@ -134,13 +134,13 @@ impl TlsServer {
             .conns
             .iter_mut()
             .filter_map(|(index, conn)| {
+                if !conn.destroyed() && conn.timeout(check_active_time) {
+                    log::warn!("connection:{} timeout, close now", index);
+                    conn.destroy(poll);
+                }
                 if conn.destroyed() {
                     Some(*index)
                 } else {
-                    if conn.timeout(check_active_time) {
-                        log::warn!("connection:{} timeout, close now", index);
-                        conn.destroy(poll)
-                    }
                     None
                 }
             })
