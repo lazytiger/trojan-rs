@@ -158,7 +158,7 @@ impl IdlePool {
     }
 
     pub fn check_timeout(&mut self, poll: &Poll) {
-        let closed: Vec<_> = self
+        let mut closed: Vec<_> = self
             .pool
             .iter_mut()
             .enumerate()
@@ -174,8 +174,9 @@ impl IdlePool {
                 }
             })
             .collect();
-        for index in closed {
-            self.pool.swap_remove(index);
+        closed.sort_unstable();
+        for index in closed.iter().rev() {
+            self.pool.swap_remove(*index);
         }
     }
 }
