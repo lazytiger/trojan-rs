@@ -118,9 +118,6 @@ pub fn run() -> Result<()> {
     let mut udp_server = UdpServer::new(udp_listener);
 
     let mut events = Events::with_capacity(1024);
-    let mut last_udp_check_time = Instant::now();
-    let mut last_tcp_check_time = Instant::now();
-    let check_duration = Duration::new(1, 0);
 
     let mut pool = IdlePool::new(
         config,
@@ -131,6 +128,9 @@ pub fn run() -> Result<()> {
     );
     pool.init(&poll, &resolver);
     pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
+
+    let mut last_check_time = Instant::now();
+    let check_duration = Duration::new(1, 0);
 
     loop {
         poll.poll(&mut events, Some(check_duration))?;
@@ -160,13 +160,11 @@ pub fn run() -> Result<()> {
             }
         }
         let now = Instant::now();
-        if now - last_tcp_check_time > Duration::from_secs(1) {
+        if now - last_check_time > check_duration {
             tcp_server.check_timeout(&poll, now);
-            last_tcp_check_time = now;
-        }
-        if now - last_udp_check_time > OPTIONS.udp_idle_duration {
             udp_cache.check_timeout();
-            last_udp_check_time = now;
+            pool.check_timeout(&poll);
+            last_check_time = now;
         }
     }
 }

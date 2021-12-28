@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -135,27 +136,46 @@ impl IdlePool {
     }
 
     pub fn ready(&mut self, event: &Event, poll: &Poll) {
-        let mut found = false;
-        for i in 0..self.pool.len() {
-            let conn = self.pool.get_mut(i).unwrap();
-            if conn.token() == event.token() {
-                if event.is_readable() && conn.do_read().is_some() {
+        if let Some((index, conn)) = self
+            .pool
+            .iter_mut()
+            .find_position(|conn| conn.token() == event.token())
+        {
+            if event.is_readable() && conn.do_read().is_some() {
+                log::error!("found data in https handshake phase");
+            }
+            if event.is_writable() {
+                conn.established();
+                conn.do_send();
+            }
+            conn.check_status(poll);
+            if conn.deregistered() {
+                self.pool.swap_remove(index);
+            }
+        } else {
+            log::error!("idle token:{} not found", event.token().0);
+        }
+    }
+
+    pub fn check_timeout(&mut self, poll: &Poll) {
+        let closed: Vec<_> = self
+            .pool
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(index, conn)| {
+                if !conn.deregistered() && conn.do_read().is_some() {
                     log::error!("found data in https handshake phase");
-                }
-                if event.is_writable() {
-                    conn.established();
-                    conn.do_send();
                 }
                 conn.check_status(poll);
                 if conn.deregistered() {
-                    self.pool.remove(i);
+                    Some(index)
+                } else {
+                    None
                 }
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            log::error!("idle token:{} not found", event.token().0);
+            })
+            .collect();
+        for index in closed {
+            self.pool.swap_remove(index);
         }
     }
 }

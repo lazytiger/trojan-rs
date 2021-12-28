@@ -334,8 +334,7 @@ pub fn run() -> Result<()> {
 
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
-    let mut last_udp_check_time = std::time::Instant::now();
-    let mut last_tcp_check_time = std::time::Instant::now();
+    let mut last_check_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(60, 0);
     let mut now = Instant::now();
     let mut wakers = Wakers::new();
@@ -380,9 +379,8 @@ pub fn run() -> Result<()> {
         }
 
         let now = std::time::Instant::now();
-        if now - last_tcp_check_time > check_duration {
+        if now - last_check_time > check_duration {
             tcp_server.check_timeout(&poll, now, &mut interface);
-            last_tcp_check_time = now;
             let sockets_count = interface.sockets().fold(0, |count, (handle, socket)| {
                 if let Socket::Tcp(socket) = socket {
                     log::info!(
@@ -398,11 +396,7 @@ pub fn run() -> Result<()> {
                 }
             });
             log::warn!("total tcp sockets count:{}", sockets_count);
-        }
-
-        if now - last_udp_check_time > check_duration {
             udp_server.check_timeout(now, &mut interface);
-            last_udp_check_time = now;
             let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {
                 if matches!(socket, Socket::Udp(_)) {
                     count + 1
@@ -411,6 +405,8 @@ pub fn run() -> Result<()> {
                 }
             });
             log::warn!("total udp sockets count:{}", sockets_count);
+            pool.check_timeout(&poll);
+            last_check_time = now;
         }
     }
 }
