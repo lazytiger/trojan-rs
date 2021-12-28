@@ -74,7 +74,7 @@ impl Connection {
         if let Some(backend) = &self.backend {
             backend.timeout(self.last_active_time, recent_active_time)
         } else {
-            false
+            self.last_active_time.elapsed().as_secs() > 30
         }
     }
 
