@@ -339,7 +339,6 @@ pub fn run() -> Result<()> {
     let mut now = Instant::now();
     let mut wakers = Wakers::new();
     loop {
-        wakers.clear();
         do_tun_read(
             &session,
             &rx_sender,
@@ -353,9 +352,7 @@ pub fn run() -> Result<()> {
 
         udp_server.do_local(&mut pool, &poll, &resolver, &mut wakers, &mut interface);
         tcp_server.do_local(&mut pool, &poll, &resolver, &mut wakers, &mut interface);
-        if let Err(err) = interface.poll(now) {
-            log::info!("interface error:{}", err);
-        }
+        wakers.clear();
 
         now = Instant::now();
         let timeout = interface.poll_delay(now).or(timeout);
