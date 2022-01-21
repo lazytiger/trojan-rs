@@ -63,7 +63,7 @@ fn start_dns() {
         } else {
             "".into()
         };
-        let message = match Command::new(program.clone())
+        let message = match Command::new(program)
             .args([
                 "--log-file",
                 log_file.as_str(),
@@ -350,8 +350,12 @@ pub fn run() -> Result<()> {
         if let Err(err) = interface.poll(now) {
             log::info!("interface error:{}", err);
         }
+
         udp_server.do_local(&mut pool, &poll, &resolver, &mut wakers, &mut interface);
         tcp_server.do_local(&mut pool, &poll, &resolver, &mut wakers, &mut interface);
+        if let Err(err) = interface.poll(now) {
+            log::info!("interface error:{}", err);
+        }
 
         now = Instant::now();
         let timeout = interface.poll_delay(now).or(timeout);

@@ -26,15 +26,15 @@ pub fn is_private(endpoint: IpEndpoint) -> bool {
 }
 
 pub struct IPSet {
-    data: Vec<CIDR>,
+    data: Vec<Cidr>,
 }
 
-struct CIDR {
+struct Cidr {
     ip: u32,
     prefix: u32,
 }
 
-impl CIDR {
+impl Cidr {
     fn new(ip: u32, prefix: u32) -> Self {
         let mut item = Self { ip, prefix };
         item.ip &= item.mask();
@@ -53,15 +53,15 @@ impl CIDR {
     }
 }
 
-impl Eq for CIDR {}
+impl Eq for Cidr {}
 
-impl PartialEq<Self> for CIDR {
+impl PartialEq<Self> for Cidr {
     fn eq(&self, other: &Self) -> bool {
         self.ip == other.ip && self.prefix == other.prefix
     }
 }
 
-impl PartialOrd<Self> for CIDR {
+impl PartialOrd<Self> for Cidr {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match self.ip.partial_cmp(&other.ip) {
             Some(Ordering::Equal) => other.prefix.partial_cmp(&self.prefix),
@@ -70,7 +70,7 @@ impl PartialOrd<Self> for CIDR {
     }
 }
 
-impl Ord for CIDR {
+impl Ord for Cidr {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.ip.cmp(&other.ip) {
             Ordering::Equal => other.prefix.cmp(&self.prefix),
@@ -108,7 +108,7 @@ impl IPSet {
     }
 
     pub fn add(&mut self, ip: u32, prefix: u32) {
-        self.data.push(CIDR::new(ip, prefix))
+        self.data.push(Cidr::new(ip, prefix))
     }
 
     pub fn add_str(&mut self, line: &str) {
@@ -159,10 +159,10 @@ impl Not for IPSet {
     }
 }
 
-fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<CIDR> {
+fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
     let mut cidrs = Vec::new();
     if left == right {
-        cidrs.push(CIDR::new(left, 32));
+        cidrs.push(Cidr::new(left, 32));
         return cidrs;
     }
 
@@ -171,7 +171,7 @@ fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<CIDR> {
         let prefix = 32 - shift;
         let r = right & !((1 << shift) - 1);
         if left <= r {
-            cidrs.push(CIDR::new(r, prefix));
+            cidrs.push(Cidr::new(r, prefix));
             right = r - 1;
         } else {
             break;
@@ -180,7 +180,7 @@ fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<CIDR> {
     while left <= right {
         let shift = left.trailing_zeros();
         let prefix = 32 - shift;
-        cidrs.push(CIDR::new(left, prefix));
+        cidrs.push(Cidr::new(left, prefix));
         left += 1 << shift;
     }
     cidrs.sort();
