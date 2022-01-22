@@ -321,7 +321,7 @@ impl Connection {
             self.try_close(poll, sockets);
         }
 
-        self.do_send_server();
+        self.do_send_server(poll, sockets);
     }
 
     fn try_send_client(&mut self, sockets: &mut SocketSet, data: &[u8]) {
@@ -383,7 +383,7 @@ impl Connection {
 
         if event.is_writable() {
             self.conn.established();
-            self.do_send_server();
+            self.do_send_server(poll, sockets);
         }
 
         if !self.send_buffer.is_empty() {
@@ -401,7 +401,7 @@ impl Connection {
         }
     }
 
-    fn do_send_server(&mut self) {
+    fn do_send_server(&mut self, poll: &Poll, sockets: &mut SocketSet) {
         self.conn.do_send();
         if self.conn.writable() && self.read_client {
             self.try_recv_client(poll, sockets);
