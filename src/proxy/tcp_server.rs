@@ -213,14 +213,6 @@ impl Connection {
                 if event.is_writable() {
                     self.established();
                     self.try_send_client(&[]);
-                    if self.writable() && self.read_server {
-                        log::trace!(
-                            "client connection:{} is writable, restore reading from server",
-                            self.index
-                        );
-                        self.try_read_server();
-                        self.read_server = false;
-                    }
                 }
             }
             CHANNEL_TCP => {
@@ -239,14 +231,6 @@ impl Connection {
                 if event.is_writable() {
                     self.server_conn.established();
                     self.try_send_server();
-                    if self.server_conn.writable() && self.read_client {
-                        log::trace!(
-                            "server connection:{} is writable, restore reading from client",
-                            self.index
-                        );
-                        self.try_read_client();
-                        self.read_client = false;
-                    }
                 }
             }
             _ => {
@@ -291,6 +275,14 @@ impl Connection {
             let buffer = self.send_buffer.split();
             self.do_send_client(buffer.as_ref());
         }
+        if self.writable() && self.read_server {
+            log::trace!(
+                "client connection:{} is writable, restore reading from server",
+                self.index
+            );
+            self.try_read_server();
+            self.read_server = false;
+        }
     }
 
     fn do_send_client(&mut self, data: &[u8]) {
@@ -307,6 +299,14 @@ impl Connection {
 
     fn try_send_server(&mut self) {
         self.server_conn.do_send();
+        if self.server_conn.writable() && self.read_client {
+            log::trace!(
+                "server connection:{} is writable, restore reading from client",
+                self.index
+            );
+            self.try_read_client();
+            self.read_client = false;
+        }
     }
 }
 
