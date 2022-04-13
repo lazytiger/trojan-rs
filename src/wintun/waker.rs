@@ -1,9 +1,11 @@
-use smoltcp::iface::SocketHandle;
 use std::{
     collections::HashMap,
     sync::Arc,
     task::{Wake, Waker},
 };
+
+use crossbeam::channel::{Receiver, Sender};
+use smoltcp::iface::SocketHandle;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Event(u8);
@@ -33,94 +35,55 @@ impl Event {
 struct TunWaker {
     event: Event,
     handle: SocketHandle,
-    handles: Arc<HashMap<SocketHandle, Event>>,
-    waker: Option<Waker>,
+    sender: Sender<(SocketHandle, Event)>,
 }
 
 impl Wake for TunWaker {
     fn wake(self: Arc<Self>) {
-        let mut handles = self.handles.clone();
-        let handles = unsafe { Arc::get_mut_unchecked(&mut handles) };
-        handles
-            .entry(self.handle)
-            .or_insert(Event(0))
-            .add(self.event);
+        self.sender.send((self.handle, self.event)).unwrap();
     }
 }
 
 impl TunWaker {
-    fn new(
-        event: Event,
-        handle: SocketHandle,
-        handles: Arc<HashMap<SocketHandle, Event>>,
-    ) -> Arc<Self> {
-        let mut waker = Arc::new(TunWaker {
+    fn create(event: Event, handle: SocketHandle, sender: Sender<(SocketHandle, Event)>) -> Waker {
+        let waker = Arc::new(TunWaker {
             handle,
             event,
-            handles,
-            waker: None,
+            sender,
         });
-        unsafe { Arc::get_mut_unchecked(&mut waker) }.waker = Some(Waker::from(waker.clone()));
-        waker
+        Waker::from(waker)
     }
 }
 
 pub struct Wakers {
-    udp_handles: Arc<HashMap<SocketHandle, Event>>,
-    tcp_handles: Arc<HashMap<SocketHandle, Event>>,
-    wakers: HashMap<SocketHandle, (Arc<TunWaker>, Arc<TunWaker>)>,
+    wakers: HashMap<SocketHandle, (Waker, Waker)>,
+    sender: Sender<(SocketHandle, Event)>,
+    receiver: Receiver<(SocketHandle, Event)>,
 }
 
 impl Wakers {
     pub fn new() -> Self {
+        let (sender, receiver) = crossbeam::channel::unbounded();
         Self {
-            udp_handles: Arc::new(Default::default()),
-            tcp_handles: Arc::new(Default::default()),
             wakers: Default::default(),
+            sender,
+            receiver,
         }
     }
-    pub fn get_udp_wakers(&mut self, handle: SocketHandle) -> (&Waker, &Waker) {
+    pub fn get_wakers(&mut self, handle: SocketHandle) -> (&Waker, &Waker) {
         if self.wakers.get(&handle).is_none() {
-            let rx = TunWaker::new(Event::rx(), handle, self.udp_handles.clone());
-            let tx = TunWaker::new(Event::tx(), handle, self.udp_handles.clone());
+            let rx = TunWaker::create(Event::rx(), handle, self.sender.clone());
+            let tx = TunWaker::create(Event::tx(), handle, self.sender.clone());
             self.wakers.insert(handle, (rx, tx));
         }
-        let (rx, tx) = self.wakers.get_mut(&handle).unwrap();
-        if !Arc::ptr_eq(&rx.handles, &self.udp_handles) {
-            log::info!("handle:{} type changed to udp", handle);
-            unsafe { Arc::get_mut_unchecked(rx) }.handles = self.udp_handles.clone();
-            unsafe { Arc::get_mut_unchecked(tx) }.handles = self.udp_handles.clone();
-        }
-        (rx.waker.as_ref().unwrap(), tx.waker.as_ref().unwrap())
+        let (rx, tx) = self.wakers.get(&handle).unwrap();
+        (rx, tx)
     }
-
-    pub fn get_tcp_wakers(&mut self, handle: SocketHandle) -> (&Waker, &Waker) {
-        if self.wakers.get(&handle).is_none() {
-            let rx = TunWaker::new(Event::rx(), handle, self.tcp_handles.clone());
-            let tx = TunWaker::new(Event::tx(), handle, self.tcp_handles.clone());
-            self.wakers.insert(handle, (rx, tx));
+    pub fn get_events(&self) -> HashMap<SocketHandle, Event> {
+        let mut events = HashMap::new();
+        while let Ok((handle, event)) = self.receiver.try_recv() {
+            events.entry(handle).or_insert(event).add(event);
         }
-        let (rx, tx) = self.wakers.get_mut(&handle).unwrap();
-        if !Arc::ptr_eq(&rx.handles, &self.tcp_handles) {
-            log::info!("handle:{} type changed to tcp", handle);
-            unsafe { Arc::get_mut_unchecked(rx) }.handles = self.tcp_handles.clone();
-            unsafe { Arc::get_mut_unchecked(tx) }.handles = self.tcp_handles.clone();
-        }
-        (rx.waker.as_ref().unwrap(), tx.waker.as_ref().unwrap())
-    }
-
-    pub fn clear(&mut self) {
-        unsafe {
-            Arc::get_mut_unchecked(&mut self.udp_handles).clear();
-            Arc::get_mut_unchecked(&mut self.tcp_handles).clear();
-        }
-    }
-
-    pub fn get_tcp_handles(&self) -> Arc<HashMap<SocketHandle, Event>> {
-        self.tcp_handles.clone()
-    }
-
-    pub fn get_udp_handles(&self) -> Arc<HashMap<SocketHandle, Event>> {
-        self.udp_handles.clone()
+        events
     }
 }

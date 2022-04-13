@@ -1,3 +1,13 @@
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
+
+use bytes::BytesMut;
+use mio::{event::Event, Poll, Token};
+use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint};
+
 use crate::{
     proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
     proxy::IdlePool,
@@ -6,14 +16,6 @@ use crate::{
     tls_conn::TlsConn,
     wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
-};
-use bytes::BytesMut;
-use mio::{event::Event, Poll, Token};
-use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Instant,
 };
 
 pub struct UdpServer {
@@ -68,7 +70,7 @@ impl UdpServer {
         wakers: &mut Wakers,
         sockets: &mut SocketSet,
     ) {
-        for (handle, event) in wakers.get_udp_handles().iter() {
+        for (handle, event) in wakers.get_events().iter() {
             let handle = *handle;
             let listener = if let Some(listener) = self.src_map.get_mut(&handle) {
                 listener
@@ -86,7 +88,7 @@ impl UdpServer {
             for index in &removes {
                 self.conns.remove(index);
             }
-            let (rx, tx) = wakers.get_udp_wakers(handle);
+            let (rx, tx) = wakers.get_wakers(handle);
             let socket = sockets.get_socket::<UdpSocket>(handle);
             if event.is_readable() {
                 socket.register_recv_waker(rx);
@@ -373,7 +375,7 @@ impl Connection {
 
         if !self.send_buffer.is_empty() {
             let socket = sockets.get_socket::<UdpSocket>(self.handle);
-            let (_, tx) = wakers.get_udp_wakers(self.handle);
+            let (_, tx) = wakers.get_wakers(self.handle);
             socket.register_send_waker(tx);
         }
 

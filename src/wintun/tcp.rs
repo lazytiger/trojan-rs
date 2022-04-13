@@ -81,7 +81,7 @@ impl TcpServer {
         sockets: &mut SocketSet,
     ) {
         let mut destroyed = Vec::new();
-        for (handle, event) in wakers.get_tcp_handles().iter() {
+        for (handle, event) in wakers.get_events().iter() {
             let handle = *handle;
             log::info!("handle:{}, event:{:?}", handle, event);
             let socket = sockets.get_socket::<TcpSocket>(handle);
@@ -121,7 +121,7 @@ impl TcpServer {
                 destroyed.push((conn.handle, conn.index));
             } else {
                 let socket = sockets.get_socket::<TcpSocket>(handle);
-                let (rx, tx) = wakers.get_tcp_wakers(handle);
+                let (rx, tx) = wakers.get_wakers(handle);
                 if event.is_readable() {
                     socket.register_recv_waker(rx);
                 }
@@ -388,7 +388,7 @@ impl Connection {
 
         if !self.send_buffer.is_empty() {
             let socket = sockets.get_socket::<TcpSocket>(self.handle);
-            let (_, tx) = wakers.get_tcp_wakers(self.handle);
+            let (_, tx) = wakers.get_wakers(self.handle);
             socket.register_send_waker(tx);
         }
 

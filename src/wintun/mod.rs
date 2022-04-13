@@ -14,6 +14,8 @@ use smoltcp::{
 };
 use wintun::{Adapter, Session};
 
+pub use route::route_add_with_if;
+
 use crate::{
     dns::get_adapter_ip,
     proxy::IdlePool,
@@ -28,7 +30,6 @@ use crate::{
     },
     OPTIONS,
 };
-pub use route::route_add_with_if;
 
 mod ipset;
 mod route;
@@ -187,7 +188,8 @@ fn do_tun_read(
     sender: &Sender<Vec<u8>>,
     sockets: &mut SocketSet,
     udp_server: &mut UdpServer,
-    wakers: &mut Wakers,
+    udp_wakers: &mut Wakers,
+    tcp_wakers: &mut Wakers,
 ) -> Result<()> {
     for _ in 0..1024 {
         let packet = session.try_receive()?;
@@ -251,7 +253,7 @@ fn do_tun_read(
                 );
                 let handle = sockets.add_socket(socket);
                 let socket = sockets.get_socket::<TcpSocket>(handle);
-                let (rx, tx) = wakers.get_tcp_wakers(handle);
+                let (rx, tx) = tcp_wakers.get_wakers(handle);
                 socket.register_recv_waker(rx);
                 socket.register_send_waker(tx);
                 socket.listen(dst_endpoint).unwrap();
@@ -283,7 +285,7 @@ fn do_tun_read(
                 let handle = sockets.add_socket(socket);
                 log::info!("udp handle:{} is {}", handle, dst_endpoint);
                 let socket = sockets.get_socket::<UdpSocket>(handle);
-                let (rx, tx) = wakers.get_udp_wakers(handle);
+                let (rx, tx) = udp_wakers.get_wakers(handle);
                 socket.register_recv_waker(rx);
                 socket.register_send_waker(tx);
             }
@@ -337,22 +339,24 @@ pub fn run() -> Result<()> {
     let mut last_check_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(60, 0);
     let mut now = Instant::now();
-    let mut wakers = Wakers::new();
+
+    let mut udp_wakers = Wakers::new();
+    let mut tcp_wakers = Wakers::new();
     loop {
         do_tun_read(
             &session,
             &rx_sender,
             &mut interface,
             &mut udp_server,
-            &mut wakers,
+            &mut udp_wakers,
+            &mut tcp_wakers,
         )?;
         if let Err(err) = interface.poll(now) {
             log::info!("interface error:{}", err);
         }
 
-        udp_server.do_local(&mut pool, &poll, &resolver, &mut wakers, &mut interface);
-        tcp_server.do_local(&mut pool, &poll, &resolver, &mut wakers, &mut interface);
-        wakers.clear();
+        udp_server.do_local(&mut pool, &poll, &resolver, &mut udp_wakers, &mut interface);
+        tcp_server.do_local(&mut pool, &poll, &resolver, &mut tcp_wakers, &mut interface);
 
         now = Instant::now();
         let timeout = interface.poll_delay(now).or(timeout);
@@ -371,10 +375,10 @@ pub fn run() -> Result<()> {
                     pool.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.do_remote(event, &poll, &mut interface, &mut wakers);
+                    udp_server.do_remote(event, &poll, &mut interface, &mut udp_wakers);
                 }
                 _ => {
-                    tcp_server.do_remote(event, &poll, &mut interface, &mut wakers);
+                    tcp_server.do_remote(event, &poll, &mut interface, &mut tcp_wakers);
                 }
             }
         }
