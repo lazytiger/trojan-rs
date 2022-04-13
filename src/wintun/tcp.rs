@@ -122,7 +122,7 @@ impl TcpServer {
             } else {
                 let socket = sockets.get_socket::<TcpSocket>(handle);
                 let (rx, tx) = wakers.get_wakers(handle);
-                if event.is_readable() {
+                if !conn.read_client {
                     socket.register_recv_waker(rx);
                 }
                 if !conn.send_buffer.is_empty() {
@@ -406,6 +406,7 @@ impl Connection {
         if self.conn.writable() && self.read_client {
             self.try_recv_client(poll, sockets);
             self.read_client = false;
+            //register_read
         }
     }
 }
