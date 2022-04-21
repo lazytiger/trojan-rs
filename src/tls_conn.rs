@@ -84,14 +84,18 @@ impl TlsConn {
                         size
                     );
                 }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                Err(err)
+                    if err.kind() == ErrorKind::WouldBlock
+                        || err.kind() == ErrorKind::NotConnected =>
+                {
                     log::debug!("connection:{} read from server blocked", self.index());
                     break;
                 }
                 Err(err) => {
                     log::info!(
-                        "connection:{} read from server failed:{}",
+                        "connection:{} read from server failed:{}-{}",
                         self.index(),
+                        err.kind(),
                         err
                     );
                     self.shutdown();

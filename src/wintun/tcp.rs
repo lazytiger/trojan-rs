@@ -300,9 +300,11 @@ impl Connection {
     fn try_recv_client(&mut self, poll: &Poll, sockets: &mut SocketSet) {
         let socket = sockets.get_socket::<TcpSocket>(self.handle);
         let buffer = self.recv_buffer.as_mut_slice();
+        let mut count = 0;
         while socket.may_recv() {
             match socket.recv_slice(buffer) {
                 Ok(size) => {
+                    count += size;
                     log::info!("receive {} bytes from client", size);
                     if size == 0 || !self.conn.write_session(&buffer[..size]) {
                         break;
@@ -321,7 +323,9 @@ impl Connection {
             self.try_close(poll, sockets);
         }
 
-        self.do_send_server(poll, sockets);
+        if count > 0 {
+            self.do_send_server(poll, sockets);
+        }
     }
 
     fn try_send_client(&mut self, sockets: &mut SocketSet, data: &[u8]) {

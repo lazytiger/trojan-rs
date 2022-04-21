@@ -11,7 +11,7 @@ use winapi::{
 use crate::types::{Result, TrojanError};
 
 pub fn route_add_with_if(dst: u32, mask: u32, if_index: u32) -> Result<()> {
-    log::info!(
+    log::trace!(
         "route add {} mask {} 0.0.0.0 metric 1 if {}",
         Ipv4Addr::from(dst),
         Ipv4Addr::from(mask),

@@ -26,7 +26,10 @@ fn main() {
     config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);
     if let Err(err) = match OPTIONS.mode {
         Mode::Proxy(_) => {
-            log::warn!("trojan started in proxy mode");
+            log::warn!(
+                "trojan started in dns mode with server:{}",
+                OPTIONS.back_addr.as_ref().unwrap()
+            );
             proxy::run()
         }
         Mode::Server(_) => {
@@ -36,7 +39,7 @@ fn main() {
         Mode::Wintun(_) => {
             cfg_if::cfg_if! {
                 if #[cfg(windows)] {
-                    log::warn!("trojan started in wintun mode");
+                    log::warn!("trojan started in wintun mode with server:{}", OPTIONS.back_addr.as_ref().unwrap());
                     wintun::run()
                 } else {
                     panic!("trojan in wintun mode not supported on non-windows platform");
