@@ -2,8 +2,6 @@
 #![feature(get_mut_unchecked)]
 #![feature(test)]
 
-extern crate core;
-
 use crate::config::{Mode, OPTIONS};
 
 mod config;

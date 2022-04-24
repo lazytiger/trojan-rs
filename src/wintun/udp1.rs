@@ -1,8 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io::{ErrorKind, Read, Write},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytes::BytesMut;
@@ -14,7 +14,7 @@ use crate::{
     proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
     resolver::DnsResolver,
     tls_conn::TlsConn,
-    utils::{copy_stream, read_once, send_all},
+    utils::send_all,
     wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
@@ -239,7 +239,7 @@ impl Connection {
                                 self.lbuffer.set_len(len);
                             }
                         }
-                        log::info!("continue to read with {} bytes left", self.lbuffer.len());
+                        log::info!("continue parsing with {} bytes left", self.lbuffer.len());
                         break;
                     }
                     UdpParseResultEndpoint::Packet(packet) => {
@@ -270,12 +270,12 @@ impl Connection {
 pub struct UdpServer {
     token2conns: HashMap<Token, Arc<Connection>>,
     addr2conns: HashMap<IpEndpoint, Arc<Connection>>,
-    sockets: HashSet<IpEndpoint>,
+    sockets: HashMap<IpEndpoint, Instant>,
     buffer: BytesMut,
 }
 
 impl UdpServer {
-    pub fn new(ipv4: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             token2conns: Default::default(),
             addr2conns: Default::default(),
@@ -285,16 +285,33 @@ impl UdpServer {
     }
 
     pub fn new_socket(&mut self, endpoint: IpEndpoint) -> bool {
-        if self.sockets.contains(&endpoint) {
+        if self.sockets.contains_key(&endpoint) {
             false
         } else {
-            self.sockets.insert(endpoint);
+            self.sockets.insert(endpoint, Instant::now());
             true
         }
     }
 
     pub fn check_timeout(&mut self, now: Instant, sockets: &mut SocketSet) {
-        //TODO
+        let conns: Vec<_> = self
+            .sockets
+            .iter()
+            .filter_map(|(endpoint, last_active)| {
+                let elapsed = now - *last_active;
+                if elapsed > Duration::from_secs(600) {
+                    self.addr2conns.get(endpoint).map(|c| c.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for conn in conns {
+            self.sockets.remove(&conn.endpoint);
+            sockets.remove_socket(conn.local);
+            self.remove(conn);
+        }
     }
 
     pub fn do_local(
@@ -305,11 +322,12 @@ impl UdpServer {
         wakers: &mut Wakers,
         sockets: &mut SocketSet,
     ) {
-        for (handle, event) in wakers.get_events().iter() {
+        for (handle, _) in wakers.get_events().iter() {
             let socket = sockets.get_socket::<UdpSocket>(*handle);
             let (rx_waker, _) = wakers.get_wakers(*handle);
             socket.register_recv_waker(rx_waker);
             let dst_endpoint = socket.endpoint();
+            *self.sockets.get_mut(&dst_endpoint).unwrap() = Instant::now();
             while let Ok((data, src_endpoint)) = socket.recv() {
                 self.buffer.clear();
                 UdpAssociate::generate_endpoint(&mut self.buffer, &dst_endpoint, data.len() as u16);
@@ -350,13 +368,7 @@ impl UdpServer {
         }
     }
 
-    pub fn do_remote(
-        &mut self,
-        event: &Event,
-        poll: &Poll,
-        sockets: &mut SocketSet,
-        wakers: &mut Wakers,
-    ) {
+    pub fn do_remote(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
         log::debug!("remote event for token:{}", event.token().0);
         if let Some(conn) = self.token2conns.get_mut(&event.token()) {
             let socket = sockets.get_socket::<UdpSocket>(conn.local);

@@ -23,7 +23,7 @@ use crate::{
     types::Result,
     wintun::{
         ipset::{is_private, IPSet},
-        tcp::TcpServer,
+        tcp1::TcpServer,
         tun::TunInterface,
         udp1::UdpServer,
         waker::Wakers,
@@ -33,7 +33,7 @@ use crate::{
 
 mod ipset;
 mod route;
-mod tcp;
+mod tcp1;
 mod tun;
 mod udp1;
 mod waker;
@@ -247,15 +247,13 @@ fn do_tun_read(
 
         match connect {
             Some(true) => {
-                continue;
                 let socket = TcpSocket::new(
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_rx_buffer_size]),
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_tx_buffer_size]),
                 );
                 let handle = sockets.add_socket(socket);
                 let socket = sockets.get_socket::<TcpSocket>(handle);
-                let (rx, tx) = tcp_wakers.get_wakers(handle);
-                socket.register_recv_waker(rx);
+                let (_, tx) = tcp_wakers.get_wakers(handle);
                 socket.register_send_waker(tx);
                 socket.listen(dst_endpoint).unwrap();
                 socket.set_nagle_enabled(false);
@@ -316,7 +314,7 @@ pub fn run() -> Result<()> {
     let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
     let mut pool = prepare_idle_pool(&poll, &resolver)?;
 
-    let mut udp_server = UdpServer::new(OPTIONS.back_addr.as_ref().unwrap().is_ipv4());
+    let mut udp_server = UdpServer::new();
     let mut tcp_server = TcpServer::new();
 
     let (rx_sender, rx_receiver) = crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);
@@ -376,7 +374,7 @@ pub fn run() -> Result<()> {
                     pool.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.do_remote(event, &poll, &mut interface, &mut udp_wakers);
+                    udp_server.do_remote(event, &poll, &mut interface);
                 }
                 _ => {
                     tcp_server.do_remote(event, &poll, &mut interface, &mut tcp_wakers);
