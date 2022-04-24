@@ -25,7 +25,7 @@ use crate::{
         ipset::{is_private, IPSet},
         tcp::TcpServer,
         tun::TunInterface,
-        udp::UdpServer,
+        udp1::UdpServer,
         waker::Wakers,
     },
     OPTIONS,
@@ -35,7 +35,7 @@ mod ipset;
 mod route;
 mod tcp;
 mod tun;
-mod udp;
+mod udp1;
 mod waker;
 
 pub(crate) type SocketSet<'a> = Interface<'a, TunInterface>;
@@ -247,6 +247,7 @@ fn do_tun_read(
 
         match connect {
             Some(true) => {
+                continue;
                 let socket = TcpSocket::new(
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_rx_buffer_size]),
                     TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_tx_buffer_size]),
@@ -315,7 +316,7 @@ pub fn run() -> Result<()> {
     let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
     let mut pool = prepare_idle_pool(&poll, &resolver)?;
 
-    let mut udp_server = UdpServer::new();
+    let mut udp_server = UdpServer::new(OPTIONS.back_addr.as_ref().unwrap().is_ipv4());
     let mut tcp_server = TcpServer::new();
 
     let (rx_sender, rx_receiver) = crossbeam::channel::bounded(OPTIONS.wintun_args().buffer_size);

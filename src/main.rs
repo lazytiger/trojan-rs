@@ -2,6 +2,8 @@
 #![feature(get_mut_unchecked)]
 #![feature(test)]
 
+extern crate core;
+
 use crate::config::{Mode, OPTIONS};
 
 mod config;
@@ -21,6 +23,7 @@ mod sys;
 mod tcp_util;
 mod tls_conn;
 mod types;
+mod utils;
 
 fn main() {
     config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);

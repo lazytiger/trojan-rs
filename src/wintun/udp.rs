@@ -1,12 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
+    io::{ErrorKind, Write},
     sync::Arc,
     time::Instant,
 };
 
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
-use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint};
+use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint, Error};
 
 use crate::{
     proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
@@ -354,6 +355,8 @@ impl Connection {
         log::info!("sending request to remote");
         self.recv_buffer.clear();
         UdpAssociate::generate_endpoint(&mut self.recv_buffer, &target, payload.len() as u16);
+        self.conn.write(self.recv_buffer.as_ref());
+        self.conn.write(payload);
         if self.conn.write_session(self.recv_buffer.as_ref()) {
             self.conn.write_session(payload);
         }

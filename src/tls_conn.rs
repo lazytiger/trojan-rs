@@ -1,11 +1,12 @@
 use std::{
-    io::{ErrorKind, Read, Write},
+    io::{Error, ErrorKind, Read, Write},
     net::Shutdown,
 };
 
-use crate::status::{ConnStatus, StatusProvider};
 use mio::{net::TcpStream, Interest, Poll, Token};
 use rustls::Connection;
+
+use crate::status::{ConnStatus, StatusProvider};
 
 pub struct TlsConn {
     session: Connection,
@@ -14,6 +15,66 @@ pub struct TlsConn {
     token: Token,
     status: ConnStatus,
     writable: bool,
+}
+
+impl TlsConn {
+    pub(crate) fn close(&mut self, poll: &Poll) {
+        let _ = self.stream.shutdown(Shutdown::Both);
+        let _ = poll.registry().deregister(&mut self.stream);
+    }
+}
+
+impl Read for TlsConn {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.session.wants_read() {
+            log::info!("read from stream now");
+            match self.session.read_tls(&mut self.stream) {
+                Ok(0) => Ok(0),
+                Ok(n) => {
+                    log::info!("read {} byte tls data from stream", n);
+                    if let Err(err) = self.session.process_new_packets() {
+                        Err(Error::new(ErrorKind::InvalidData, err))
+                    } else {
+                        log::info!("process new packets success");
+                        self.read(buf)
+                    }
+                }
+                Err(err) => Err(err),
+            }
+        } else {
+            log::info!("read from session now");
+            self.session.reader().read(buf)
+        }
+    }
+}
+
+impl Write for TlsConn {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.session.wants_write() {
+            log::info!("send data to stream now");
+            match self.session.write_tls(&mut self.stream) {
+                Ok(0) => Ok(0),
+                Ok(n) => {
+                    log::info!("send {} bytes tls data to remote stream", n);
+                    self.write(buf)
+                }
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    log::info!("remote stream blocked, send data to session");
+                    self.session.writer().write(buf)
+                }
+                Err(err) => Err(err),
+            }
+        } else {
+            log::info!("send data to session now");
+            self.session.writer().write(buf)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.session.write_tls(&mut self.stream).map(|n| {
+            log::info!("flush {} bytes tls data to stream", n);
+        })
+    }
 }
 
 impl TlsConn {
@@ -33,6 +94,17 @@ impl TlsConn {
         self.index = index;
         self.token = token;
         self.reregister(poll)
+    }
+
+    pub fn set_token(&mut self, token: Token, poll: &Poll) -> bool {
+        self.token = token;
+        poll.registry()
+            .reregister(
+                &mut self.stream,
+                self.token,
+                Interest::WRITABLE | Interest::READABLE,
+            )
+            .is_ok()
     }
 
     pub fn reregister(&mut self, poll: &Poll) -> bool {

@@ -18,6 +18,15 @@ pub enum TrojanError {
     NonWindowsPlatform,
     #[from(ignore)]
     Winapi(String),
+    #[from(ignore)]
+    TxBreak(Option<std::io::Error>),
+    #[from(ignore)]
+    RxBreak(Option<std::io::Error>),
+}
+
+pub enum CopyResult {
+    RxBlock,
+    TxBlock,
 }
 
 pub type Result<T> = std::result::Result<T, TrojanError>;
