@@ -1,5 +1,3 @@
-use crate::{types::Result, wintun::route::route_add_with_if};
-use smoltcp::wire::{IpAddress, IpEndpoint};
 use std::{
     cmp::Ordering,
     fs::File,
@@ -8,10 +6,15 @@ use std::{
     ops::Not,
 };
 
+use smoltcp::wire::{IpAddress, IpEndpoint};
+
+use crate::{types::Result, wintun::route::route_add_with_if};
+
 //TODO ipv6
 pub fn is_private(endpoint: IpEndpoint) -> bool {
     if let IpAddress::Ipv4(ip) = endpoint.addr {
-        ip.is_unspecified() //0.0.0.0/8
+        endpoint.port == 0
+        || ip.is_unspecified() //0.0.0.0/8
             || ip.0[0] == 10 //10.0.0.0/8
             || ip.is_loopback() //127.0.0.0/8
             || ip.is_link_local() //169.254.0.0/16
@@ -190,8 +193,9 @@ fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
 #[allow(dead_code)]
 #[allow(unused_imports)]
 mod tests {
-    use crate::wintun::ipset::{range_to_cidr, IPSet};
     use std::{fs::File, io::Write, net::Ipv4Addr};
+
+    use crate::wintun::ipset::{range_to_cidr, IPSet};
 
     #[test]
     fn test_ipset_create() {

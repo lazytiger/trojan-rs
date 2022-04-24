@@ -26,54 +26,66 @@ impl TlsConn {
 
 impl Read for TlsConn {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.session.wants_read() {
-            log::info!("read from stream now");
-            match self.session.read_tls(&mut self.stream) {
-                Ok(0) => Ok(0),
-                Ok(n) => {
-                    log::info!("read {} byte tls data from stream", n);
-                    if let Err(err) = self.session.process_new_packets() {
-                        Err(Error::new(ErrorKind::InvalidData, err))
-                    } else {
-                        log::info!("process new packets success");
-                        self.read(buf)
+        let ret = self.session.reader().read(buf);
+        log::info!("reader.read return {:?}", ret);
+        match ret {
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                let ret = self.session.read_tls(&mut self.stream);
+                log::info!("session.read_tls return {:?}", err);
+                match ret {
+                    Ok(n) => {
+                        log::info!("read {} byte tls data from stream", n);
+                        if let Err(err) = self.session.process_new_packets() {
+                            Err(Error::new(ErrorKind::InvalidData, err))
+                        } else {
+                            log::info!("process new packets success");
+                            self.read(buf)
+                        }
                     }
+                    Err(err) if err.kind() == ErrorKind::NotConnected => {
+                        Err(ErrorKind::WouldBlock.into())
+                    }
+                    ret => ret,
                 }
-                Err(err) => Err(err),
             }
-        } else {
-            log::info!("read from session now");
-            self.session.reader().read(buf)
+            ret => ret,
         }
     }
 }
 
 impl Write for TlsConn {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.session.wants_write() {
-            log::info!("send data to stream now");
-            match self.session.write_tls(&mut self.stream) {
-                Ok(0) => Ok(0),
-                Ok(n) => {
-                    log::info!("send {} bytes tls data to remote stream", n);
-                    self.write(buf)
+        let ret = self.session.writer().write(buf);
+        log::info!("writer.write return {:?}", ret);
+        match ret {
+            Ok(0) => {
+                let ret = self.session.write_tls(&mut self.stream);
+                log::info!("session.write_tls return {:?}", ret);
+                match ret {
+                    Err(err) if err.kind() == ErrorKind::NotConnected => {
+                        Err(ErrorKind::WouldBlock.into())
+                    }
+                    Ok(m) if m > 0 => self.write(buf),
+                    ret => ret,
                 }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    log::info!("remote stream blocked, send data to session");
-                    self.session.writer().write(buf)
-                }
-                Err(err) => Err(err),
             }
-        } else {
-            log::info!("send data to session now");
-            self.session.writer().write(buf)
+            ret => ret,
         }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.session.write_tls(&mut self.stream).map(|n| {
-            log::info!("flush {} bytes tls data to stream", n);
-        })
+        self.session
+            .write_tls(&mut self.stream)
+            .map(|n| {
+                log::info!("flush {} bytes tls data to stream", n);
+            })
+            .map_err(|err| {
+                if err.kind() == ErrorKind::NotConnected {
+                    ErrorKind::WouldBlock.into()
+                } else {
+                    err
+                }
+            })
     }
 }
 

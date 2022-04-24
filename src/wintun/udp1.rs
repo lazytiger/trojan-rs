@@ -120,9 +120,15 @@ impl Connection {
     }
 
     fn flush_remote(&mut self, poll: &Poll) {
-        if matches!(self.remote.flush(), Err(err)if err.kind()!= ErrorKind::WouldBlock) {
-            log::info!("flush data to remote failed");
-            self.close_remote(poll);
+        match self.remote.flush() {
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                log::info!("remote connection send blocked");
+            }
+            Err(err) => {
+                log::info!("flush data to remote failed:{}", err);
+                self.close_remote(poll);
+            }
+            Ok(()) => log::info!("flush data successfully"),
         }
     }
 
@@ -209,6 +215,7 @@ impl Connection {
                 },
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     log::info!("read from remote blocked");
+
                     unsafe {
                         self.lbuffer.set_len(offset);
                     }

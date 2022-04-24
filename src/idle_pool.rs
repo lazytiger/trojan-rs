@@ -120,7 +120,8 @@ impl IdlePool {
         #[cfg(not(target_os = "windows"))]
         server.set_nodelay(true)?;
 
-        let session = ClientConnection::new(self.config.clone(), self.hostname.clone())?;
+        let mut session = ClientConnection::new(self.config.clone(), self.hostname.clone())?;
+        session.set_buffer_limit(Some(1500));
         let index = self.next_index();
         let conn = TlsConn::new(
             index,

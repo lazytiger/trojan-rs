@@ -111,6 +111,7 @@ impl<'a> TrojanRequest<'a> {
         buffer.put_u8(b'\r');
         buffer.put_u8(b'\n');
         buffer.put_u8(cmd);
+        log::info!("generate endpoint:{}", addr);
         Sock5Address::generate_endpoint(buffer, addr);
         buffer.put_u8(b'\r');
         buffer.put_u8(b'\n');
@@ -344,6 +345,7 @@ impl<'a> UdpAssociate<'a> {
     }
 
     pub fn generate_endpoint(buffer: &mut BytesMut, endpoint: &IpEndpoint, length: u16) {
+        log::info!("generate endpoint:{}", endpoint);
         Sock5Address::generate_endpoint(buffer, endpoint);
         buffer.put_u16(length);
         buffer.put_u8(b'\r');

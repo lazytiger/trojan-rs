@@ -1,20 +1,22 @@
-use crate::{
-    idle_pool::IdlePool,
-    proto::{TrojanRequest, CONNECT},
-    resolver::DnsResolver,
-    tls_conn::TlsConn,
-    types::TrojanError,
-    utils::copy_stream,
-    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
-};
-use bytes::BytesMut;
-use mio::{event::Event, Poll, Token};
-use smoltcp::{iface::SocketHandle, socket::TcpSocket};
 use std::{
     collections::HashMap,
     io::{Error, ErrorKind, Write},
     sync::Arc,
     time::{Duration, Instant},
+};
+
+use bytes::BytesMut;
+use mio::{event::Event, Poll, Token};
+use smoltcp::{iface::SocketHandle, socket::TcpSocket};
+
+use crate::{
+    idle_pool::IdlePool,
+    proto::{TrojanRequest, CONNECT},
+    resolver::DnsResolver,
+    tls_conn::TlsConn,
+    types::{CopyResult, TrojanError},
+    utils::copy_stream,
+    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
 };
 
 pub struct TcpStreamRef<'a, 'b> {
@@ -23,20 +25,30 @@ pub struct TcpStreamRef<'a, 'b> {
 
 impl<'a, 'b> std::io::Read for TcpStreamRef<'a, 'b> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self.socket.recv_slice(buf) {
-            Ok(0) => Err(ErrorKind::WouldBlock.into()),
-            Ok(n) => Ok(n),
-            Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
+        log::info!("reading {} bytes", buf.len());
+        if self.socket.may_recv() {
+            match self.socket.recv_slice(buf) {
+                Ok(0) => Err(ErrorKind::WouldBlock.into()),
+                Ok(n) => Ok(n),
+                Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
+            }
+        } else {
+            Err(ErrorKind::WouldBlock.into())
         }
     }
 }
 
 impl<'a, 'b> std::io::Write for TcpStreamRef<'a, 'b> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self.socket.send_slice(buf) {
-            Ok(0) => Err(ErrorKind::WouldBlock.into()),
-            Ok(n) => Ok(n),
-            Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
+        log::info!("sending {} bytes", buf.len());
+        if self.socket.may_send() {
+            match self.socket.send_slice(buf) {
+                Ok(0) => Err(ErrorKind::WouldBlock.into()),
+                Ok(n) => Ok(n),
+                Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
+            }
+        } else {
+            Err(ErrorKind::WouldBlock.into())
         }
     }
 
@@ -96,9 +108,11 @@ impl Connection {
     ) {
         self.last_active = Instant::now();
         if event.is_readable() {
+            log::info!("local readable now");
             self.local_to_remote(sockets, poll);
         }
         if event.is_writable() {
+            log::info!("local writable now");
             self.remote_to_local(sockets, poll);
         }
         let (rx, tx) = wakers.get_wakers(self.local);
@@ -111,18 +125,42 @@ impl Connection {
         }
     }
 
+    fn flush_remote(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+        match self.remote.flush() {
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                log::info!("remote connection send blocked");
+            }
+            Err(err) => {
+                log::info!("flush data to remote failed:{}", err);
+                self.close_stream(false, sockets, poll);
+            }
+            Ok(()) => log::info!("flush data successfully"),
+        }
+    }
+
     fn local_to_remote(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+        log::info!("copy local request to remote");
         let socket = sockets.get_socket::<TcpSocket>(self.local);
         let mut local = TcpStreamRef { socket };
         match copy_stream(&mut local, &mut self.remote, &mut self.rbuffer) {
-            Ok(_) => {}
-            Err(TrojanError::RxBreak(_)) => self.close_stream(true, sockets, poll),
-            Err(TrojanError::TxBreak(_)) => self.close_stream(false, sockets, poll),
+            Ok(CopyResult::TxBlock) => log::info!("remote sending blocked"),
+            Ok(CopyResult::RxBlock) => log::info!("local reading blocked"),
+            Err(TrojanError::RxBreak(err)) => {
+                log::info!("local break with error:{:?}", err);
+                self.close_stream(true, sockets, poll)
+            }
+            Err(TrojanError::TxBreak(err)) => {
+                log::info!("remote break with err:{:?}", err);
+                self.close_stream(false, sockets, poll)
+            }
             _ => unreachable!(),
         }
         if self.lclosed && !self.rclosed && self.rbuffer.is_empty() {
             log::info!("connection local closed and nothing to send, close remote now",);
             self.close_stream(false, sockets, poll);
+        }
+        if !self.rclosed {
+            self.flush_remote(sockets, poll);
         }
     }
 
@@ -135,6 +173,7 @@ impl Connection {
     ) {
         self.last_active = Instant::now();
         if event.is_writable() {
+            log::info!("remote writable");
             if !self.established {
                 let endpoint = sockets.get_socket::<TcpSocket>(self.local).local_endpoint();
                 let mut request = BytesMut::new();
@@ -146,9 +185,9 @@ impl Connection {
                     let socket = sockets.get_socket::<TcpSocket>(self.local);
                     socket.register_recv_waker(rx);
                     socket.register_send_waker(tx);
+                    log::info!("connection is ready now");
                 } else {
-                    self.close_stream(false, sockets, poll);
-                    self.close_stream(true, sockets, poll);
+                    self.close(sockets, poll);
                     return;
                 }
             }
@@ -156,17 +195,26 @@ impl Connection {
         }
 
         if event.is_readable() {
+            log::info!("remote readable");
             self.remote_to_local(sockets, poll);
         }
     }
 
     fn remote_to_local(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+        log::info!("copy remote data to local");
         let socket = sockets.get_socket::<TcpSocket>(self.local);
         let mut local = TcpStreamRef { socket };
         match copy_stream(&mut self.remote, &mut local, &mut self.lbuffer) {
-            Ok(_) => {}
-            Err(TrojanError::RxBreak(_)) => self.close_stream(false, sockets, poll),
-            Err(TrojanError::TxBreak(_)) => self.close_stream(true, sockets, poll),
+            Ok(CopyResult::RxBlock) => log::info!("remote reading blocked"),
+            Ok(CopyResult::TxBlock) => log::info!("local sending blocked"),
+            Err(TrojanError::RxBreak(err)) => {
+                log::info!("remote connection break with:{:?}", err);
+                self.close_stream(false, sockets, poll);
+            }
+            Err(TrojanError::TxBreak(err)) => {
+                log::info!("local connection break with:{:?}", err);
+                self.close_stream(true, sockets, poll)
+            }
             _ => unreachable!(),
         }
         if self.rclosed && !self.lclosed && self.lbuffer.is_empty() {
