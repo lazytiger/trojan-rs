@@ -325,11 +325,13 @@ impl TcpServer {
                 self.token2conns.remove(&conn.token);
             }
             sockets.remove_socket(*handle);
+            log::info!("handle:{} removed", handle);
         }
         self.removed.clear();
     }
 
     pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, sockets: &mut SocketSet) {
+        log::info!("tcp server check timeout");
         let conns: Vec<_> = self
             .token2conns
             .iter()

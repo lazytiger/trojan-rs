@@ -71,8 +71,8 @@ fn start_device_send(tx_receiver: Receiver<Vec<u8>>, tx_session: Arc<Session>) {
     });
 }
 
-fn apply_ipset(file: &str, index: u32) -> Result<()> {
-    let mut ipset = IPSet::with_file(file)?;
+fn apply_ipset(file: &str, index: u32, inverse: bool) -> Result<()> {
+    let mut ipset = IPSet::with_file(file, inverse)?;
     if OPTIONS.wintun_args().inverse_route {
         ipset = !ipset;
     }
@@ -255,7 +255,7 @@ pub fn run() -> Result<()> {
     let index = adapter.get_adapter_index()?;
 
     if let Some(file) = &OPTIONS.wintun_args().route_ipset {
-        apply_ipset(file, index)?;
+        apply_ipset(file, index, OPTIONS.wintun_args().inverse_route)?;
     }
 
     let mut poll = Poll::new()?;
@@ -360,5 +360,9 @@ pub fn run() -> Result<()> {
             pool.check_timeout(&poll);
             last_check_time = now;
         }
+
+        //clear close generated events
+        tcp_wakers.get_events();
+        udp_wakers.get_events();
     }
 }

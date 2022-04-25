@@ -83,7 +83,7 @@ impl Ord for Cidr {
 }
 
 impl IPSet {
-    pub fn with_file(file: &str) -> crate::types::Result<Self> {
+    pub fn with_file(file: &str, inverse: bool) -> crate::types::Result<Self> {
         let mut ipset = Self::new();
         let file = File::open(file)?;
         let reader = BufReader::new(file);
@@ -92,15 +92,17 @@ impl IPSet {
                 ipset.add_str(line.as_str());
             }
         });
-        ipset.add_str("0.0.0.0/8");
-        ipset.add_str("10.0.0.0/8");
-        ipset.add_str("127.0.0.0/8");
-        ipset.add_str("169.254.0.0/16");
-        ipset.add_str("172.16.0.0/12");
-        ipset.add_str("192.168.0.0/16");
-        ipset.add_str("224.0.0.0/4");
-        ipset.add_str("240.0.0.0/4");
-        ipset.add_str("255.255.255.255/32");
+        if inverse {
+            ipset.add_str("0.0.0.0/8");
+            ipset.add_str("10.0.0.0/8");
+            ipset.add_str("127.0.0.0/8");
+            ipset.add_str("169.254.0.0/16");
+            ipset.add_str("172.16.0.0/12");
+            ipset.add_str("192.168.0.0/16");
+            ipset.add_str("224.0.0.0/4");
+            ipset.add_str("240.0.0.0/4");
+            ipset.add_str("255.255.255.255/32");
+        }
         ipset.build();
 
         Ok(ipset)
