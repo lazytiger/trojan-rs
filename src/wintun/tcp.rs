@@ -279,11 +279,7 @@ impl TcpServer {
             let endpoint = socket.local_endpoint();
             if !socket.is_active() {
                 log::info!("socket:{} {} is not active, remove now", handle, endpoint,);
-                if let Some(conn) = self.handle2conns.get(&handle) {
-                    let conn = conn.clone();
-                    self.remove_conn(conn);
-                }
-                sockets.remove_socket(handle);
+                self.removed.insert(handle);
                 continue; // Filter unused syn packet
             }
             let conn = self.handle2conns.entry(handle).or_insert_with(|| {
@@ -350,7 +346,9 @@ impl TcpServer {
             unsafe {
                 Arc::get_mut_unchecked(&mut conn).close(sockets, poll);
             }
-            self.remove_conn(conn);
+            self.removed.insert(conn.local);
         }
+
+        self.remove_closed(sockets);
     }
 }

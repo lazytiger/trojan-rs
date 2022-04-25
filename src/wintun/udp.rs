@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{ErrorKind, Read, Write},
     sync::Arc,
     time::{Duration, Instant},
@@ -277,8 +277,10 @@ impl Connection {
 pub struct UdpServer {
     token2conns: HashMap<Token, Arc<Connection>>,
     addr2conns: HashMap<IpEndpoint, Arc<Connection>>,
-    sockets: HashMap<IpEndpoint, Instant>,
+    sockets: HashSet<IpEndpoint>,
+    handles: HashMap<SocketHandle, Instant>,
     buffer: BytesMut,
+    removed: HashSet<Token>,
 }
 
 impl UdpServer {
@@ -288,36 +290,40 @@ impl UdpServer {
             addr2conns: Default::default(),
             buffer: BytesMut::with_capacity(1500),
             sockets: Default::default(),
+            removed: Default::default(),
+            handles: Default::default(),
         }
     }
 
     pub fn new_socket(&mut self, endpoint: IpEndpoint) -> bool {
-        if self.sockets.contains_key(&endpoint) {
+        if self.sockets.contains(&endpoint) {
             false
         } else {
-            self.sockets.insert(endpoint, Instant::now());
+            self.sockets.insert(endpoint);
             true
         }
     }
 
     pub fn check_timeout(&mut self, now: Instant, sockets: &mut SocketSet) {
         let conns: Vec<_> = self
-            .sockets
+            .handles
             .iter()
-            .filter_map(|(endpoint, last_active)| {
+            .filter_map(|(handle, last_active)| {
                 let elapsed = now - *last_active;
                 if elapsed > Duration::from_secs(600) {
-                    self.addr2conns.get(endpoint).map(|c| c.clone())
+                    Some(*handle)
                 } else {
                     None
                 }
             })
             .collect();
 
-        for conn in conns {
-            self.sockets.remove(&conn.endpoint);
-            sockets.remove_socket(conn.local);
-            self.remove(conn);
+        for handle in conns {
+            let socket = sockets.get_socket::<UdpSocket>(handle);
+            let endpoint = socket.endpoint();
+            sockets.remove_socket(handle);
+            self.handles.remove(&handle);
+            self.sockets.remove(&endpoint);
         }
     }
 
@@ -334,7 +340,7 @@ impl UdpServer {
             let (rx_waker, _) = wakers.get_wakers(*handle);
             socket.register_recv_waker(rx_waker);
             let dst_endpoint = socket.endpoint();
-            *self.sockets.get_mut(&dst_endpoint).unwrap() = Instant::now();
+            self.handles.entry(*handle).or_insert_with(Instant::now);
             while let Ok((data, src_endpoint)) = socket.recv() {
                 self.buffer.clear();
                 UdpAssociate::generate_endpoint(&mut self.buffer, &dst_endpoint, data.len() as u16);
@@ -367,9 +373,7 @@ impl UdpServer {
                     Arc::get_mut_unchecked(conn).do_local(poll, self.buffer.as_ref(), data);
                 }
                 if conn.is_closed() {
-                    let conn = conn.clone();
-                    log::info!("connection:{} closed, remove now", conn.token.0);
-                    self.remove(conn.clone());
+                    self.removed.insert(conn.token);
                 }
             }
         }
@@ -383,14 +387,20 @@ impl UdpServer {
                 Arc::get_mut_unchecked(conn).do_remote(poll, socket, event);
             }
             if conn.is_closed() {
-                let conn = conn.clone();
-                log::info!("connection:{} closed, remove now", conn.token.0);
-                self.remove(conn);
+                self.removed.insert(conn.token);
             }
         }
     }
-    fn remove(&mut self, conn: Arc<Connection>) {
-        self.token2conns.remove(&conn.token);
-        self.addr2conns.remove(&conn.endpoint);
+
+    pub fn remove_closed(&mut self) {
+        for token in &self.removed {
+            if let Some(conn) = self.token2conns.get(token) {
+                let conn = conn.clone();
+                self.token2conns.remove(&conn.token);
+                self.addr2conns.remove(&conn.endpoint);
+                log::info!("connection:{} is closed, remove from server", conn.token.0);
+            }
+        }
+        self.removed.clear();
     }
 }

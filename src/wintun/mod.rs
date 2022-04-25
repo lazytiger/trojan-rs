@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, convert::TryInto, process::Command, sync::Arc, thread};
+use std::{collections::BTreeMap, convert::TryInto, sync::Arc, thread};
 
 use crossbeam::channel::{Receiver, Sender};
 use mio::{Events, Poll, Token, Waker};
@@ -23,9 +23,9 @@ use crate::{
     types::Result,
     wintun::{
         ipset::{is_private, IPSet},
-        tcp1::TcpServer,
+        tcp::TcpServer,
         tun::TunInterface,
-        udp1::UdpServer,
+        udp::UdpServer,
         waker::Wakers,
     },
     OPTIONS,
@@ -33,9 +33,9 @@ use crate::{
 
 mod ipset;
 mod route;
-mod tcp1;
+mod tcp;
 mod tun;
-mod udp1;
+mod udp;
 mod waker;
 
 pub(crate) type SocketSet<'a> = Interface<'a, TunInterface>;
@@ -54,57 +54,6 @@ const CHANNEL_IDLE: usize = 0;
 const CHANNEL_UDP: usize = 1;
 /// Channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
-
-fn start_dns() {
-    let _ = thread::spawn(|| {
-        let program = std::env::current_exe().unwrap();
-        let args = OPTIONS.wintun_args();
-        let log_file = if !OPTIONS.log_file.is_empty() {
-            OPTIONS.log_file.clone() + ".dns"
-        } else {
-            "".into()
-        };
-        let message = match Command::new(program)
-            .args([
-                "--log-file",
-                log_file.as_str(),
-                "--local-addr",
-                OPTIONS.local_addr.as_str(),
-                "--password",
-                OPTIONS.password.as_str(),
-                "--log-level",
-                OPTIONS.log_level.to_string().as_str(),
-                "--udp-idle-timeout",
-                OPTIONS.udp_idle_timeout.to_string().as_str(),
-                "--tcp-idle-timeout",
-                OPTIONS.tcp_idle_timeout.to_string().as_str(),
-                "dns",
-                "-n",
-                args.name.as_str(),
-                "--blocked-domain-list",
-                args.blocked_domain_list.as_str(),
-                "--dns-listen-address",
-                args.dns_listen_address.as_str(),
-                "--trusted-dns",
-                args.trusted_dns.as_str(),
-                "--poisoned-dns",
-                args.poisoned_dns.as_str(),
-            ])
-            .output()
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    "success".into()
-                } else {
-                    String::from_utf8(output.stderr).unwrap()
-                }
-            }
-            Err(err) => err.to_string(),
-        };
-        log::error!("trojan dns exit with message:{}", message);
-        std::process::exit(-1);
-    });
-}
 
 fn start_device_send(tx_receiver: Receiver<Vec<u8>>, tx_session: Arc<Session>) {
     let _ = thread::spawn(move || {
@@ -329,10 +278,6 @@ pub fn run() -> Result<()> {
     let gateway = get_adapter_ip(OPTIONS.wintun_args().name.as_str()).unwrap();
     log::warn!("wintun is ready at:{}", gateway);
 
-    if OPTIONS.wintun_args().with_dns {
-        start_dns();
-    }
-
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
     let mut last_check_time = std::time::Instant::now();
@@ -381,6 +326,9 @@ pub fn run() -> Result<()> {
                 }
             }
         }
+
+        tcp_server.remove_closed(&mut interface);
+        udp_server.remove_closed();
 
         let now = std::time::Instant::now();
         if now - last_check_time > check_duration {
