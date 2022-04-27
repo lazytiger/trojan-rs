@@ -349,7 +349,7 @@ pub fn run() -> Result<()> {
 
         let now = std::time::Instant::now();
         if now - last_check_time > check_duration {
-            tcp_server.check_timeout(&poll, now, &mut interface);
+            tcp_server.check_timeout(&poll, now, &mut interface, tcp_wakers.get_dummy_waker());
             let sockets_count = interface.sockets().fold(0, |count, (handle, socket)| {
                 if let Socket::Tcp(socket) = socket {
                     log::info!(
@@ -377,9 +377,5 @@ pub fn run() -> Result<()> {
             pool.check_timeout(&poll);
             last_check_time = now;
         }
-
-        //clear close generated events
-        tcp_wakers.get_events();
-        udp_wakers.get_events();
     }
 }

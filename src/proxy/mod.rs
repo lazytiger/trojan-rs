@@ -13,6 +13,7 @@ use mio::{
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
+pub use crate::idle_pool::IdlePool;
 use crate::{
     config::OPTIONS,
     proxy::{tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer},
@@ -24,8 +25,6 @@ use crate::{
 mod tcp_server;
 mod udp_cache;
 mod udp_server;
-
-pub use crate::idle_pool::IdlePool;
 
 /// minimal index used in `IdlePool`, `TcpServer` and `UdpServer`
 const MIN_INDEX: usize = 2;

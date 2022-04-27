@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    net::IpAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -13,7 +14,6 @@ use crate::{
     status::StatusProvider,
     tls_conn::TlsConn,
 };
-use std::net::IpAddr;
 
 pub enum PollEvent<'a> {
     Network(&'a Event),

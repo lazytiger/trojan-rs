@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::{mem::MaybeUninit, ptr};
+
 use widestring::U16Str;
 use winapi::{
     shared::{

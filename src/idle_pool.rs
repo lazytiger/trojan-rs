@@ -1,9 +1,9 @@
-use itertools::Itertools;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
 };
 
+use itertools::Itertools;
 use mio::{event::Event, net::TcpStream, Poll, Token};
 use rustls::{ClientConfig, ClientConnection, Connection, ServerName};
 

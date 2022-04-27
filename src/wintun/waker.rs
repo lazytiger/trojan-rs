@@ -59,6 +59,7 @@ pub struct Wakers {
     wakers: HashMap<SocketHandle, (Waker, Waker)>,
     sender: Sender<(SocketHandle, Event)>,
     receiver: Receiver<(SocketHandle, Event)>,
+    dummy: Waker,
 }
 
 impl Wakers {
@@ -68,6 +69,7 @@ impl Wakers {
             wakers: Default::default(),
             sender,
             receiver,
+            dummy: Waker::from(Arc::new(DummyWaker)),
         }
     }
     pub fn get_wakers(&mut self, handle: SocketHandle) -> (&Waker, &Waker) {
@@ -86,4 +88,13 @@ impl Wakers {
         }
         events
     }
+    pub fn get_dummy_waker(&self) -> &Waker {
+        &self.dummy
+    }
+}
+
+struct DummyWaker;
+
+impl Wake for DummyWaker {
+    fn wake(self: Arc<Self>) {}
 }

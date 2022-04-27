@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::{Error, ErrorKind, Write},
     sync::Arc,
+    task::Waker,
     time::{Duration, Instant},
 };
 
@@ -84,8 +85,17 @@ impl Connection {
         }
     }
 
-    fn close_stream(&mut self, is_local: bool, sockets: &mut SocketSet, poll: &Poll) {
+    fn close_stream(
+        &mut self,
+        is_local: bool,
+        sockets: &mut SocketSet,
+        poll: &Poll,
+        waker: &Waker,
+    ) {
         if is_local && !self.lclosed {
+            let socket = sockets.get_socket::<TcpSocket>(self.local);
+            socket.register_recv_waker(waker);
+            socket.register_send_waker(waker);
             sockets.get_socket::<TcpSocket>(self.local).close();
             self.lclosed = true;
         } else if !is_local && !self.rclosed {
@@ -109,14 +119,14 @@ impl Connection {
         self.last_active = Instant::now();
         if event.is_readable() {
             log::info!("local readable now");
-            self.local_to_remote(sockets, poll);
+            self.local_to_remote(sockets, poll, wakers.get_dummy_waker());
         }
         if event.is_writable() {
             log::info!("local writable now");
-            self.remote_to_local(sockets, poll);
+            self.remote_to_local(sockets, poll, wakers.get_dummy_waker());
         }
+        self.check_half_close(sockets, poll, wakers.get_dummy_waker());
         self.reregister_local(wakers, sockets);
-        self.check_half_close(sockets, poll);
     }
 
     fn reregister_local(&mut self, wakers: &mut Wakers, sockets: &mut SocketSet) {
@@ -133,20 +143,20 @@ impl Connection {
         }
     }
 
-    fn flush_remote(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+    fn flush_remote(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
         match self.remote.flush() {
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
                 log::info!("remote connection flush blocked");
             }
             Err(err) => {
                 log::info!("flush data to remote failed:{}", err);
-                self.close_stream(false, sockets, poll);
+                self.close_stream(false, sockets, poll, waker);
             }
             Ok(()) => log::info!("flush data successfully"),
         }
     }
 
-    fn local_to_remote(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+    fn local_to_remote(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
         log::info!("copy local request to remote");
         let socket = sockets.get_socket::<TcpSocket>(self.local);
         let mut local = TcpStreamRef { socket };
@@ -155,16 +165,16 @@ impl Connection {
             Ok(CopyResult::RxBlock) => log::info!("local reading blocked"),
             Err(TrojanError::RxBreak(err)) => {
                 log::info!("local break with error:{:?}", err);
-                self.close_stream(true, sockets, poll)
+                self.close_stream(true, sockets, poll, waker)
             }
             Err(TrojanError::TxBreak(err)) => {
                 log::info!("remote break with err:{:?}", err);
-                self.close_stream(false, sockets, poll)
+                self.close_stream(false, sockets, poll, waker)
             }
             _ => unreachable!(),
         }
         if !self.rclosed {
-            self.flush_remote(sockets, poll);
+            self.flush_remote(sockets, poll, waker);
         }
     }
 
@@ -187,22 +197,22 @@ impl Connection {
                     self.established = true;
                     log::info!("connection is ready now");
                 } else {
-                    self.close(sockets, poll);
+                    self.close(sockets, poll, wakers.get_dummy_waker());
                     return;
                 }
             }
-            self.local_to_remote(sockets, poll);
+            self.local_to_remote(sockets, poll, wakers.get_dummy_waker());
         }
 
         if event.is_readable() {
             log::info!("remote readable");
-            self.remote_to_local(sockets, poll);
+            self.remote_to_local(sockets, poll, wakers.get_dummy_waker());
         }
         self.reregister_local(wakers, sockets);
-        self.check_half_close(sockets, poll);
+        self.check_half_close(sockets, poll, wakers.get_dummy_waker());
     }
 
-    fn remote_to_local(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+    fn remote_to_local(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
         log::info!("copy remote data to local");
         let socket = sockets.get_socket::<TcpSocket>(self.local);
         let mut local = TcpStreamRef { socket };
@@ -211,17 +221,17 @@ impl Connection {
             Ok(CopyResult::TxBlock) => log::info!("local sending blocked"),
             Err(TrojanError::RxBreak(err)) => {
                 log::info!("remote connection break with:{:?}", err);
-                self.close_stream(false, sockets, poll);
+                self.close_stream(false, sockets, poll, waker);
             }
             Err(TrojanError::TxBreak(err)) => {
                 log::info!("local connection break with:{:?}", err);
-                self.close_stream(true, sockets, poll)
+                self.close_stream(true, sockets, poll, waker)
             }
             _ => unreachable!(),
         }
         if self.rclosed && !self.lclosed && self.lbuffer.is_empty() {
             log::info!("connection remote closed and nothing to send, close local now",);
-            self.close_stream(true, sockets, poll);
+            self.close_stream(true, sockets, poll, waker);
         }
     }
 
@@ -229,25 +239,25 @@ impl Connection {
         self.rclosed && self.lclosed
     }
 
-    pub fn close(&mut self, sockets: &mut SocketSet, poll: &Poll) {
-        self.close_stream(true, sockets, poll);
-        self.close_stream(false, sockets, poll);
+    pub fn close(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
+        self.close_stream(true, sockets, poll, waker);
+        self.close_stream(false, sockets, poll, waker);
     }
 
-    fn check_half_close(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+    fn check_half_close(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
         if self.lclosed && !self.rclosed && self.rbuffer.is_empty() {
             log::info!(
                 "connection:{} local closed and nothing to send, close remote now",
                 self.local
             );
-            self.close_stream(false, sockets, poll);
+            self.close_stream(false, sockets, poll, waker);
         }
         if self.rclosed && !self.lclosed && self.lbuffer.is_empty() {
             log::info!(
                 "connection:{} remote closed and nothing to send, close local now",
                 self.local
             );
-            self.close_stream(true, sockets, poll);
+            self.close_stream(true, sockets, poll, waker);
         }
     }
 }
@@ -348,7 +358,13 @@ impl TcpServer {
         self.removed.clear();
     }
 
-    pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, sockets: &mut SocketSet) {
+    pub(crate) fn check_timeout(
+        &mut self,
+        poll: &Poll,
+        now: Instant,
+        sockets: &mut SocketSet,
+        waker: &Waker,
+    ) {
         log::info!("tcp server check timeout");
         let conns: Vec<_> = self
             .token2conns
@@ -364,7 +380,7 @@ impl TcpServer {
             .collect();
         for mut conn in conns {
             unsafe {
-                Arc::get_mut_unchecked(&mut conn).close(sockets, poll);
+                Arc::get_mut_unchecked(&mut conn).close(sockets, poll, waker);
             }
             self.removed.insert(conn.local);
         }

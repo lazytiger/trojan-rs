@@ -2,10 +2,14 @@ use mio::Poll;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ConnStatus {
-    Connecting,   //
-    Established,  // connection is ok
-    PeerClosed,   // peer is closed, sending remaining data
-    Shutdown,     // self shutdown now
+    Connecting,
+    //
+    Established,
+    // connection is ok
+    PeerClosed,
+    // peer is closed, sending remaining data
+    Shutdown,
+    // self shutdown now
     Deregistered, // self deregistered
 }
 

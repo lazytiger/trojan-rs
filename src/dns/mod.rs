@@ -1,11 +1,11 @@
 use std::{thread, time::Duration};
 
 use mio::{Events, Poll};
+
 use server::DnsServer;
 
-use crate::{dns::adapter::get_adapter_index, types::Result, OPTIONS};
-
 pub use crate::dns::adapter::{get_adapter_ip, get_main_adapter_gwif};
+use crate::{dns::adapter::get_adapter_index, types::Result, OPTIONS};
 
 mod adapter;
 mod domain;

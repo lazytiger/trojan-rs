@@ -1,5 +1,4 @@
 use crossbeam::channel::{Receiver, Sender};
-
 use smoltcp::{
     phy::{Device, DeviceCapabilities, Medium},
     time::Instant,

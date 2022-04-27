@@ -1,10 +1,12 @@
+use std::io::{ErrorKind, Read, Write};
+
+use bytes::{Buf, BytesMut};
+
 use crate::types::{
     CopyResult,
     CopyResult::{RxBlock, TxBlock},
     Result, TrojanError,
 };
-use bytes::{Buf, BytesMut};
-use std::io::{ErrorKind, Read, Write};
 
 pub fn copy_stream(
     from: &mut impl Read,

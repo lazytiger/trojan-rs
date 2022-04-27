@@ -1,11 +1,3 @@
-use crate::{
-    dns::{domain::DomainMap, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
-    proto::MAX_PACKET_SIZE,
-    wintun::route_add_with_if,
-    OPTIONS,
-};
-use itertools::Itertools;
-use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -14,10 +6,20 @@ use std::{
     str::FromStr,
     time::{Duration, Instant},
 };
+
+use itertools::Itertools;
+use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use trust_dns_proto::{
     op::{Message, MessageType, Query, ResponseCode},
     rr::{DNSClass, Name, RData, Record, RecordType},
     serialize::binary::BinDecodable,
+};
+
+use crate::{
+    dns::{domain::DomainMap, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
+    proto::MAX_PACKET_SIZE,
+    wintun::route_add_with_if,
+    OPTIONS,
 };
 
 pub struct DnsServer {

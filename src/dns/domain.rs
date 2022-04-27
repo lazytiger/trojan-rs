@@ -58,12 +58,13 @@ mod tests {
     #![allow(unused_imports)]
     extern crate test;
 
-    use crate::dns::domain::DomainMap;
     use std::{
         fs::File,
         io::{BufRead, BufReader},
     };
     use test::Bencher;
+
+    use crate::dns::domain::DomainMap;
 
     #[test]
     fn test_contains() {

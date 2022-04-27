@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use bytes::{BufMut, BytesMut};
