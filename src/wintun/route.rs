@@ -39,6 +39,7 @@ pub fn route_add_with_if(dst: u32, mask: u32, gw: u32, if_index: u32) -> Result<
     };
 
     let ret = unsafe { iphlpapi::CreateIpForwardEntry(&mut forward) };
+    match ret {
         NO_ERROR | ERROR_OBJECT_ALREADY_EXISTS => Ok(()),
         ERROR_INVALID_PARAMETER => Err(TrojanError::Winapi("route add invalid parameter".into())),
         ERROR_NOT_SUPPORTED => Err(TrojanError::Winapi("route add not supported".into())),
