@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::{ErrorKind, Write},
     sync::Arc,
+    task::Waker,
     time::{Duration, Instant},
 };
 
@@ -259,7 +260,7 @@ pub struct UdpServer {
     token2conns: HashMap<Token, Arc<Connection>>,
     addr2conns: HashMap<IpEndpoint, Arc<Connection>>,
     sockets: HashSet<IpEndpoint>,
-    handles: HashMap<SocketHandle, Instant>,
+    handles: HashMap<SocketHandle, (Instant, usize)>,
     buffer: BytesMut,
     removed: HashSet<Token>,
 }
@@ -285,11 +286,14 @@ impl UdpServer {
         }
     }
 
-    pub fn check_timeout(&mut self, now: Instant, sockets: &mut SocketSet) {
+    pub fn check_timeout(&mut self, now: Instant, sockets: &mut SocketSet, waker: &Waker) {
         let conns: Vec<_> = self
             .handles
             .iter()
-            .filter_map(|(handle, last_active)| {
+            .filter_map(|(handle, (last_active, ref_count))| {
+                if *ref_count > 0 {
+                    return None;
+                }
                 let elapsed = now - *last_active;
                 if elapsed > Duration::from_secs(600) {
                     Some(*handle)
@@ -302,7 +306,12 @@ impl UdpServer {
         for handle in conns {
             let socket = sockets.get_socket::<UdpSocket>(handle);
             let endpoint = socket.endpoint();
+
+            socket.register_send_waker(waker);
+            socket.register_recv_waker(waker);
+            socket.close();
             sockets.remove_socket(handle);
+
             self.handles.remove(&handle);
             self.sockets.remove(&endpoint);
         }
@@ -321,7 +330,11 @@ impl UdpServer {
             let (rx_waker, _) = wakers.get_wakers(*handle);
             socket.register_recv_waker(rx_waker);
             let dst_endpoint = socket.endpoint();
-            self.handles.entry(*handle).or_insert_with(Instant::now);
+            let info = self
+                .handles
+                .entry(*handle)
+                .or_insert_with(|| (Instant::now(), 0));
+            info.0 = Instant::now();
             while let Ok((data, src_endpoint)) = socket.recv() {
                 self.buffer.clear();
                 UdpAssociate::generate_endpoint(&mut self.buffer, &dst_endpoint, data.len() as u16);
@@ -333,6 +346,7 @@ impl UdpServer {
                     data.len()
                 );
                 let conn = self.addr2conns.entry(src_endpoint).or_insert_with(|| {
+                    info.1 += 1;
                     log::info!(
                         "new udp connection:{} is {} -> {}",
                         handle,
@@ -367,8 +381,12 @@ impl UdpServer {
     }
 
     pub fn do_remote(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
-        log::debug!("remote event for token:{}", event.token().0);
         if let Some(conn) = self.token2conns.get_mut(&event.token()) {
+            log::debug!(
+                "remote event for token:{} - handle:{}",
+                event.token().0,
+                conn.local
+            );
             let socket = sockets.get_socket::<UdpSocket>(conn.local);
             unsafe {
                 Arc::get_mut_unchecked(conn).do_remote(poll, socket, event);
@@ -376,6 +394,8 @@ impl UdpServer {
             if conn.is_closed() {
                 self.removed.insert(conn.token);
             }
+        } else {
+            log::warn!("token:{} not found", event.token().0);
         }
     }
 
@@ -383,6 +403,7 @@ impl UdpServer {
         for token in &self.removed {
             if let Some(conn) = self.token2conns.get(token) {
                 let conn = conn.clone();
+                self.handles.get_mut(&conn.local).unwrap().1 -= 1;
                 self.token2conns.remove(&conn.token);
                 self.addr2conns.remove(&conn.endpoint);
                 log::info!(

@@ -96,7 +96,7 @@ impl Connection {
             let socket = sockets.get_socket::<TcpSocket>(self.local);
             socket.register_recv_waker(waker);
             socket.register_send_waker(waker);
-            sockets.get_socket::<TcpSocket>(self.local).close();
+            socket.close();
             self.lclosed = true;
         } else if !is_local && !self.rclosed {
             let _ = self.remote.close(poll);
@@ -136,9 +136,11 @@ impl Connection {
         let (rx, tx) = wakers.get_wakers(self.local);
         let socket = sockets.get_socket::<TcpSocket>(self.local);
         if !self.lbuffer.is_empty() {
+            //local buffer is not empty, should send data later.
             socket.register_send_waker(tx);
         }
-        if self.rbuffer.is_empty() {
+        if self.rbuffer.is_empty() && !self.rclosed {
+            //remote buffer is empty, should recv data later.
             socket.register_recv_waker(rx);
         }
     }
@@ -208,8 +210,9 @@ impl Connection {
             log::info!("remote readable");
             self.remote_to_local(sockets, poll, wakers.get_dummy_waker());
         }
-        self.reregister_local(wakers, sockets);
+
         self.check_half_close(sockets, poll, wakers.get_dummy_waker());
+        self.reregister_local(wakers, sockets);
     }
 
     fn remote_to_local(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {

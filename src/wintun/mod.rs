@@ -365,7 +365,7 @@ pub fn run() -> Result<()> {
                 }
             });
             log::warn!("total tcp sockets count:{}", sockets_count);
-            udp_server.check_timeout(now, &mut interface);
+            udp_server.check_timeout(now, &mut interface, udp_wakers.get_dummy_waker());
             let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {
                 if matches!(socket, Socket::Udp(_)) {
                     count + 1
