@@ -302,9 +302,13 @@ impl TcpServer {
             log::info!("new request, handle:{}, event:{:?}", handle, event);
             let socket = sockets.get_socket::<TcpSocket>(handle);
             let endpoint = socket.local_endpoint();
-            if !socket.is_active() {
-                log::info!("socket:{} {} is not active, remove now", handle, endpoint,);
-                self.removed.insert(handle);
+            if socket.is_listening() {
+                log::info!(
+                    "socket:{} {} is still listening, remove now",
+                    handle,
+                    endpoint,
+                );
+                sockets.remove_socket(handle);
                 continue; // Filter unused syn packet
             }
             let conn = self.handle2conns.entry(handle).or_insert_with(|| {
