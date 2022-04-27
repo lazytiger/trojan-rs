@@ -133,9 +133,8 @@ impl IPSet {
     }
 
     pub fn add_route(&self, index: u32) -> Result<()> {
-        route_add_with_if(123434343, !0, index)?;
         for item in &self.data {
-            route_add_with_if(item.ip, item.mask(), index)?;
+            route_add_with_if(item.ip, item.mask(), 0, index)?;
         }
         Ok(())
     }

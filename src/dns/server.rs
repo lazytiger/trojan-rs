@@ -262,7 +262,7 @@ impl DnsServer {
                                         if let IpAddr::V4(addr) = addr {
                                             let addr: u32 = addr.into();
                                             if !route_added.contains(&addr)
-                                                && route_add_with_if(addr, !0, adapter_index)
+                                                && route_add_with_if(addr, !0, 0, adapter_index)
                                                     .is_ok()
                                             {
                                                 route_added.insert(addr);

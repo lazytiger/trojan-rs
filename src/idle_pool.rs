@@ -73,14 +73,10 @@ impl IdlePool {
 
     pub fn get(&mut self, poll: &Poll, resolver: &DnsResolver) -> Option<TlsConn> {
         // in case we got all the cached connections disconnected
-        for _ in 0..self.size + 1 {
+        for _ in 0..self.size {
             self.alloc(poll, resolver);
-            if let Some(mut conn) = self.pool.pop() {
-                conn.do_read();
-                conn.check_status(poll);
-                if !conn.deregistered() {
-                    return Some(conn);
-                }
+            if let Some(conn) = self.pool.pop() {
+                return Some(conn);
             }
         }
         None
@@ -93,8 +89,6 @@ impl IdlePool {
                 Ok(mut conn) => {
                     if conn.register(poll) {
                         self.pool.push(conn);
-                    } else {
-                        conn.check_status(poll);
                     }
                 }
                 Err(err) => {

@@ -3,12 +3,13 @@ use crate::types::{
     CopyResult::{RxBlock, TxBlock},
     Result, TrojanError,
 };
+use bytes::{Buf, BytesMut};
 use std::io::{ErrorKind, Read, Write};
 
 pub fn copy_stream(
     from: &mut impl Read,
     to: &mut impl Write,
-    buffer: &mut Vec<u8>,
+    buffer: &mut BytesMut,
 ) -> Result<CopyResult> {
     loop {
         if !send_all(to, buffer)? {
@@ -20,12 +21,12 @@ pub fn copy_stream(
     }
 }
 
-pub fn send_all(writer: &mut impl Write, buffer: &mut Vec<u8>) -> Result<bool> {
-    log::debug!("start sending {} bytes data", buffer.len());
+pub fn send_all(writer: &mut impl Write, buffer: &mut BytesMut) -> Result<bool> {
     if buffer.is_empty() {
         return Ok(true);
     }
-    let mut data = buffer.as_slice();
+    log::debug!("start sending {} bytes data", buffer.len());
+    let mut data = buffer.as_ref();
     let mut offset = 0;
     let mut ret = Ok(true);
     while !data.is_empty() {
@@ -45,26 +46,24 @@ pub fn send_all(writer: &mut impl Write, buffer: &mut Vec<u8>) -> Result<bool> {
     if ret.is_err() {
         buffer.clear();
     } else if offset != 0 {
-        let len = buffer.len() - offset;
-        log::debug!("remaining {} bytes, offset:{}", len, offset);
-        buffer.copy_within(offset.., 0);
-        unsafe {
-            buffer.set_len(len);
-        }
+        buffer.advance(offset);
     }
     ret
 }
 
-pub fn read_once(reader: &mut impl Read, buffer: &mut Vec<u8>) -> Result<bool> {
+pub fn read_once(reader: &mut impl Read, buffer: &mut BytesMut) -> Result<bool> {
+    buffer.reserve(1500);
+    let mut nb = buffer.split_off(buffer.len());
     unsafe {
-        buffer.set_len(buffer.capacity());
+        nb.set_len(nb.capacity());
     }
-    let ret = match reader.read(buffer.as_mut_slice()) {
+    assert!(!nb.as_mut().is_empty());
+    let ret = match reader.read(nb.as_mut()) {
         Ok(0) => Err(TrojanError::RxBreak(None)),
         Ok(n) => {
             log::debug!("read {} bytes", n);
             unsafe {
-                buffer.set_len(n);
+                nb.set_len(n);
             }
             Ok(true)
         }
@@ -72,7 +71,8 @@ pub fn read_once(reader: &mut impl Read, buffer: &mut Vec<u8>) -> Result<bool> {
         Err(err) => Err(TrojanError::RxBreak(Some(err))),
     };
     if !matches!(ret, Ok(true)) {
-        buffer.clear();
+        nb.clear();
     }
+    buffer.unsplit(nb);
     ret
 }

@@ -61,8 +61,8 @@ pub struct Connection {
     token: Token,
     local: SocketHandle,
     remote: TlsConn,
-    lbuffer: Vec<u8>,
-    rbuffer: Vec<u8>,
+    lbuffer: BytesMut,
+    rbuffer: BytesMut,
     lclosed: bool,
     rclosed: bool,
     established: bool,
@@ -75,8 +75,8 @@ impl Connection {
             token,
             local,
             remote,
-            lbuffer: Vec::with_capacity(1500),
-            rbuffer: Vec::with_capacity(1500),
+            lbuffer: BytesMut::with_capacity(1500),
+            rbuffer: BytesMut::with_capacity(1500),
             lclosed: false,
             rclosed: false,
             established: false,
@@ -116,6 +116,7 @@ impl Connection {
             self.remote_to_local(sockets, poll);
         }
         self.reregister_local(wakers, sockets);
+        self.check_half_close(sockets, poll);
     }
 
     fn reregister_local(&mut self, wakers: &mut Wakers, sockets: &mut SocketSet) {
@@ -135,7 +136,7 @@ impl Connection {
     fn flush_remote(&mut self, sockets: &mut SocketSet, poll: &Poll) {
         match self.remote.flush() {
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                log::info!("remote connection send blocked");
+                log::info!("remote connection flush blocked");
             }
             Err(err) => {
                 log::info!("flush data to remote failed:{}", err);
@@ -161,10 +162,6 @@ impl Connection {
                 self.close_stream(false, sockets, poll)
             }
             _ => unreachable!(),
-        }
-        if self.lclosed && !self.rclosed && self.rbuffer.is_empty() {
-            log::info!("connection local closed and nothing to send, close remote now",);
-            self.close_stream(false, sockets, poll);
         }
         if !self.rclosed {
             self.flush_remote(sockets, poll);
@@ -202,6 +199,7 @@ impl Connection {
             self.remote_to_local(sockets, poll);
         }
         self.reregister_local(wakers, sockets);
+        self.check_half_close(sockets, poll);
     }
 
     fn remote_to_local(&mut self, sockets: &mut SocketSet, poll: &Poll) {
@@ -234,6 +232,23 @@ impl Connection {
     pub fn close(&mut self, sockets: &mut SocketSet, poll: &Poll) {
         self.close_stream(true, sockets, poll);
         self.close_stream(false, sockets, poll);
+    }
+
+    fn check_half_close(&mut self, sockets: &mut SocketSet, poll: &Poll) {
+        if self.lclosed && !self.rclosed && self.rbuffer.is_empty() {
+            log::info!(
+                "connection:{} local closed and nothing to send, close remote now",
+                self.local
+            );
+            self.close_stream(false, sockets, poll);
+        }
+        if self.rclosed && !self.lclosed && self.lbuffer.is_empty() {
+            log::info!(
+                "connection:{} remote closed and nothing to send, close local now",
+                self.local
+            );
+            self.close_stream(true, sockets, poll);
+        }
     }
 }
 
@@ -283,6 +298,7 @@ impl TcpServer {
                 continue; // Filter unused syn packet
             }
             let conn = self.handle2conns.entry(handle).or_insert_with(|| {
+                log::info!("found new tcp connection");
                 let token = next_token();
                 let mut remote = pool.get(poll, resolver).unwrap();
                 remote.set_token(token, poll);
@@ -323,9 +339,11 @@ impl TcpServer {
                 let conn = conn.clone();
                 self.handle2conns.remove(handle);
                 self.token2conns.remove(&conn.token);
+                log::info!("handle:{} removed", handle);
+            } else {
+                log::info!("handle:{} not found", handle);
             }
             sockets.remove_socket(*handle);
-            log::info!("handle:{} removed", handle);
         }
         self.removed.clear();
     }

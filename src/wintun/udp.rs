@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Write},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -14,7 +14,7 @@ use crate::{
     proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
     resolver::DnsResolver,
     tls_conn::TlsConn,
-    utils::send_all,
+    utils::{read_once, send_all},
     wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
@@ -69,8 +69,8 @@ pub struct Connection {
     local: SocketHandle,
     remote: TlsConn,
     rclosed: bool,
-    rbuffer: Vec<u8>,
-    lbuffer: Vec<u8>,
+    rbuffer: BytesMut,
+    lbuffer: BytesMut,
     endpoint: IpEndpoint,
     established: bool,
 }
@@ -198,31 +198,12 @@ impl Connection {
         };
 
         loop {
-            let offset = self.lbuffer.len();
-            unsafe {
-                self.lbuffer.set_len(self.lbuffer.capacity());
-            }
             let mut closed = false;
-            log::info!("copy remote data from {} to {}", offset, self.lbuffer.len());
-            match self.remote.read(&mut self.lbuffer.as_mut_slice()[offset..]) {
-                Ok(0) => {
-                    log::info!("read 0 bytes from remote, close now");
-                    closed = true;
-                }
-                Ok(n) => unsafe {
-                    log::info!("read {} bytes raw data", n);
-                    self.lbuffer.set_len(offset + n);
-                },
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    log::info!("read from remote blocked");
-
-                    unsafe {
-                        self.lbuffer.set_len(offset);
-                    }
-                    return;
-                }
+            match read_once(&mut self.remote, &mut self.lbuffer) {
+                Ok(true) => {}
+                Ok(false) => return,
                 Err(err) => {
-                    log::info!("remote closed with error:{}", err);
+                    log::info!("remote closed with error:{:?}", err);
                     closed = true;
                 }
             }
@@ -232,7 +213,7 @@ impl Connection {
                 return;
             }
 
-            let mut buffer = self.lbuffer.as_slice();
+            let mut buffer = self.lbuffer.as_ref();
             loop {
                 match UdpAssociate::parse_endpoint(buffer) {
                     UdpParseResultEndpoint::Continued => {
@@ -352,6 +333,12 @@ impl UdpServer {
                     data.len()
                 );
                 let conn = self.addr2conns.entry(src_endpoint).or_insert_with(|| {
+                    log::info!(
+                        "new udp connection:{} is {} -> {}",
+                        handle,
+                        src_endpoint,
+                        dst_endpoint
+                    );
                     let mut tls = pool.get(poll, resolver).unwrap();
                     tls.set_token(next_token(), poll);
                     let conn = Connection {
@@ -359,8 +346,8 @@ impl UdpServer {
                         local: *handle,
                         remote: tls,
                         rclosed: false,
-                        rbuffer: Vec::with_capacity(1500), //TODO mtu
-                        lbuffer: Vec::with_capacity(1500),
+                        rbuffer: BytesMut::with_capacity(1500), //TODO mtu
+                        lbuffer: BytesMut::with_capacity(1500),
                         established: false,
                         endpoint: src_endpoint,
                     };
@@ -398,7 +385,13 @@ impl UdpServer {
                 let conn = conn.clone();
                 self.token2conns.remove(&conn.token);
                 self.addr2conns.remove(&conn.endpoint);
-                log::info!("connection:{} is closed, remove from server", conn.token.0);
+                log::info!(
+                    "connection:{} - {} is closed, remove from server",
+                    conn.token.0,
+                    conn.endpoint
+                );
+            } else {
+                log::warn!("connection:{} not found", token.0);
             }
         }
         self.removed.clear();

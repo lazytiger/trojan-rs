@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, convert::TryInto, sync::Arc, thread};
+use std::{
+    collections::BTreeMap,
+    convert::TryInto,
+    net::{Ipv4Addr, SocketAddr},
+    sync::Arc,
+    thread,
+};
 
 use crossbeam::channel::{Receiver, Sender};
 use mio::{Events, Poll, Token, Waker};
@@ -17,7 +23,7 @@ use wintun::{Adapter, Session};
 pub use route::route_add_with_if;
 
 use crate::{
-    dns::get_adapter_ip,
+    dns::{get_adapter_ip, get_main_adapter_gwif},
     proxy::IdlePool,
     resolver::DnsResolver,
     types::Result,
@@ -252,8 +258,19 @@ pub fn run() -> Result<()> {
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let adapter = Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?;
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
+    if let Some((main_gw, main_index)) = get_main_adapter_gwif() {
+        log::warn!(
+            "main adapter gateway is {}, main adapter index is :{}",
+            main_gw,
+            main_index
+        );
+        let gw: Ipv4Addr = main_gw.parse()?;
+        if let Some(SocketAddr::V4(v4)) = &OPTIONS.back_addr {
+            let index: u32 = (*v4.ip()).into();
+            route_add_with_if(index, !0, gw.into(), main_index)?;
+        }
+    }
     let index = adapter.get_adapter_index()?;
-
     if let Some(file) = &OPTIONS.wintun_args().route_ipset {
         apply_ipset(file, index, OPTIONS.wintun_args().inverse_route)?;
     }

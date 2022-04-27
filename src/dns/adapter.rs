@@ -63,6 +63,18 @@ pub fn get_main_adapter_ip() -> Option<String> {
     ret
 }
 
+pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
+    let mut ret = None;
+    unsafe {
+        get_adapters(|adapter| {
+            let ip = get_string(&adapter.GatewayList.IpAddress.String);
+            ret = Some((ip.clone(), adapter.Index));
+            !ip.is_empty()
+        })
+    }
+    ret
+}
+
 unsafe fn get_adapters<F>(mut callback: F)
 where
     F: FnMut(&IP_ADAPTER_INFO) -> bool,

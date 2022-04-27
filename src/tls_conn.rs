@@ -26,14 +26,16 @@ impl TlsConn {
 
 impl Read for TlsConn {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        //1. read from session
+        //1.1 session return WouldBlock,
         let ret = self.session.reader().read(buf);
         log::info!("reader.read return {:?}", ret);
         match ret {
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
                 let ret = self.session.read_tls(&mut self.stream);
-                log::info!("session.read_tls return {:?}", err);
+                log::info!("session.read_tls return {:?}", ret);
                 match ret {
-                    Ok(n) => {
+                    Ok(n) if n > 0 => {
                         log::info!("read {} byte tls data from stream", n);
                         if let Err(err) = self.session.process_new_packets() {
                             Err(Error::new(ErrorKind::InvalidData, err))

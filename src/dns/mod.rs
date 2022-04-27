@@ -5,7 +5,7 @@ use server::DnsServer;
 
 use crate::{dns::adapter::get_adapter_index, types::Result, OPTIONS};
 
-pub use crate::dns::adapter::get_adapter_ip;
+pub use crate::dns::adapter::{get_adapter_ip, get_main_adapter_gwif};
 
 mod adapter;
 mod domain;
