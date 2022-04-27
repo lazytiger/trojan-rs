@@ -159,6 +159,9 @@ impl Connection {
     }
 
     fn local_to_remote(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
+        if !self.established {
+            return;
+        }
         log::info!("copy local request to remote");
         let socket = sockets.get_socket::<TcpSocket>(self.local);
         let mut local = TcpStreamRef { socket };

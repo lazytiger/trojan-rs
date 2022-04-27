@@ -26,6 +26,7 @@ impl TlsConn {
 
 impl Read for TlsConn {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        debug_assert!(!buf.is_empty());
         //1. read from session
         //1.1 session return WouldBlock,
         let ret = self.session.reader().read(buf);
@@ -57,6 +58,7 @@ impl Read for TlsConn {
 
 impl Write for TlsConn {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        debug_assert!(!buf.is_empty());
         let ret = self.session.writer().write(buf);
         log::info!("writer.write return {:?}", ret);
         match ret {
