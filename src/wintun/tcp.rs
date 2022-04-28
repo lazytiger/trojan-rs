@@ -194,16 +194,21 @@ impl Connection {
         if event.is_writable() {
             log::info!("remote writable");
             if !self.established {
-                let mut request = BytesMut::new();
-                let endpoint = sockets.get_socket::<TcpSocket>(self.local).local_endpoint();
-                TrojanRequest::generate_endpoint(&mut request, CONNECT, &endpoint);
-                log::info!("send trojan request {} bytes", request.len());
-                if self.remote.write(request.as_ref()).is_ok() {
-                    self.established = true;
-                    log::info!("connection is ready now");
-                } else {
-                    self.close(sockets, poll, wakers.get_dummy_waker());
+                if self.lclosed {
+                    self.close_stream(false, sockets, poll, wakers.get_dummy_waker());
                     return;
+                } else {
+                    let mut request = BytesMut::new();
+                    let endpoint = sockets.get_socket::<TcpSocket>(self.local).local_endpoint();
+                    TrojanRequest::generate_endpoint(&mut request, CONNECT, &endpoint);
+                    log::info!("send trojan request {} bytes", request.len());
+                    if self.remote.write(request.as_ref()).is_ok() {
+                        self.established = true;
+                        log::info!("connection is ready now");
+                    } else {
+                        self.close(sockets, poll, wakers.get_dummy_waker());
+                        return;
+                    }
                 }
             }
             self.local_to_remote(sockets, poll, wakers.get_dummy_waker());
