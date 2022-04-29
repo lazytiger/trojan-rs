@@ -41,6 +41,7 @@ mod ipset;
 mod route;
 mod tcp;
 mod tun;
+mod tun1;
 mod udp;
 mod waker;
 
