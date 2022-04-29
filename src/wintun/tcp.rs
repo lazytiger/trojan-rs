@@ -163,7 +163,7 @@ impl Connection {
         let socket = sockets.get_socket::<TcpSocket>(self.local);
         if !self.established {
             if !socket.is_active() {
-                self.close_stream(false, sockets, poll, waker);
+                self.close_stream(true, sockets, poll, waker);
             }
             return;
         }
