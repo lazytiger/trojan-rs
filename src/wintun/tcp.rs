@@ -159,11 +159,14 @@ impl Connection {
     }
 
     fn local_to_remote(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
-        if !self.established {
-            return;
-        }
         log::info!("copy local request to remote");
         let socket = sockets.get_socket::<TcpSocket>(self.local);
+        if !self.established {
+            if !socket.is_active() {
+                self.close_stream(false, sockets, poll, waker);
+            }
+            return;
+        }
         let mut local = TcpStreamRef { socket };
         match copy_stream(&mut local, &mut self.remote, &mut self.rbuffer) {
             Ok(CopyResult::TxBlock) => log::info!("remote sending blocked"),
