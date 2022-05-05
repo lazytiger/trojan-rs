@@ -1,45 +1,81 @@
-use crossbeam::channel::{Receiver, Sender};
-use smoltcp::{
-    phy::{Device, DeviceCapabilities, Medium},
-    time::Instant,
+use crate::{
+    wintun::{ipset::is_private, waker::Wakers},
+    OPTIONS,
 };
+use smoltcp::{
+    iface::Interface,
+    phy::{Device, DeviceCapabilities, Medium},
+    socket::{Socket, TcpSocket, TcpSocketBuffer, UdpPacketMetadata, UdpSocket, UdpSocketBuffer},
+    time::Instant,
+    wire::{
+        IpAddress, IpEndpoint, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
+    },
+};
+use std::{ptr, sync::Arc};
+use wintun::{Packet, Session};
 
-pub struct TunInterface {
-    sender: Sender<Vec<u8>>,
-    receiver: Receiver<Vec<u8>>,
+pub struct WintunInterface {
+    session: Arc<Session>,
+    interface: *mut Interface<'static, WintunInterface>,
+    tcp_wakers: *mut Wakers,
+    udp_wakers: *mut Wakers,
     mtu: usize,
 }
 
-impl TunInterface {
-    pub fn new(sender: Sender<Vec<u8>>, receiver: Receiver<Vec<u8>>, mtu: usize) -> Self {
-        TunInterface {
-            sender,
+impl WintunInterface {
+    pub fn new(session: Arc<Session>, mtu: usize) -> Self {
+        Self {
+            session,
             mtu,
-            receiver,
+            interface: ptr::null_mut(),
+            tcp_wakers: ptr::null_mut(),
+            udp_wakers: ptr::null_mut(),
+        }
+    }
+
+    pub fn init(
+        &mut self,
+        interface: *mut Interface<WintunInterface>,
+        tcp_wakers: &mut Wakers,
+        udp_wakers: &mut Wakers,
+    ) {
+        unsafe {
+            self.interface = std::mem::transmute(interface);
+            self.tcp_wakers = std::mem::transmute(tcp_wakers);
+            self.udp_wakers = std::mem::transmute(udp_wakers);
         }
     }
 }
 
-impl<'d> Device<'d> for TunInterface {
+impl<'d> Device<'d> for WintunInterface {
     type RxToken = RxToken;
     type TxToken = TxToken;
 
     fn receive(&'d mut self) -> Option<(Self::RxToken, Self::TxToken)> {
-        match self.receiver.try_recv() {
-            Ok(packet) => {
-                let rx = RxToken { buffer: packet };
-                let tx = TxToken {
-                    sender: self.sender.clone(),
-                };
-                Some((rx, tx))
-            }
-            Err(_) => None,
-        }
+        self.session
+            .try_receive()
+            .ok()
+            .map(|packet| {
+                packet.map(|packet| {
+                    unsafe {
+                        let interface = &mut *self.interface;
+                        let tcp_wakers = &mut *self.tcp_wakers;
+                        let udp_wakers = &mut *self.udp_wakers;
+                        preprocess_packet(&packet, interface, tcp_wakers, udp_wakers);
+                    }
+                    let rx = RxToken { packet };
+                    let tx = TxToken {
+                        session: self.session.clone(),
+                    };
+                    (rx, tx)
+                })
+            })
+            .unwrap_or(None)
     }
 
     fn transmit(&'d mut self) -> Option<Self::TxToken> {
         Some(TxToken {
-            sender: self.sender.clone(),
+            session: self.session.clone(),
         })
     }
 
@@ -51,12 +87,123 @@ impl<'d> Device<'d> for TunInterface {
     }
 }
 
+fn preprocess_packet(
+    packet: &Packet,
+    sockets: &mut Interface<WintunInterface>,
+    tcp_wakers: &mut Wakers,
+    udp_wakers: &mut Wakers,
+) {
+    let (src_addr, dst_addr, payload, protocol) =
+        match IpVersion::of_packet(packet.bytes()).unwrap() {
+            IpVersion::Ipv4 => {
+                let packet = Ipv4Packet::new_checked(packet.bytes()).unwrap();
+                let src_addr = packet.src_addr();
+                let dst_addr = packet.dst_addr();
+                (
+                    IpAddress::Ipv4(src_addr),
+                    IpAddress::Ipv4(dst_addr),
+                    packet.payload(),
+                    packet.protocol(),
+                )
+            }
+            IpVersion::Ipv6 => {
+                let packet = Ipv6Packet::new_checked(packet.bytes()).unwrap();
+                let src_addr = packet.src_addr();
+                let dst_addr = packet.dst_addr();
+                (
+                    IpAddress::Ipv6(src_addr),
+                    IpAddress::Ipv6(dst_addr),
+                    packet.payload(),
+                    packet.next_header(),
+                )
+            }
+            _ => return,
+        };
+    let (src_port, dst_port, connect) = match protocol {
+        IpProtocol::Udp => {
+            let packet = UdpPacket::new_checked(payload).unwrap();
+            (packet.src_port(), packet.dst_port(), None)
+        }
+        IpProtocol::Tcp => {
+            let packet = TcpPacket::new_checked(payload).unwrap();
+            (
+                packet.src_port(),
+                packet.dst_port(),
+                Some(packet.syn() && !packet.ack()),
+            )
+        }
+        _ => return,
+    };
+
+    let src_endpoint = IpEndpoint::new(src_addr, src_port);
+    let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
+    if is_private(dst_endpoint) {
+        return;
+    }
+
+    match connect {
+        Some(true) => {
+            let socket = TcpSocket::new(
+                TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_rx_buffer_size]),
+                TcpSocketBuffer::new(vec![0; OPTIONS.wintun_args().tcp_tx_buffer_size]),
+            );
+            let handle = sockets.add_socket(socket);
+            let socket = sockets.get_socket::<TcpSocket>(handle);
+            let (_, tx) = tcp_wakers.get_wakers(handle);
+            socket.register_send_waker(tx);
+            socket.listen(dst_endpoint).unwrap();
+            socket.set_nagle_enabled(false);
+            socket.set_ack_delay(None);
+            //timeout could cause performance problem
+            //socket.set_timeout(Some(Duration::from_secs(120)));
+            //socket.set_keep_alive(Some(Duration::from_secs(60)));
+
+            log::info!(
+                "tcp handle:{} is {} -> {}",
+                handle,
+                src_endpoint,
+                dst_endpoint
+            );
+        }
+        None if !sockets
+            .sockets()
+            .filter_map(|(_, socket)| {
+                if let Socket::Udp(socket) = socket {
+                    Some(socket)
+                } else {
+                    None
+                }
+            })
+            .any(|socket| socket.endpoint() == dst_endpoint) =>
+        {
+            let mut socket = UdpSocket::new(
+                UdpSocketBuffer::new(
+                    vec![UdpPacketMetadata::EMPTY; OPTIONS.wintun_args().udp_rx_meta_size],
+                    vec![0; OPTIONS.wintun_args().udp_rx_buffer_size],
+                ),
+                UdpSocketBuffer::new(
+                    vec![UdpPacketMetadata::EMPTY; OPTIONS.wintun_args().udp_rx_meta_size],
+                    vec![0; OPTIONS.wintun_args().udp_tx_buffer_size],
+                ),
+            );
+            socket.bind(dst_endpoint).unwrap();
+            let handle = sockets.add_socket(socket);
+            log::info!("udp handle:{} is {}", handle, dst_endpoint);
+            let socket = sockets.get_socket::<UdpSocket>(handle);
+            let (rx, tx) = udp_wakers.get_wakers(handle);
+            socket.register_recv_waker(rx);
+            socket.register_send_waker(tx);
+        }
+        _ => {}
+    }
+}
+
 pub struct TxToken {
-    sender: Sender<Vec<u8>>,
+    session: Arc<Session>,
 }
 
 pub struct RxToken {
-    buffer: Vec<u8>,
+    packet: Packet,
 }
 
 impl smoltcp::phy::RxToken for RxToken {
@@ -64,7 +211,7 @@ impl smoltcp::phy::RxToken for RxToken {
     where
         F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
     {
-        f(self.buffer.as_mut_slice())
+        f(self.packet.bytes_mut())
     }
 }
 
@@ -73,11 +220,13 @@ impl smoltcp::phy::TxToken for TxToken {
     where
         F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
     {
-        let mut buffer = vec![0; len];
-        let result = f(buffer.as_mut_slice());
-        if let Err(err) = self.sender.try_send(buffer) {
-            log::error!("send data to wintun failed:{}", err);
-        }
-        result
+        self.session
+            .allocate_send_packet(len as u16)
+            .map(|mut packet| {
+                let r = f(packet.bytes_mut());
+                self.session.send_packet(packet);
+                r
+            })
+            .unwrap_or(Err(smoltcp::Error::Exhausted))
     }
 }

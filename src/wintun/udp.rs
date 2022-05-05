@@ -259,7 +259,6 @@ impl Connection {
 pub struct UdpServer {
     token2conns: HashMap<Token, Arc<Connection>>,
     addr2conns: HashMap<IpEndpoint, Arc<Connection>>,
-    sockets: HashSet<IpEndpoint>,
     handles: HashMap<SocketHandle, (Instant, usize)>,
     buffer: BytesMut,
     removed: HashSet<Token>,
@@ -271,18 +270,8 @@ impl UdpServer {
             token2conns: Default::default(),
             addr2conns: Default::default(),
             buffer: BytesMut::with_capacity(1500),
-            sockets: Default::default(),
             removed: Default::default(),
             handles: Default::default(),
-        }
-    }
-
-    pub fn new_socket(&mut self, endpoint: IpEndpoint) -> bool {
-        if self.sockets.contains(&endpoint) {
-            false
-        } else {
-            self.sockets.insert(endpoint);
-            true
         }
     }
 
@@ -305,15 +294,12 @@ impl UdpServer {
 
         for handle in conns {
             let socket = sockets.get_socket::<UdpSocket>(handle);
-            let endpoint = socket.endpoint();
-
             socket.register_send_waker(waker);
             socket.register_recv_waker(waker);
             socket.close();
             sockets.remove_socket(handle);
 
             self.handles.remove(&handle);
-            self.sockets.remove(&endpoint);
         }
     }
 
