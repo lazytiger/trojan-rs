@@ -33,8 +33,10 @@ impl<'a, 'b> std::io::Read for TcpStreamRef<'a, 'b> {
                 Ok(n) => Ok(n),
                 Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
             }
-        } else {
+        } else if self.socket.is_active() {
             Err(ErrorKind::WouldBlock.into())
+        } else {
+            Err(ErrorKind::UnexpectedEof.into())
         }
     }
 }
@@ -48,8 +50,10 @@ impl<'a, 'b> std::io::Write for TcpStreamRef<'a, 'b> {
                 Ok(n) => Ok(n),
                 Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
             }
-        } else {
+        } else if self.socket.is_active() {
             Err(ErrorKind::WouldBlock.into())
+        } else {
+            Err(ErrorKind::UnexpectedEof.into())
         }
     }
 
@@ -369,7 +373,7 @@ impl TcpServer {
                 self.token2conns.remove(&conn.token);
                 log::info!("handle:{} removed", handle);
             } else {
-                log::info!("handle:{} not found", handle);
+                log::warn!("handle:{} not found", handle);
             }
             sockets.remove_socket(*handle);
         }
