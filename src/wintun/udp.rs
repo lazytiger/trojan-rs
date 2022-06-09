@@ -251,7 +251,7 @@ impl Connection {
         if self.rclosed {
             return;
         }
-        let _ = self.remote.close(poll);
+        self.remote.close(poll);
         self.rclosed = true;
     }
 }

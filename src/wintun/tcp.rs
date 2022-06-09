@@ -103,7 +103,7 @@ impl Connection {
             socket.close();
             self.lclosed = true;
         } else if !is_local && !self.rclosed {
-            let _ = self.remote.close(poll);
+            self.remote.close(poll);
             self.rclosed = true;
         } else {
             log::info!(
@@ -213,6 +213,7 @@ impl Connection {
                         self.established = true;
                         log::info!("connection is ready now");
                     } else {
+                        log::warn!("send trojan request failed");
                         self.close(sockets, poll, wakers.get_dummy_waker());
                         return;
                     }

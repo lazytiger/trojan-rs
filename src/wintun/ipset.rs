@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_ipset_create() {
-        let ipset = IPSet::with_file("ipset/ipset_cidr.txt").unwrap();
+        let ipset = IPSet::with_file("ipset/ipset_cidr.txt", false).unwrap();
         let mut file = File::create("route1.bat").unwrap();
         for item in &ipset.data {
             let (left, right) = item.range();
