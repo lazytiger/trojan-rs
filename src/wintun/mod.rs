@@ -131,7 +131,11 @@ pub fn run() -> Result<()> {
 
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
-    let mut resolver = DnsResolver::new(waker, Token(RESOLVER));
+    let mut resolver = DnsResolver::new(
+        waker,
+        Token(RESOLVER),
+        OPTIONS.wintun_args().dns_server_addr.clone(),
+    );
     let mut pool = prepare_idle_pool(&poll, &resolver)?;
 
     let mut udp_server = UdpServer::new();

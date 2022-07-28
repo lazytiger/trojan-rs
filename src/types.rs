@@ -22,6 +22,7 @@ pub enum TrojanError {
     TxBreak(Option<std::io::Error>),
     #[from(ignore)]
     RxBreak(Option<std::io::Error>),
+    DnsProto(trust_dns_proto::error::ProtoError),
 }
 
 pub enum CopyResult {

@@ -10,6 +10,8 @@ use std::{
 
 use mio::{Token, Waker};
 
+use crate::types::TrojanError;
+
 pub struct DnsEntry {
     pub address: IpAddr,
     pub expired_time: Instant,
@@ -22,10 +24,11 @@ pub struct DnsResolver {
     dns_cache: HashMap<String, DnsEntry>,
     dns_cache_duration: Duration,
     token: Token,
+    dns_server: Option<String>,
 }
 
 impl DnsResolver {
-    pub fn new(waker: Arc<Waker>, token: Token) -> Self {
+    pub fn new(waker: Arc<Waker>, token: Token, dns_server: Option<String>) -> Self {
         let (sender, receiver) = channel();
         Self {
             sender,
@@ -34,6 +37,7 @@ impl DnsResolver {
             receiver: Some(receiver),
             dns_cache: HashMap::new(),
             dns_cache_duration: Duration::new(10, 0),
+            dns_server,
         }
     }
 
@@ -72,10 +76,15 @@ impl DnsResolver {
         log::info!("resolve domain:{} with token:{}", domain, token.0);
         let sender = self.sender.clone();
         let waker = self.waker.clone();
+        let dns_server = self.dns_server.clone();
         rayon::spawn(move || {
             log::info!("thread resolve domain:{} with token:{}", domain, token.0);
             let mut address = None;
-            if let Ok(ips) = dns_lookup::lookup_host(domain.as_str()) {
+            if let Ok(ips) = if let Some(dns_server) = dns_server {
+                crate::utils::resolve(domain.as_str(), dns_server.as_str())
+            } else {
+                dns_lookup::lookup_host(domain.as_str()).map_err(|_| TrojanError::Dummy(()))
+            } {
                 for addr in ips {
                     if address.is_none() || addr.is_ipv4() {
                         address.replace(addr);

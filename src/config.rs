@@ -7,6 +7,8 @@ use std::{
 use clap::Parser;
 use crypto::{digest::Digest, sha2::Sha224};
 
+use crate::{types::TrojanError, utils::resolve};
+
 #[derive(Parser)]
 #[clap(
     version,
@@ -130,6 +132,10 @@ pub struct WintunArgs {
     /// Should reverse the ipset
     #[clap(long)]
     pub inverse_route: bool,
+
+    /// DNS server address used for query trojan server ip
+    #[clap(long)]
+    pub dns_server_addr: Option<String>,
 }
 
 #[derive(Parser)]
@@ -236,9 +242,13 @@ impl Opts {
         }
     }
 
-    fn resolve(&mut self, hostname: String, port: u16) {
+    fn resolve(&mut self, hostname: String, port: u16, dns_server: Option<&str>) {
         for i in 0..10 {
-            if let Ok(response) = dns_lookup::lookup_host(hostname.as_str()) {
+            if let Ok(response) = if let Some(dns_server) = dns_server {
+                resolve(hostname.as_str(), dns_server)
+            } else {
+                dns_lookup::lookup_host(hostname.as_str()).map_err(|_| TrojanError::Dummy(()))
+            } {
                 for ip in response {
                     if ip.is_ipv4() {
                         self.back_addr.replace(SocketAddr::new(ip, port));
@@ -269,12 +279,13 @@ impl Opts {
             Mode::Proxy(ref args) => {
                 let hostname = args.hostname.clone();
                 let port = args.port;
-                self.resolve(hostname, port);
+                self.resolve(hostname, port, None);
             }
             Mode::Wintun(ref args) => {
                 let hostname = args.hostname.clone();
                 let port = args.port;
-                self.resolve(hostname, port);
+                let dns_server = args.dns_server_addr.clone();
+                self.resolve(hostname, port, dns_server.as_deref());
             }
             Mode::Dns(_) => {}
         }

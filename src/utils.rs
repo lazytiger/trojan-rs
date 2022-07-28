@@ -1,6 +1,17 @@
-use std::io::{ErrorKind, Read, Write};
+use std::{
+    io::{ErrorKind, Read, Write},
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+    time::Duration,
+};
 
 use bytes::{Buf, BytesMut};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use trust_dns_proto::{
+    op::{Message, Query},
+    rr::{DNSClass, Name, RecordType},
+    serialize::binary::BinDecodable,
+};
 
 use crate::types::{
     CopyResult,
@@ -77,4 +88,41 @@ pub fn read_once(reader: &mut impl Read, buffer: &mut BytesMut) -> Result<bool> 
     }
     buffer.unsplit(nb);
     ret
+}
+
+pub fn resolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
+    let dns_server_addr: SocketAddr = dns_server_addr.parse()?;
+    let dns_server_addr: SockAddr = dns_server_addr.into();
+    let mut socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    let addr: SocketAddr = "0.0.0.0:0".parse()?;
+    let addr: SockAddr = addr.into();
+    socket.bind(&addr)?;
+    let mut message = Message::new();
+    let mut query = Query::new();
+    let name = Name::from_str(name)?;
+    query.set_name(name);
+    query.set_query_type(RecordType::A);
+    query.set_query_class(DNSClass::IN);
+    message.add_query(query);
+    let request = message.to_vec()?;
+    if request.len() != socket.send_to(request.as_slice(), &dns_server_addr)? {
+        return Err(TrojanError::Dummy(()));
+    }
+    let mut response = vec![0u8; 1024];
+    socket.set_read_timeout(Some(Duration::from_millis(3000)))?;
+    let length = socket.read(response.as_mut_slice())?;
+    let message = Message::from_bytes(&response.as_slice()[..length])?;
+    Ok(message
+        .answers()
+        .iter()
+        .filter_map(|record| record.rdata().to_ip_addr())
+        .collect())
+}
+
+mod test {
+    #[test]
+    fn test_resolve() {
+        let result = crate::utils::resolve("www.jd.com", "192.168.3.1:53");
+        println!("{:?}", result);
+    }
 }
