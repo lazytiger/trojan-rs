@@ -98,6 +98,8 @@ pub fn resolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
     let addr: SockAddr = addr.into();
     socket.bind(&addr)?;
     let mut message = Message::new();
+    message.set_recursion_desired(true);
+    message.set_id(1);
     let mut query = Query::new();
     let name = Name::from_str(name)?;
     query.set_name(name);

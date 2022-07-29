@@ -1037,10 +1037,10 @@ dependencies = [
 name = "trojan"
 version = "0.9.2"
 dependencies = [
- "bytes",
- "cfg-if 1.0.0",
- "chrono",
- "clap",
+    "bytes",
+    "cfg-if 1.0.0",
+    "chrono",
+    "clap",
     "clap-num",
     "crossbeam",
     "derive_more",
@@ -1062,9 +1062,9 @@ dependencies = [
     "trust-dns-proto",
     "webpki",
     "webpki-roots",
- "widestring 0.5.1",
- "winapi 0.3.9",
- "wintun",
+    "widestring 0.5.1",
+    "winapi 0.3.9",
+    "wintun",
 ]
 
 [[package]]
