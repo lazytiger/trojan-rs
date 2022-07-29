@@ -124,7 +124,7 @@ pub fn resolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
 mod test {
     #[test]
     fn test_resolve() {
-        let result = crate::utils::resolve("www.jd.com", "192.168.3.1:53");
+        let result = crate::utils::resolve("pha.hopingwhite.com", "192.168.3.1:53");
         println!("{:?}", result);
     }
 }
