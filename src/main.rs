@@ -2,6 +2,10 @@
 #![feature(get_mut_unchecked)]
 #![feature(test)]
 
+use std::panic;
+
+use backtrace::Backtrace;
+
 use crate::config::{Mode, OPTIONS};
 
 mod config;
@@ -25,6 +29,16 @@ mod utils;
 
 fn main() {
     config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);
+    panic::set_hook(Box::new(|info| {
+        let trace = Backtrace::new();
+        let message = info.to_string();
+        log::error!("application exit with error:{}\n{:?}", message, trace);
+        if cfg!(windows) {
+            if let Mode::Dns(_) = OPTIONS.mode {
+                dns::set_dns_server("".to_owned());
+            }
+        }
+    }));
     if let Err(err) = match OPTIONS.mode {
         Mode::Proxy(_) => {
             log::warn!(

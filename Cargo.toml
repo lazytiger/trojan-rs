@@ -33,6 +33,7 @@ winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default"
 widestring = "1.0"
 itertools = "0.10"
 smoltcp = "0.8"
+backtrace = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.2"
@@ -43,3 +44,4 @@ features = ["reopen-03"]
 
 [profile.release]
 lto = true
+debug = true
