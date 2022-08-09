@@ -8,7 +8,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
+use mio::{event::Event, Interest, net::UdpSocket, Poll, Token};
 use trust_dns_proto::{
     op::{Message, MessageType, Query, ResponseCode},
     rr::{DNSClass, Name, RData, Record, RecordType},
@@ -16,10 +16,10 @@ use trust_dns_proto::{
 };
 
 use crate::{
-    dns::{domain::DomainMap, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
+    dns::{DNS_LOCAL, DNS_POISONED, DNS_TRUSTED, domain::DomainMap},
+    OPTIONS,
     proto::MAX_PACKET_SIZE,
     wintun::route_add_with_if,
-    OPTIONS,
 };
 
 pub struct DnsServer {
@@ -62,7 +62,7 @@ impl DnsServer {
                     .parse()
                     .unwrap(),
             )
-            .unwrap(),
+                .unwrap(),
             trusted: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
             poisoned: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
             buffer: vec![0; MAX_PACKET_SIZE],
@@ -73,6 +73,10 @@ impl DnsServer {
             route_added: HashSet::new(),
             adapter_index: index,
         }
+    }
+
+    pub fn name_server(&self) -> String {
+        self.listener.local_addr().unwrap().ip().to_string()
     }
 
     pub fn setup(&mut self, poll: &Poll) {
@@ -124,7 +128,7 @@ impl DnsServer {
         record.set_record_type(RecordType::PTR);
         record.set_dns_class(DNSClass::IN);
         record.set_ttl(20567);
-        record.set_rdata(RData::PTR(Name::from_str("trojan.dns").unwrap()));
+        record.set_data(Some(RData::PTR(Name::from_str("trojan.dns").unwrap())));
         message.add_answer(record);
         self.arp_data = message.to_vec().unwrap();
     }
@@ -157,7 +161,7 @@ impl DnsServer {
                             if query.query_type() == RecordType::PTR && name == self.ptr_name {
                                 log::debug!("found ptr query");
                                 if let Err(err) =
-                                    self.listener.send_to(self.arp_data.as_slice(), from)
+                                self.listener.send_to(self.arp_data.as_slice(), from)
                                 {
                                     log::error!("send response to {} failed:{}", from, err);
                                 }
@@ -259,13 +263,14 @@ impl DnsServer {
                             let mut timeout = 0;
                             for record in message.answers() {
                                 timeout = record.ttl();
-                                if let Some(addr) = record.rdata().to_ip_addr() {
+                                if let Some(addr) = record.data().and_then(|data| data.to_ip_addr())
+                                {
                                     if OPTIONS.dns_args().add_route && blocked && addr.is_ipv4() {
                                         if let IpAddr::V4(addr) = addr {
                                             let addr: u32 = addr.into();
                                             if !route_added.contains(&addr)
                                                 && route_add_with_if(addr, !0, 0, adapter_index)
-                                                    .is_ok()
+                                                .is_ok()
                                             {
                                                 route_added.insert(addr);
                                             }

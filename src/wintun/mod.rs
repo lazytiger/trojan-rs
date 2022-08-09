@@ -20,11 +20,11 @@ pub use route::route_add_with_if;
 
 use crate::{
     dns::{get_adapter_ip, get_main_adapter_gwif},
+    OPTIONS,
     proxy::IdlePool,
     resolver::DnsResolver,
     types::Result,
     wintun::{ipset::IPSet, tcp::TcpServer, tun::WintunInterface, udp::UdpServer, waker::Wakers},
-    OPTIONS,
 };
 
 mod ipset;
@@ -214,7 +214,7 @@ pub fn run() -> Result<()> {
                     count
                 }
             });
-            log::warn!("total tcp sockets count:{}", sockets_count);
+            log::info!("total tcp sockets count:{}", sockets_count);
             udp_server.check_timeout(now, &mut interface, udp_wakers.get_dummy_waker());
             let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {
                 if matches!(socket, Socket::Udp(_)) {
@@ -223,7 +223,7 @@ pub fn run() -> Result<()> {
                     count
                 }
             });
-            log::warn!("total udp sockets count:{}", sockets_count);
+            log::info!("total udp sockets count:{}", sockets_count);
             pool.check_timeout(&poll);
             last_check_time = now;
         }

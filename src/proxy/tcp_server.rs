@@ -8,15 +8,15 @@ use std::{
 use bytes::BytesMut;
 use mio::{
     event::Event,
-    net::{TcpListener, TcpStream},
-    Interest, Poll, Token,
+    Interest,
+    net::{TcpListener, TcpStream}, Poll, Token,
 };
 
 use crate::{
     config::OPTIONS,
     idle_pool::IdlePool,
-    proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
-    proxy::{next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
+    proto::{CONNECT, MAX_PACKET_SIZE, TrojanRequest},
+    proxy::{CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX, next_index},
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     sys, tcp_util,

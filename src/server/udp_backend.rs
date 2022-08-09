@@ -1,11 +1,11 @@
 use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
-use mio::{net::UdpSocket, Interest, Poll, Token};
+use mio::{Interest, net::UdpSocket, Poll, Token};
 
 use crate::{
     config::OPTIONS,
-    proto::{UdpAssociate, UdpParseResult, MAX_PACKET_SIZE},
+    proto::{MAX_PACKET_SIZE, UdpAssociate, UdpParseResult},
     server::tls_server::Backend,
     status::{ConnStatus, StatusProvider},
     tls_conn::TlsConn,

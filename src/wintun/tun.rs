@@ -1,7 +1,5 @@
-use crate::{
-    wintun::{ipset::is_private, waker::Wakers},
-    OPTIONS,
-};
+use std::{ptr, sync::Arc};
+
 use smoltcp::{
     iface::Interface,
     phy::{Device, DeviceCapabilities, Medium},
@@ -11,8 +9,12 @@ use smoltcp::{
         IpAddress, IpEndpoint, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
     },
 };
-use std::{ptr, sync::Arc};
 use wintun::{Packet, Session};
+
+use crate::{
+    wintun::{ipset::is_private, waker::Wakers},
+    OPTIONS,
+};
 
 pub struct WintunInterface {
     session: Arc<Session>,

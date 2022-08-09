@@ -51,7 +51,9 @@ fn main() {
             cfg_if::cfg_if! {
                 if #[cfg(windows)] {
                     log::warn!("trojan started in dns mode");
-                    dns::run()
+                    let ret = dns::run();
+                    dns::set_dns_server("".into());
+                    ret
                 } else {
                     panic!("trojan in dns mode not supported on non-windows platform");
                 }

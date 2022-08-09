@@ -12,12 +12,12 @@ use smoltcp::{iface::SocketHandle, socket::TcpSocket};
 
 use crate::{
     idle_pool::IdlePool,
-    proto::{TrojanRequest, CONNECT},
+    proto::{CONNECT, TrojanRequest},
     resolver::DnsResolver,
     tls_conn::TlsConn,
     types::{CopyResult, TrojanError},
     utils::copy_stream,
-    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
+    wintun::{CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX, SocketSet, waker::Wakers},
 };
 
 pub struct TcpStreamRef<'a, 'b> {
@@ -321,8 +321,8 @@ impl TcpServer {
             log::info!("new request, handle:{}, event:{:?}", handle, event);
             let socket = sockets.get_socket::<TcpSocket>(handle);
             let endpoint = socket.local_endpoint();
-            if socket.is_listening() {
-                log::info!(
+            if socket.is_listening() && !self.handle2conns.contains_key(&handle) {
+                log::warn!(
                     "socket:{} {} is still listening, remove now",
                     handle,
                     endpoint,

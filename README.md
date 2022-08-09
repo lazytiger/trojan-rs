@@ -8,13 +8,14 @@
 ***[Trojan](https://github.com/trojan-gfw/trojan) server and proxy programs written in Rust.***
 
 * ***For the server mode, the protocol is compatible with [original trojan](https://github.com/trojan-gfw/trojan) except
-UDP Associate does not support domain address type (maybe later?) If 
-you are not ok with that, you can use the original version, it should work
-perfectly with the proxy mode.***
+  UDP Associate does not support domain address type (maybe later?) If
+  you are not ok with that, you can use the original version, it should work
+  perfectly with the proxy mode.***
 * ***For the proxy mode, it uses TPROXY to relay all UDP and TCP packets, and it
-should work with the [original server](https://github.com/trojan-gfw/trojan) in both route or local type.***
+  should work with the [original server](https://github.com/trojan-gfw/trojan) in both route or local type.***
 
 ## How to use it
+
 ```bash
 hoping@HopingPC:~/workspace/trojan-rs$ trojan --help
 trojan 0.6
@@ -90,7 +91,7 @@ OPTIONS:
 A workable example as follows.
 lanlist and byplist are ipsets which you can create by ipset command.
 
-> IMPORTANT your trojan server IP should be included in byplist or lanlist, otherwise, route loop should occur. 
+> IMPORTANT your trojan server IP should be included in byplist or lanlist, otherwise, route loop should occur.
 
 ```bash
 # Add any tproxy policy rules
@@ -143,15 +144,16 @@ ip route flush cache
 You can get more about iptables rules in [PRINCIPLE.md](https://github.com/lazytiger/trojan-rs/blob/master/PRINCIPLE.md)
 
 ## Windows
+
 For Windows users, wintun mode may supply a virtual device operating on ip layer base on Wintun and Smoltcp library.  
 You can check ```trojan help wintun``` for more parameter detail.
 
 Assuming your virtual device number is 3, which can be got by ```route print```
 The following command can route all traffic to 8.8.8.8 into this device.
+
 ```bash
 route ADD 8.8.8.8 MASK 255.255.255.255 0.0.0.0 METRIC 1 IF 3
 ```
-
 
 ## Special Thanks for ![Jetbrains](https://github.com/lazytiger/trojan-rs/blob/master/jetbrains.png?raw=true)
 

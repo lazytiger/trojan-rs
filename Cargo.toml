@@ -7,14 +7,14 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3.1", features = ["derive", "cargo", "env"] }
+clap = { version = "3.2", features = ["derive", "cargo", "env"] }
 mio = { version = "0.8", features = ["net", "os-poll"] }
 log = "0.4"
 chrono = "0.4"
 libc = "0.2"
 rustls = "0.20"
 rust-crypto = "0.2"
-bytes = "1.1"
+bytes = "1.2"
 dns-lookup = "1.0"
 cfg-if = "1.0"
 webpki-roots = "0.22"
@@ -22,15 +22,15 @@ webpki = "0.22"
 mio-extras = "2.0"
 socket2 = "0.4"
 rayon = "1.5"
-rustls-pemfile = "0.3"
+rustls-pemfile = "1.0"
 lazy_static = "1.4"
 derive_more = "0.99"
 clap-num = "1.0"
 libloading = "0.7"
 crossbeam = "0.8"
-trust-dns-proto = "0.20"
-winapi = "0.3"
-widestring = "0.5"
+trust-dns-proto = "0.21"
+winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons"] }
+widestring = "1.0"
 itertools = "0.10"
 smoltcp = "0.8"
 

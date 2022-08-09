@@ -2,14 +2,23 @@
 
 use std::{mem::MaybeUninit, ptr};
 
-use widestring::U16Str;
+use widestring::{U16CString, U16Str};
 use winapi::{
     shared::{
+        guiddef::GUID,
+        ipifcons,
         minwindef::{PULONG, ULONG},
+        netioapi::{
+            DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
+            GetInterfaceDnsSettings, SetInterfaceDnsSettings,
+        },
         ntdef::{CHAR, LANG_NEUTRAL, SUBLANG_DEFAULT},
         winerror,
+        winerror::{NO_ERROR, S_OK},
     },
-    um::{iphlpapi, iptypes::IP_ADAPTER_INFO, winbase, winnt::MAKELANGID},
+    um::{
+        combaseapi::IIDFromString, iphlpapi, iptypes::IP_ADAPTER_INFO, winbase, winnt::MAKELANGID,
+    },
 };
 
 pub fn get_adapter_ip(name: &str) -> Option<String> {
@@ -51,6 +60,9 @@ pub fn get_main_adapter_ip() -> Option<String> {
     let mut ret = None;
     unsafe {
         get_adapters(|adapter| {
+            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET {
+                return false;
+            }
             let ip = get_string(&adapter.GatewayList.IpAddress.String);
             if ip.is_empty() {
                 false
@@ -59,7 +71,7 @@ pub fn get_main_adapter_ip() -> Option<String> {
                 ret = Some(ip);
                 true
             }
-        })
+        });
     }
     ret
 }
@@ -68,17 +80,21 @@ pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
     let mut ret = None;
     unsafe {
         get_adapters(|adapter| {
-            let ip = get_string(&adapter.GatewayList.IpAddress.String);
-            ret = Some((ip.clone(), adapter.Index));
-            !ip.is_empty()
-        })
+            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET {
+                false
+            } else {
+                let ip = get_string(&adapter.GatewayList.IpAddress.String);
+                ret = Some((ip.clone(), adapter.Index));
+                !ip.is_empty() && adapter.Type == 6
+            }
+        });
     }
     ret
 }
 
-unsafe fn get_adapters<F>(mut callback: F)
-where
-    F: FnMut(&IP_ADAPTER_INFO) -> bool,
+unsafe fn get_adapters<F>(mut callback: F) -> bool
+    where
+        F: FnMut(&IP_ADAPTER_INFO) -> bool,
 {
     let mut buffer_length: u32 = 0;
     let result = iphlpapi::GetAdaptersInfo(std::ptr::null_mut(), &mut buffer_length as PULONG);
@@ -94,13 +110,16 @@ where
         panic!("{}", get_error_message(result));
     }
     let mut info = buffer.as_ptr() as *const IP_ADAPTER_INFO;
+    let mut ret = false;
     while !info.is_null() {
         let adapter = &*info;
-        if callback(adapter) {
+        ret = callback(adapter);
+        if ret {
             break;
         }
         info = adapter.Next;
     }
+    ret
 }
 
 fn get_string(s: &[CHAR]) -> String {
@@ -109,7 +128,7 @@ fn get_string(s: &[CHAR]) -> String {
             .map_while(|c| if *c == 0 { None } else { Some(*c as u8) })
             .collect(),
     )
-    .unwrap()
+        .unwrap()
 }
 
 fn get_error_message(err_code: u32) -> String {
@@ -139,4 +158,63 @@ fn get_error_message(err_code: u32) -> String {
         unsafe { U16Str::from_ptr(first, chars_written as usize) }.to_string_lossy(),
         err_code
     )
+}
+
+pub fn set_dns_server(name_server: String) -> bool {
+    unsafe {
+        get_adapters(|adapter| {
+            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET {
+                return false;
+            }
+            let ip = get_string(&adapter.GatewayList.IpAddress.String);
+            if ip.is_empty() {
+                return false;
+            }
+            let mut guid = GUID::default();
+            let iid: Vec<u16> = adapter
+                .AdapterName
+                .as_slice()
+                .iter()
+                .map(|w| *w as u16)
+                .collect();
+            if S_OK != IIDFromString(iid.as_ptr(), &mut guid) {
+                log::warn!("IIDFromString failed");
+                return false;
+            }
+            let mut setting = DNS_INTERFACE_SETTINGS {
+                Version: DNS_INTERFACE_SETTINGS_VERSION1,
+                ..DNS_INTERFACE_SETTINGS::default()
+            };
+            let code = GetInterfaceDnsSettings(guid, &mut setting);
+            if code != NO_ERROR {
+                log::warn!("get interface dns failed:{}", get_error_message(code));
+                return false;
+            }
+            let mut name_server = U16CString::from_str(name_server.clone()).unwrap();
+            setting.Flags = DNS_SETTING_NAMESERVER;
+            if name_server.is_empty() {
+                setting.NameServer = ptr::null_mut();
+            } else {
+                setting.NameServer = name_server.as_mut_ptr();
+            }
+            let code = SetInterfaceDnsSettings(guid, &setting);
+            if code != NO_ERROR {
+                log::warn!("set failed:{}", get_error_message(code));
+                false
+            } else {
+                log::info!("set name server to:{}", name_server.to_string_lossy());
+                true
+            }
+        })
+    }
+}
+
+#[allow(unused_imports)]
+mod test {
+    use crate::dns::adapter::set_dns_server;
+
+    #[test]
+    fn test_set_dns() {
+        assert!(set_dns_server("127.0.0.1".into()));
+    }
 }

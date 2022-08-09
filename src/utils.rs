@@ -114,17 +114,21 @@ pub fn resolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
     socket.set_read_timeout(Some(Duration::from_millis(3000)))?;
     let length = socket.read(response.as_mut_slice())?;
     let message = Message::from_bytes(&response.as_slice()[..length])?;
-    Ok(message
-        .answers()
-        .iter()
-        .filter_map(|record| record.rdata().to_ip_addr())
-        .collect())
+    if message.id() != 1 {
+        Err(TrojanError::Dummy(()))
+    } else {
+        Ok(message
+            .answers()
+            .iter()
+            .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
+            .collect())
+    }
 }
 
 mod test {
     #[test]
     fn test_resolve() {
-        let result = crate::utils::resolve("pha.hopingwhite.com", "192.168.3.1:53");
+        let result = crate::utils::resolve("www.baidu.com", "192.168.3.1:53");
         println!("{:?}", result);
     }
 }

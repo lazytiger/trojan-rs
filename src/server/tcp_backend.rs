@@ -1,7 +1,7 @@
 use std::{net::Shutdown, time::Duration};
 
 use bytes::BytesMut;
-use mio::{net::TcpStream, Interest, Poll, Token};
+use mio::{Interest, net::TcpStream, Poll, Token};
 
 use crate::{
     config::OPTIONS,

@@ -11,13 +11,13 @@ use mio::{
 
 use crate::{
     config::OPTIONS,
-    proto::{Sock5Address, TrojanRequest, CONNECT},
+    proto::{CONNECT, Sock5Address, TrojanRequest},
     resolver::DnsResolver,
     server::{
-        tcp_backend::TcpBackend,
-        tls_server::{Backend, PollEvent},
-        udp_backend::UdpBackend,
-        CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY,
+        CHANNEL_BACKEND,
+        CHANNEL_CNT,
+        CHANNEL_PROXY,
+        tcp_backend::TcpBackend, tls_server::{Backend, PollEvent}, udp_backend::UdpBackend,
     },
     status::StatusProvider,
     tls_conn::TlsConn,

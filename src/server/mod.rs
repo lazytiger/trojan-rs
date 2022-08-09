@@ -5,12 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{net::TcpListener, Events, Interest, Poll, Token, Waker};
+use mio::{Events, Interest, net::TcpListener, Poll, Token, Waker};
 use rustls::{
-    server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth},
-    KeyLogFile, RootCertStore, ServerConfig,
+    KeyLogFile,
+    RootCertStore, server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth}, ServerConfig,
 };
-use rustls_pemfile::{certs, read_one, Item};
+use rustls_pemfile::{certs, Item, read_one};
 
 pub use tls_server::TlsServer;
 

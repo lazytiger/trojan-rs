@@ -10,7 +10,7 @@ use rustls::{ServerConfig, ServerConnection};
 
 use crate::{
     resolver::DnsResolver,
-    server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
+    server::{CHANNEL_CNT, CHANNEL_PROXY, connection::Connection, MAX_INDEX, MIN_INDEX},
     status::StatusProvider,
     tls_conn::TlsConn,
 };

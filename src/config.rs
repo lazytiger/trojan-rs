@@ -11,9 +11,9 @@ use crate::{types::TrojanError, utils::resolve};
 
 #[derive(Parser)]
 #[clap(
-    version,
-    author = "Hoping White",
-    about = "A trojan implementation using rust"
+version,
+author = "Hoping White",
+about = "A trojan implementation using rust"
 )]
 pub struct Opts {
     #[clap(subcommand)]

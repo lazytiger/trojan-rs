@@ -2,8 +2,8 @@ use std::{
     collections::HashMap,
     net::IpAddr,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc,
+        mpsc::{channel, Receiver, Sender},
     },
     time::{Duration, Instant},
 };

@@ -7,13 +7,12 @@ use std::{
 };
 
 use mio::{
-    net::{TcpListener, UdpSocket},
-    Events, Interest, Poll, Token, Waker,
+    Events,
+    Interest, net::{TcpListener, UdpSocket}, Poll, Token, Waker,
 };
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
-pub use crate::idle_pool::IdlePool;
 use crate::{
     config::OPTIONS,
     proxy::{tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer},
@@ -21,6 +20,7 @@ use crate::{
     sys,
     types::Result,
 };
+pub use crate::idle_pool::IdlePool;
 
 mod tcp_server;
 mod udp_cache;

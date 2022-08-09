@@ -6,8 +6,8 @@ use mio::{event::Event, net::UdpSocket, Poll, Token};
 use crate::{
     config::OPTIONS,
     idle_pool::IdlePool,
-    proto::{TrojanRequest, UdpAssociate, UdpParseResult, MAX_PACKET_SIZE, UDP_ASSOCIATE},
-    proxy::{next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX},
+    proto::{MAX_PACKET_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult},
+    proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index, udp_cache::UdpSvrCache},
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     sys,
