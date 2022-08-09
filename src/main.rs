@@ -33,10 +33,12 @@ fn main() {
         let trace = Backtrace::new();
         let message = info.to_string();
         log::error!("application exit with error:{}\n{:?}", message, trace);
-        if cfg!(windows) {
+        cfg_if::cfg_if! {
+          if #[cfg(windows)] {
             if let Mode::Dns(_) = OPTIONS.mode {
                 dns::set_dns_server("".to_owned());
             }
+                }
         }
     }));
     if let Err(err) = match OPTIONS.mode {
