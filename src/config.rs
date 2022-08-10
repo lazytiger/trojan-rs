@@ -5,15 +5,15 @@ use std::{
 };
 
 use clap::Parser;
-use crypto::{digest::Digest, sha2::Sha224};
+use sha2::{Digest, Sha224};
 
 use crate::{types::TrojanError, utils::resolve};
 
 #[derive(Parser)]
 #[clap(
-version,
-author = "Hoping White",
-about = "A trojan implementation using rust"
+    version,
+    author = "Hoping White",
+    about = "A trojan implementation using rust"
 )]
 pub struct Opts {
     #[clap(subcommand)]
@@ -304,9 +304,9 @@ impl Opts {
 
     fn digest_pass(&mut self) {
         let mut encoder = Sha224::new();
-        encoder.reset();
-        encoder.input(self.password.as_bytes());
-        let result = encoder.result_str();
+        encoder.update(self.password.as_bytes());
+        let result = encoder.finalize();
+        let result = format!("{:02x?}", result.as_slice());
         self.pass_len = result.len();
         log::info!(
             "sha224({}) = {}, length = {}",
