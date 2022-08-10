@@ -306,13 +306,11 @@ impl Opts {
         let mut encoder = Sha224::new();
         encoder.update(self.password.as_bytes());
         let result = encoder.finalize();
-        let result = format!("{:02x?}", result.as_slice());
+        let result = hex::encode(result.as_slice());
         self.pass_len = result.len();
-        log::info!(
+        println!(
             "sha224({}) = {}, length = {}",
-            self.password,
-            result,
-            self.pass_len
+            self.password, result, self.pass_len
         );
         self.sha_pass = result;
     }

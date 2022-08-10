@@ -34,6 +34,7 @@ widestring = "1.0"
 itertools = "0.10"
 smoltcp = "0.8"
 backtrace = "0.3"
+hex = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.2"
