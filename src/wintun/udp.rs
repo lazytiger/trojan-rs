@@ -8,16 +8,16 @@ use std::{
 
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
-use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint, Error};
+use smoltcp::{Error, iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint};
 
 use crate::{
     idle_pool::IdlePool,
-    proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
+    OPTIONS,
+    proto::{TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResultEndpoint},
     resolver::DnsResolver,
     tls_conn::TlsConn,
     utils::{read_once, send_all},
-    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
-    OPTIONS,
+    wintun::{CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX, SocketSet, waker::Wakers},
 };
 
 fn next_token() -> Token {
@@ -74,10 +74,15 @@ pub struct Connection {
     lbuffer: BytesMut,
     endpoint: IpEndpoint,
     established: bool,
+    last_remote: Instant,
 }
 
 impl Connection {
     fn do_local(&mut self, poll: &Poll, header: &[u8], body: &[u8]) {
+        if self.last_remote.elapsed().as_secs() > 1hlj20 {
+            self.close_remote(poll);
+            return;
+        }
         if !self.rbuffer.is_empty() {
             log::info!("send is blocked, discard udp packet");
             return;
@@ -92,6 +97,7 @@ impl Connection {
     }
 
     fn do_remote(&mut self, poll: &Poll, socket: &mut UdpSocket, event: &Event) {
+        self.last_remote = Instant::now();
         if event.is_writable() {
             if !self.established {
                 let mut buffer = BytesMut::new();
@@ -350,6 +356,7 @@ impl UdpServer {
                         lbuffer: BytesMut::with_capacity(1500),
                         established: false,
                         endpoint: src_endpoint,
+                        last_remote: Instant::now(),
                     };
                     Arc::new(conn)
                 });
