@@ -8,16 +8,16 @@ use std::{
 
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
-use smoltcp::{Error, iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint};
+use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint, Error};
 
 use crate::{
     idle_pool::IdlePool,
-    OPTIONS,
-    proto::{TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResultEndpoint},
+    proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
     resolver::DnsResolver,
     tls_conn::TlsConn,
     utils::{read_once, send_all},
-    wintun::{CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX, SocketSet, waker::Wakers},
+    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
+    OPTIONS,
 };
 
 fn next_token() -> Token {
@@ -79,7 +79,7 @@ pub struct Connection {
 
 impl Connection {
     fn do_local(&mut self, poll: &Poll, header: &[u8], body: &[u8]) {
-        if self.last_remote.elapsed().as_secs() > 1hlj20 {
+        if self.last_remote.elapsed().as_secs() > 120 {
             self.close_remote(poll);
             return;
         }
