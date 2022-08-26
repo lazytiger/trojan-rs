@@ -1,4 +1,3 @@
-#![feature(ip)]
 #![feature(get_mut_unchecked)]
 #![feature(test)]
 

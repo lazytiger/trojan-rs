@@ -45,4 +45,3 @@ features = ["reopen-03"]
 
 [profile.release]
 lto = true
-debug = true

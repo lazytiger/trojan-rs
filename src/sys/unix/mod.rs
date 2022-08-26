@@ -2,7 +2,7 @@ use mio::net::TcpStream;
 use std::{
     convert::TryFrom,
     io::{Error, ErrorKind, Result},
-    net::{SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     os::unix::io::AsRawFd,
 };
 
@@ -178,11 +178,21 @@ pub fn recv_from_with_destination<T: AsRawFd>(
 fn sockaddr_to_std(saddr: &libc::sockaddr_storage) -> Result<SocketAddr> {
     match saddr.ss_family as libc::c_int {
         libc::AF_INET => unsafe {
-            let addr: SocketAddrV4 = std::mem::transmute_copy(saddr);
+            let addr: &libc::sockaddr_in = std::mem::transmute(saddr);
+            let addr = SocketAddrV4::new(
+                Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr)),
+                u16::from_be(addr.sin_port),
+            );
             Ok(SocketAddr::V4(addr))
         },
         libc::AF_INET6 => unsafe {
-            let addr: SocketAddrV6 = std::mem::transmute_copy(saddr);
+            let addr: &libc::sockaddr_in6 = std::mem::transmute(saddr);
+            let addr = SocketAddrV6::new(
+                Ipv6Addr::from(addr.sin6_addr.s6_addr),
+                u16::from_be(addr.sin6_port),
+                u32::from_be(addr.sin6_flowinfo),
+                u32::from_be(addr.sin6_scope_id),
+            );
             Ok(SocketAddr::V6(addr))
         },
         _ => {
