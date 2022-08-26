@@ -8,15 +8,15 @@ use std::{
 use bytes::BytesMut;
 use mio::{
     event::Event,
-    Interest,
-    net::{TcpListener, TcpStream}, Poll, Token,
+    net::{TcpListener, TcpStream},
+    Interest, Poll, Token,
 };
 
 use crate::{
     config::OPTIONS,
     idle_pool::IdlePool,
-    proto::{CONNECT, MAX_PACKET_SIZE, TrojanRequest},
-    proxy::{CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX, next_index},
+    proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
+    proxy::{next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     sys, tcp_util,
@@ -28,6 +28,7 @@ pub struct TcpServer {
     tcp_listener: TcpListener,
     conns: HashMap<usize, Connection>,
     next_id: usize,
+    removed: Option<Vec<usize>>,
 }
 
 struct Connection {
@@ -48,6 +49,7 @@ impl TcpServer {
         TcpServer {
             tcp_listener,
             conns: HashMap::new(),
+            removed: Some(Vec::new()),
             next_id: MIN_INDEX,
         }
     }
@@ -99,11 +101,21 @@ impl TcpServer {
         if let Some(conn) = self.conns.get_mut(&index) {
             conn.ready(event, poll);
             if conn.destroyed() {
-                log::debug!("connection:{} removed from list", index);
-                self.conns.remove(&index);
+                self.removed.as_mut().unwrap().push(index);
             }
         } else {
             log::error!("tcp connection:{} not found, check deregister", index)
+        }
+    }
+
+    pub fn remove_closed(&mut self) {
+        if self.removed.as_ref().unwrap().is_empty() {
+            return;
+        }
+        let removed = self.removed.replace(Vec::new()).unwrap();
+        for index in removed {
+            log::debug!("connection:{} removed from list", index);
+            self.conns.remove(&index);
         }
     }
 

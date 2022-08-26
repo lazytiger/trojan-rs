@@ -7,12 +7,13 @@ use std::{
 };
 
 use mio::{
-    Events,
-    Interest, net::{TcpListener, UdpSocket}, Poll, Token, Waker,
+    net::{TcpListener, UdpSocket},
+    Events, Interest, Poll, Token, Waker,
 };
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
+pub use crate::idle_pool::IdlePool;
 use crate::{
     config::OPTIONS,
     proxy::{tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer},
@@ -20,7 +21,6 @@ use crate::{
     sys,
     types::Result,
 };
-pub use crate::idle_pool::IdlePool;
 
 mod tcp_server;
 mod udp_cache;
@@ -158,6 +158,8 @@ pub fn run() -> Result<()> {
                 }
             }
         }
+        udp_server.remove_closed();
+        tcp_server.remove_closed();
         let now = Instant::now();
         if now - last_check_time > check_duration {
             tcp_server.check_timeout(&poll, now);

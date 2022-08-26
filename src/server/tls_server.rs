@@ -10,7 +10,7 @@ use rustls::{ServerConfig, ServerConnection};
 
 use crate::{
     resolver::DnsResolver,
-    server::{CHANNEL_CNT, CHANNEL_PROXY, connection::Connection, MAX_INDEX, MIN_INDEX},
+    server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
     status::StatusProvider,
     tls_conn::TlsConn,
 };
@@ -34,6 +34,7 @@ pub struct TlsServer {
     config: Arc<ServerConfig>,
     next_id: usize,
     conns: HashMap<usize, Connection>,
+    removed: Option<Vec<usize>>,
 }
 
 pub trait Backend: StatusProvider {
@@ -51,6 +52,7 @@ impl TlsServer {
         TlsServer {
             listener,
             config,
+            removed: Some(Vec::new()),
             next_id: MIN_INDEX,
             conns: HashMap::new(),
         }
@@ -121,11 +123,21 @@ impl TlsServer {
             let conn = self.conns.get_mut(&index).unwrap();
             conn.ready(poll, event, resolver);
             if conn.destroyed() {
-                self.conns.remove(&index);
-                log::debug!("connection:{} closed, remove from pool", index);
+                self.removed.as_mut().unwrap().push(index);
             }
         } else {
             log::error!("connection:{} not found to do event", index);
+        }
+    }
+
+    pub fn remove_closed(&mut self) {
+        if self.removed.as_ref().unwrap().is_empty() {
+            return;
+        }
+        let removed = self.removed.replace(Vec::new()).unwrap();
+        for index in removed {
+            self.conns.remove(&index);
+            log::debug!("connection:{} closed, remove from pool", index);
         }
     }
 

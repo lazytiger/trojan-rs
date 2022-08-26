@@ -5,12 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{Events, Interest, net::TcpListener, Poll, Token, Waker};
+use mio::{net::TcpListener, Events, Interest, Poll, Token, Waker};
 use rustls::{
-    KeyLogFile,
-    RootCertStore, server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth}, ServerConfig,
+    server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth},
+    KeyLogFile, RootCertStore, ServerConfig,
 };
-use rustls_pemfile::{certs, Item, read_one};
+use rustls_pemfile::{certs, read_one, Item};
 
 pub use tls_server::TlsServer;
 
@@ -121,6 +121,7 @@ pub fn run() -> Result<()> {
                 }
             }
         }
+        server.remove_closed();
         let now = Instant::now();
         if now - last_check_time > check_duration {
             server.check_timeout(now, &poll);

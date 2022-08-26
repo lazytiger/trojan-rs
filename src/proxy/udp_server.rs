@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, rc::Rc, sync::Arc, time::Instant};
 
 use bytes::BytesMut;
 use mio::{event::Event, net::UdpSocket, Poll, Token};
@@ -6,8 +6,8 @@ use mio::{event::Event, net::UdpSocket, Poll, Token};
 use crate::{
     config::OPTIONS,
     idle_pool::IdlePool,
-    proto::{MAX_PACKET_SIZE, TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult},
-    proxy::{CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX, next_index, udp_cache::UdpSvrCache},
+    proto::{TrojanRequest, UdpAssociate, UdpParseResult, MAX_PACKET_SIZE, UDP_ASSOCIATE},
+    proxy::{next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX},
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     sys,
@@ -19,6 +19,7 @@ pub struct UdpServer {
     udp_listener: UdpSocket,
     conns: HashMap<usize, Arc<Connection>>,
     src_map: HashMap<SocketAddr, Arc<Connection>>,
+    removed: Option<Vec<usize>>,
     next_id: usize,
     recv_buffer: Vec<u8>,
 }
@@ -34,6 +35,7 @@ struct Connection {
     dst_addr: SocketAddr,
     bytes_read: usize,
     bytes_sent: usize,
+    last_active: Instant,
 }
 
 impl UdpServer {
@@ -42,6 +44,7 @@ impl UdpServer {
             udp_listener,
             conns: HashMap::new(),
             src_map: HashMap::new(),
+            removed: Some(Vec::new()),
             next_id: MIN_INDEX,
             recv_buffer: vec![0u8; MAX_PACKET_SIZE],
         }
@@ -124,6 +127,9 @@ impl UdpServer {
         };
         let payload = &self.recv_buffer.as_slice()[..size];
         unsafe { Arc::get_mut_unchecked(&mut conn) }.send_request(payload, &dst_addr, poll);
+        if conn.destroyed() {
+            self.removed.as_mut().unwrap().push(conn.index);
+        }
         Ok(())
     }
 
@@ -132,13 +138,28 @@ impl UdpServer {
         if let Some(conn) = self.conns.get_mut(&index) {
             unsafe { Arc::get_mut_unchecked(conn) }.ready(event, poll, udp_cache);
             if conn.destroyed() {
-                let src_addr = conn.src_addr;
+                self.removed.as_mut().unwrap().push(index);
+            }
+        } else {
+            log::error!("udp connection:{} not found, check deregister", index);
+        }
+    }
+
+    pub fn remove_closed(&mut self) {
+        if self.removed.as_ref().unwrap().is_empty() {
+            return;
+        }
+        let removed = self.removed.replace(Vec::new()).unwrap();
+        for index in removed {
+            let mut src_addr = None;
+            if let Some(conn) = self.conns.get(&index) {
+                src_addr = Some(conn.src_addr);
+            }
+            if let Some(src_addr) = src_addr {
                 self.conns.remove(&index);
                 self.src_map.remove(&src_addr);
                 log::debug!("connection:{} removed from list", index);
             }
-        } else {
-            log::error!("udp connection:{} not found, check deregister", index);
         }
     }
 }
@@ -162,6 +183,7 @@ impl Connection {
             status: ConnStatus::Established,
             bytes_read: 0,
             bytes_sent: 0,
+            last_active: Instant::now(),
         }
     }
 
@@ -188,6 +210,11 @@ impl Connection {
     }
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr, poll: &Poll) {
+        if self.last_active.elapsed().as_secs() > 120 {
+            self.server_conn.shutdown();
+            self.do_status(poll);
+            return;
+        }
         if !self.server_conn.is_connecting() && !self.server_conn.writable() {
             log::warn!("udp packet is too fast, ignore now");
             return;
@@ -215,6 +242,7 @@ impl Connection {
     }
 
     fn ready(&mut self, event: &Event, poll: &Poll, udp_cache: &mut UdpSvrCache) {
+        self.last_active = Instant::now();
         if event.is_readable() {
             self.try_read_server(udp_cache);
         }
