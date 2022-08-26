@@ -211,7 +211,7 @@ impl Connection {
 
     fn send_request(&mut self, payload: &[u8], dst_addr: &SocketAddr, poll: &Poll) {
         if self.last_active.elapsed().as_secs() > 120 {
-            self.server_conn.shutdown();
+            self.shutdown();
             self.do_status(poll);
             return;
         }

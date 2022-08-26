@@ -44,7 +44,7 @@ fn main() {
     if let Err(err) = match OPTIONS.mode {
         Mode::Proxy(_) => {
             log::warn!(
-                "trojan started in dns mode with server:{}",
+                "trojan started in proxy mode with server:{}",
                 OPTIONS.back_addr.as_ref().unwrap()
             );
             proxy::run()
