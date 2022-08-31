@@ -3,7 +3,7 @@ use std::{
     net::Shutdown,
 };
 
-use mio::{Interest, net::TcpStream, Poll, Token};
+use mio::{net::TcpStream, Interest, Poll, Token};
 use rustls::Connection;
 
 use crate::status::{ConnStatus, StatusProvider};
@@ -173,12 +173,12 @@ impl TlsConn {
                     );
                 }
                 Err(err)
-                if err.kind() == ErrorKind::WouldBlock
-                    || err.kind() == ErrorKind::NotConnected =>
-                    {
-                        log::debug!("connection:{} read from server blocked", self.index());
-                        break;
-                    }
+                    if err.kind() == ErrorKind::WouldBlock
+                        || err.kind() == ErrorKind::NotConnected =>
+                {
+                    log::debug!("connection:{} read from server blocked", self.index());
+                    break;
+                }
                 Err(err) => {
                     log::info!(
                         "connection:{} read from server failed:{}-{}",
@@ -193,7 +193,7 @@ impl TlsConn {
         }
 
         if let Err(err) = self.session.process_new_packets() {
-            log::error!(
+            log::info!(
                 "connection:{} process new packets failed:{}",
                 self.index(),
                 err
