@@ -20,11 +20,11 @@ pub use route::route_add_with_if;
 
 use crate::{
     dns::{get_adapter_ip, get_main_adapter_gwif},
-    OPTIONS,
     proxy::IdlePool,
     resolver::DnsResolver,
     types::Result,
     wintun::{ipset::IPSet, tcp::TcpServer, tun::WintunInterface, udp::UdpServer, waker::Wakers},
+    OPTIONS,
 };
 
 mod ipset;
@@ -86,8 +86,8 @@ fn prepare_idle_pool(poll: &Poll, resolver: &DnsResolver) -> Result<IdlePool> {
         OPTIONS.wintun_args().port,
         OPTIONS.wintun_args().hostname.clone(),
     );
-    pool.init(poll, resolver);
     pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
+    pool.init(poll, resolver);
     Ok(pool)
 }
 

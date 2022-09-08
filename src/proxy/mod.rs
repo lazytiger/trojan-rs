@@ -125,8 +125,8 @@ pub fn run() -> Result<()> {
         OPTIONS.proxy_args().port,
         OPTIONS.proxy_args().hostname.clone(),
     );
-    pool.init(&poll, &resolver);
     pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
+    pool.init(&poll, &resolver);
 
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
