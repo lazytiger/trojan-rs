@@ -27,6 +27,10 @@ mod types;
 mod utils;
 
 fn main() {
+    #[cfg(debug_assertions)]
+    unsafe {
+        backtrace_on_stack_overflow::enable()
+    };
     config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);
     panic::set_hook(Box::new(|info| {
         let trace = Backtrace::new();

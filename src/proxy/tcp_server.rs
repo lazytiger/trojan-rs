@@ -272,9 +272,8 @@ impl Connection {
             &mut self.server_conn,
         ) {
             self.shutdown();
-        } else {
-            self.read_client = false;
         }
+        self.read_client = false;
 
         self.try_send_server();
     }
