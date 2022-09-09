@@ -28,6 +28,7 @@ mod utils;
 
 fn main() {
     #[cfg(debug_assertions)]
+    #[cfg(not(target_os = "windows"))]
     unsafe {
         backtrace_on_stack_overflow::enable()
     };
@@ -41,7 +42,7 @@ fn main() {
             if let Mode::Dns(_) = OPTIONS.mode {
                 dns::set_dns_server("".to_owned());
             }
-                }
+            }
         }
     }));
     if let Err(err) = match OPTIONS.mode {
