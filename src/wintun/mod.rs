@@ -165,6 +165,7 @@ pub fn run() -> Result<()> {
         if let Err(err) = interface.poll(now) {
             log::info!("interface error:{}", err);
         }
+        tcp_server.check_remote_closed(&mut interface, &poll, &mut tcp_wakers);
 
         udp_server.do_local(&mut pool, &poll, &resolver, &mut udp_wakers, &mut interface);
         tcp_server.do_local(&mut pool, &poll, &resolver, &mut tcp_wakers, &mut interface);

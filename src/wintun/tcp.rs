@@ -12,12 +12,12 @@ use smoltcp::{iface::SocketHandle, socket::TcpSocket};
 
 use crate::{
     idle_pool::IdlePool,
-    proto::{CONNECT, TrojanRequest},
+    proto::{TrojanRequest, CONNECT},
     resolver::DnsResolver,
     tls_conn::TlsConn,
     types::{CopyResult, TrojanError},
     utils::copy_stream,
-    wintun::{CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX, SocketSet, waker::Wakers},
+    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
 };
 
 pub struct TcpStreamRef<'a, 'b> {
@@ -100,6 +100,7 @@ impl Connection {
             let socket = sockets.get_socket::<TcpSocket>(self.local);
             socket.register_recv_waker(waker);
             socket.register_send_waker(waker);
+            //FIXME close should be polled again
             socket.close();
             self.lclosed = true;
         } else if !is_local && !self.rclosed {
@@ -248,14 +249,20 @@ impl Connection {
             }
             _ => unreachable!(),
         }
-        if self.rclosed && !self.lclosed && self.lbuffer.is_empty() {
-            log::info!("connection remote closed and nothing to send, close local now",);
-            self.close_stream(true, sockets, poll, waker);
-        }
     }
 
-    pub fn is_closed(&self) -> bool {
-        self.rclosed && self.lclosed
+    pub fn is_closed(&self, sockets: &mut SocketSet) -> bool {
+        let socket = sockets.get_socket::<TcpSocket>(self.local);
+        self.rclosed && matches!(socket.state(), smoltcp::socket::TcpState::Closed)
+    }
+
+    pub fn is_remote_closed(&self) -> bool {
+        self.rclosed && !self.lclosed && self.lbuffer.is_empty()
+    }
+
+    pub fn abort_local(&self, sockets: &mut SocketSet) {
+        let socket = sockets.get_socket::<TcpSocket>(self.local);
+        socket.abort();
     }
 
     pub fn close(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
@@ -297,6 +304,7 @@ pub struct TcpServer {
     token2conns: HashMap<Token, Arc<Connection>>,
     handle2conns: HashMap<SocketHandle, Arc<Connection>>,
     removed: HashSet<SocketHandle>,
+    remote_closed: HashSet<Token>,
 }
 
 impl TcpServer {
@@ -305,6 +313,7 @@ impl TcpServer {
             token2conns: Default::default(),
             handle2conns: Default::default(),
             removed: HashSet::new(),
+            remote_closed: HashSet::new(),
         }
     }
 
@@ -342,7 +351,7 @@ impl TcpServer {
                 .entry(conn.token)
                 .or_insert_with(|| conn.clone());
             unsafe { Arc::get_mut_unchecked(conn).do_local(sockets, poll, event, wakers) };
-            if conn.is_closed() {
+            if conn.is_closed(sockets) {
                 self.removed.insert(conn.local);
             }
             log::info!("handle:{} is done", handle);
@@ -358,12 +367,38 @@ impl TcpServer {
     ) {
         if let Some(conn) = self.token2conns.get_mut(&event.token()) {
             unsafe { Arc::get_mut_unchecked(conn).do_remote(sockets, poll, event, wakers) };
-            if conn.is_closed() {
+            if conn.is_closed(sockets) {
                 self.removed.insert(conn.local);
+            } else if conn.is_remote_closed() {
+                //smoltcp socket write is asynchronous, so local close should be delayed after interface being polled.
+                self.remote_closed.insert(conn.token);
             }
         } else {
             log::warn!("connection:{} not found in tcp sockets", event.token().0);
         }
+    }
+
+    ///
+    /// Do actual local closing after interface being polled.
+    pub fn check_remote_closed(
+        &mut self,
+        sockets: &mut SocketSet,
+        poll: &Poll,
+        wakers: &mut Wakers,
+    ) {
+        let waker = wakers.get_dummy_waker();
+        for token in &self.remote_closed {
+            if let Some(conn) = self.token2conns.get_mut(token) {
+                log::info!("connection remote closed and nothing to send, close local now",);
+                unsafe {
+                    Arc::get_mut_unchecked(conn).close_stream(true, sockets, poll, waker);
+                }
+                if conn.is_closed(sockets) {
+                    self.removed.insert(conn.local);
+                }
+            }
+        }
+        self.remote_closed.clear();
     }
 
     pub fn remove_closed(&mut self, sockets: &mut SocketSet) {
@@ -394,7 +429,10 @@ impl TcpServer {
             .iter()
             .filter_map(|(_, conn)| {
                 let elapsed = now - conn.last_active;
-                if elapsed > Duration::from_secs(3600) {
+                if conn.lclosed && elapsed > Duration::from_secs(120) {
+                    conn.abort_local(sockets);
+                    Some(conn.clone())
+                } else if elapsed > Duration::from_secs(3600) {
                     Some(conn.clone())
                 } else {
                     None
