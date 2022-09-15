@@ -332,7 +332,7 @@ impl TcpServer {
             let socket = sockets.get_socket::<TcpSocket>(handle);
             let endpoint = socket.local_endpoint();
             if socket.is_listening() && !self.handle2conns.contains_key(&handle) {
-                log::warn!(
+                log::info!(
                     "socket:{} {} is still listening, remove now",
                     handle,
                     endpoint,
