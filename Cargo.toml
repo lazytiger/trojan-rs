@@ -1,13 +1,13 @@
 [package]
 name = "trojan"
-version = "0.10.0"
+version = "0.11.0"
 authors = ["Hoping White <baihaoping@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3.2", features = ["derive", "cargo", "env"] }
+clap = { version = "4.0", features = ["derive", "cargo", "env"] }
 mio = { version = "0.8", features = ["net", "os-poll"] }
 log = "0.4"
 chrono = "0.4"
@@ -26,7 +26,7 @@ lazy_static = "1.4"
 derive_more = "0.99"
 libloading = "0.7"
 crossbeam = "0.8"
-trust-dns-proto = "0.21"
+trust-dns-proto = "0.22"
 winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons"] }
 widestring = "1.0"
 itertools = "0.10"
