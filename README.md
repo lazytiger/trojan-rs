@@ -155,6 +155,8 @@ The following command can route all traffic to 8.8.8.8 into this device.
 route ADD 8.8.8.8 MASK 255.255.255.255 0.0.0.0 METRIC 1 IF 3
 ```
 
+You can get more about windows global proxy in [WINDOWS.md](https://github.com/lazytiger/trojan-rs/blob/master/WINDOWS.md)
+
 ## Special Thanks for ![Jetbrains](https://github.com/lazytiger/trojan-rs/blob/master/jetbrains.png?raw=true)
 
 Thanks [Jetbrains](https://www.jetbrains.com/?from=trojan-rs) open source license project. Clion is a great IDE which
