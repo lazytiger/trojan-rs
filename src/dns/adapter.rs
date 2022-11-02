@@ -9,8 +9,8 @@ use winapi::{
         ipifcons,
         minwindef::{PULONG, ULONG},
         netioapi::{
-            DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
-            GetInterfaceDnsSettings, SetInterfaceDnsSettings,
+            GetInterfaceDnsSettings, SetInterfaceDnsSettings, DNS_INTERFACE_SETTINGS,
+            DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
         },
         ntdef::{CHAR, LANG_NEUTRAL, SUBLANG_DEFAULT},
         winerror,
@@ -64,7 +64,7 @@ pub fn get_main_adapter_ip() -> Option<String> {
                 return false;
             }
             let ip = get_string(&adapter.GatewayList.IpAddress.String);
-            if ip.is_empty() {
+            if ip.is_empty() || ip == "0.0.0.0" {
                 false
             } else {
                 let ip = get_string(&adapter.IpAddressList.IpAddress.String);
@@ -85,7 +85,7 @@ pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
             } else {
                 let ip = get_string(&adapter.GatewayList.IpAddress.String);
                 ret = Some((ip.clone(), adapter.Index));
-                !ip.is_empty() && adapter.Type == 6
+                !ip.is_empty() && ip != "0.0.0.0" && adapter.Type == 6
             }
         });
     }
@@ -93,8 +93,8 @@ pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
 }
 
 unsafe fn get_adapters<F>(mut callback: F) -> bool
-    where
-        F: FnMut(&IP_ADAPTER_INFO) -> bool,
+where
+    F: FnMut(&IP_ADAPTER_INFO) -> bool,
 {
     let mut buffer_length: u32 = 0;
     let result = iphlpapi::GetAdaptersInfo(std::ptr::null_mut(), &mut buffer_length as PULONG);
@@ -128,7 +128,7 @@ fn get_string(s: &[CHAR]) -> String {
             .map_while(|c| if *c == 0 { None } else { Some(*c as u8) })
             .collect(),
     )
-        .unwrap()
+    .unwrap()
 }
 
 fn get_error_message(err_code: u32) -> String {
@@ -167,7 +167,7 @@ pub fn set_dns_server(name_server: String) -> bool {
                 return false;
             }
             let ip = get_string(&adapter.GatewayList.IpAddress.String);
-            if ip.is_empty() {
+            if ip.is_empty() || ip == "0.0.0.0" {
                 return false;
             }
             let mut guid = GUID::default();
