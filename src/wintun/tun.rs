@@ -43,8 +43,8 @@ impl WintunInterface {
     ) {
         unsafe {
             self.interface = std::mem::transmute(interface);
-            self.tcp_wakers = std::mem::transmute(tcp_wakers);
-            self.udp_wakers = std::mem::transmute(udp_wakers);
+            self.tcp_wakers = tcp_wakers as *mut Wakers;
+            self.udp_wakers = udp_wakers as *mut Wakers;
         }
     }
 }
@@ -229,6 +229,6 @@ impl smoltcp::phy::TxToken for TxToken {
                 self.session.send_packet(packet);
                 r
             })
-            .unwrap_or(Err(smoltcp::Error::Exhausted))
+            .unwrap_or_else(|_| Err(smoltcp::Error::Exhausted))
     }
 }

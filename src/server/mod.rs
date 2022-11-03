@@ -117,7 +117,7 @@ pub fn run() -> Result<()> {
                     });
                 }
                 _ => {
-                    server.do_conn_event(&poll, PollEvent::Network(&event), Some(&mut resolver));
+                    server.do_conn_event(&poll, PollEvent::Network(event), Some(&mut resolver));
                 }
             }
         }
