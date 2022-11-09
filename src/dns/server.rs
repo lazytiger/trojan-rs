@@ -8,7 +8,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use mio::{event::Event, Interest, net::UdpSocket, Poll, Token};
+use mio::{event::Event, net::UdpSocket, Interest, Poll, Token};
 use trust_dns_proto::{
     op::{Message, MessageType, Query, ResponseCode},
     rr::{DNSClass, Name, RData, Record, RecordType},
@@ -16,10 +16,10 @@ use trust_dns_proto::{
 };
 
 use crate::{
-    dns::{DNS_LOCAL, DNS_POISONED, DNS_TRUSTED, domain::DomainMap},
-    OPTIONS,
+    dns::{domain::DomainMap, DNS_LOCAL, DNS_POISONED, DNS_TRUSTED},
     proto::MAX_PACKET_SIZE,
     wintun::route_add_with_if,
+    OPTIONS,
 };
 
 pub struct DnsServer {
@@ -62,7 +62,7 @@ impl DnsServer {
                     .parse()
                     .unwrap(),
             )
-                .unwrap(),
+            .unwrap(),
             trusted: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
             poisoned: UdpSocket::bind(default_addr.as_str().parse().unwrap()).unwrap(),
             buffer: vec![0; MAX_PACKET_SIZE],
@@ -161,47 +161,53 @@ impl DnsServer {
                             if query.query_type() == RecordType::PTR && name == self.ptr_name {
                                 log::debug!("found ptr query");
                                 if let Err(err) =
-                                self.listener.send_to(self.arp_data.as_slice(), from)
+                                    self.listener.send_to(self.arp_data.as_slice(), from)
                                 {
                                     log::error!("send response to {} failed:{}", from, err);
                                 }
                                 continue;
                             }
                             let key = Self::get_message_key(&message);
-                            if let Some(result) = self.store.get_mut(&key) {
-                                if result.response.is_some() && result.expire_time > now {
-                                    log::info!("query:{} found in cache", key);
-                                    result.response.as_mut().unwrap().set_id(message.id());
-                                    if let Err(err) = self.listener.send_to(
-                                        result
-                                            .response
-                                            .as_ref()
-                                            .unwrap()
-                                            .to_vec()
-                                            .unwrap()
-                                            .as_slice(),
-                                        from,
-                                    ) {
-                                        log::error!("send response to {} failed:{}", from, err);
-                                    }
-                                    continue;
+                            let (renew, respond) = if let Some(QueryResult {
+                                response: Some(response),
+                                expire_time,
+                                ..
+                            }) = self.store.get_mut(&key)
+                            {
+                                log::info!("query:{} found in cache", key);
+                                response.set_id(message.id());
+                                if let Err(err) = self
+                                    .listener
+                                    .send_to(response.to_vec().unwrap().as_slice(), from)
+                                {
+                                    log::error!("send response to {} failed:{}", from, err);
                                 }
-                            }
-                            log::info!("query:{} not cached", key);
-                            if self.is_blocked(&name) {
-                                if let Err(err) = self.trusted.send_to(data, self.trusted_addr) {
-                                    log::error!("send to trusted dns failed:{}", err);
-                                    continue;
-                                }
-                                log::info!("domain:{} is blocked", name);
+                                (*expire_time <= now, false)
                             } else {
-                                if let Err(err) = self.poisoned.send_to(data, self.poisoned_addr) {
-                                    log::error!("send to poisoned dns failed:{}", err);
-                                    continue;
+                                (true, true)
+                            };
+
+                            if renew {
+                                if self.is_blocked(&name) {
+                                    if let Err(err) = self.trusted.send_to(data, self.trusted_addr)
+                                    {
+                                        log::error!("send to trusted dns failed:{}", err);
+                                        continue;
+                                    }
+                                    log::info!("domain:{} is blocked", name);
+                                } else {
+                                    if let Err(err) =
+                                        self.poisoned.send_to(data, self.poisoned_addr)
+                                    {
+                                        log::error!("send to poisoned dns failed:{}", err);
+                                        continue;
+                                    }
+                                    log::info!("domain:{} is not blocked", name);
                                 }
-                                log::info!("domain:{} is not blocked", name);
+                                if respond {
+                                    self.add_request(key, from, message.id());
+                                }
                             }
-                            self.add_request(key, from, message.id());
                         } else {
                             log::error!(
                                 "query count:{} found in message:{:?}",
@@ -270,7 +276,7 @@ impl DnsServer {
                                             let addr: u32 = addr.into();
                                             if !route_added.contains(&addr)
                                                 && route_add_with_if(addr, !0, 0, adapter_index)
-                                                .is_ok()
+                                                    .is_ok()
                                             {
                                                 route_added.insert(addr);
                                             }
