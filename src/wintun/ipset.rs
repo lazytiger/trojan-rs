@@ -51,7 +51,7 @@ impl Cidr {
     }
     fn ip_mask(&self) -> (Ipv4Addr, Ipv4Addr) {
         let ip = Ipv4Addr::from(self.ip);
-        let mask = Ipv4Addr::from(!((1 << (32 - self.prefix)) - 1));
+        let mask = Ipv4Addr::from(self.mask());
         (ip, mask)
     }
 }
@@ -125,6 +125,9 @@ impl IPSet {
     }
 
     pub fn add_range(&mut self, left: u32, right: u32) {
+        if left > right {
+            return;
+        }
         let cidrs = range_to_cidr(left, right);
         self.data.extend(cidrs);
     }
@@ -150,20 +153,17 @@ impl Not for IPSet {
         let mut r = 0;
         for item in &self.data {
             let (left, right) = item.range();
-            if left == 0 || left - 1 == r {
-                r = right;
-            } else {
-                if r < u32::MAX {
-                    set.add_range(r + 1, left - 1);
-                }
-                r = right;
-            }
+            set.add_range(r + 1, left - 1);
+            r = right;
+        }
+        if r < u32::MAX {
+            set.add_range(r + 1, u32::MAX);
         }
         set.data.sort();
         set
     }
 }
-
+/// check with https://www.ipaddressguide.com/cidr
 fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
     let mut cidrs = Vec::new();
     if left == right {
@@ -174,10 +174,10 @@ fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
     loop {
         let shift = right.trailing_ones();
         let prefix = 32 - shift;
-        let r = right & !((1 << shift) - 1);
-        if left <= r {
-            cidrs.push(Cidr::new(r, prefix));
-            right = r - 1;
+        let ip = right & !((1 << shift) - 1);
+        if left <= ip {
+            cidrs.push(Cidr::new(ip, prefix));
+            right = ip - 1;
         } else {
             break;
         }
@@ -254,6 +254,6 @@ mod tests {
 
     #[test]
     fn test_iprange() {
-        my_range_to_cidr(190365721, 190365722);
+        my_range_to_cidr(190365721, 190365951);
     }
 }
