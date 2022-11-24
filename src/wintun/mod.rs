@@ -52,10 +52,7 @@ const CHANNEL_UDP: usize = 1;
 const CHANNEL_TCP: usize = 2;
 
 fn apply_ipset(file: &str, index: u32, inverse: bool) -> Result<()> {
-    let mut ipset = IPSet::with_file(file, inverse)?;
-    if OPTIONS.wintun_args().inverse_route {
-        ipset = !ipset;
-    }
+    let ipset = IPSet::with_file(file, inverse)?;
     ipset.add_route(index)?;
     log::warn!("route add completed");
     Ok(())

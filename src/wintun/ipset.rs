@@ -102,10 +102,11 @@ impl IPSet {
             ipset.add_str("224.0.0.0/4");
             ipset.add_str("240.0.0.0/4");
             ipset.add_str("255.255.255.255/32");
+            Ok(!ipset)
+        } else {
+            ipset.build();
+            Ok(ipset)
         }
-        ipset.build();
-
-        Ok(ipset)
     }
 
     pub fn new() -> Self {
@@ -196,7 +197,7 @@ fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
 mod tests {
     use std::{fs::File, io::Write, net::Ipv4Addr};
 
-    use crate::wintun::ipset::{IPSet, range_to_cidr};
+    use crate::wintun::ipset::{range_to_cidr, IPSet};
 
     #[test]
     fn test_ipset_create() {
@@ -211,7 +212,7 @@ mod tests {
                 "{} - {}, {} {} {}\r\n",
                 left, right, ip, mask, item.prefix
             )
-                .unwrap();
+            .unwrap();
         }
         let ipset = !ipset;
         let mut last = 0;
@@ -232,7 +233,7 @@ mod tests {
                 "{} - {}, {} {} {}\r\n",
                 left, right, ip, mask, item.prefix
             )
-                .unwrap();
+            .unwrap();
         }
     }
 
