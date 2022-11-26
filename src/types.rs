@@ -23,6 +23,8 @@ pub enum TrojanError {
     #[from(ignore)]
     RxBreak(Option<std::io::Error>),
     DnsProto(trust_dns_proto::error::ProtoError),
+    #[from(ignore)]
+    MainAdapterNotFound,
 }
 
 pub enum CopyResult {

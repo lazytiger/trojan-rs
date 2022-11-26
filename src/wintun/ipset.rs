@@ -153,7 +153,9 @@ impl Not for IPSet {
         let mut r = 0;
         for item in &self.data {
             let (left, right) = item.range();
-            set.add_range(r + 1, left - 1);
+            if left > 0 && r < u32::MAX {
+                set.add_range(r + 1, left - 1);
+            }
             r = right;
         }
         if r < u32::MAX {
@@ -163,6 +165,7 @@ impl Not for IPSet {
         set
     }
 }
+
 /// check with https://www.ipaddressguide.com/cidr
 fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
     let mut cidrs = Vec::new();

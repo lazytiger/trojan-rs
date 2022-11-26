@@ -22,7 +22,7 @@ use crate::{
     dns::{get_adapter_ip, get_main_adapter_gwif},
     proxy::IdlePool,
     resolver::DnsResolver,
-    types::Result,
+    types::{Result, TrojanError},
     wintun::{ipset::IPSet, tcp::TcpServer, tun::WintunInterface, udp::UdpServer, waker::Wakers},
     OPTIONS,
 };
@@ -120,6 +120,9 @@ pub fn run() -> Result<()> {
             let index: u32 = (*v4.ip()).into();
             route_add_with_if(index, !0, gw.into(), main_index)?;
         }
+    } else {
+        log::error!("main adapter gateway not found");
+        return Err(TrojanError::MainAdapterNotFound);
     }
     let index = adapter.get_adapter_index()?;
     if let Some(file) = &OPTIONS.wintun_args().route_ipset {

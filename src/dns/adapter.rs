@@ -60,7 +60,7 @@ pub fn get_main_adapter_ip() -> Option<String> {
     let mut ret = None;
     unsafe {
         get_adapters(|adapter| {
-            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET {
+            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET && adapter.Type != 71 {
                 return false;
             }
             let ip = get_string(&adapter.GatewayList.IpAddress.String);
@@ -80,12 +80,17 @@ pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
     let mut ret = None;
     unsafe {
         get_adapters(|adapter| {
-            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET {
+            println!("index:{} type:{}", adapter.Index, adapter.Type);
+            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET && adapter.Type != 71 {
                 false
             } else {
                 let ip = get_string(&adapter.GatewayList.IpAddress.String);
-                ret = Some((ip.clone(), adapter.Index));
-                !ip.is_empty() && ip != "0.0.0.0" && adapter.Type == 6
+                if ip.is_empty() || ip == "0.0.0.0" {
+                    false
+                } else {
+                    ret = Some((ip.clone(), adapter.Index));
+                    true
+                }
             }
         });
     }
