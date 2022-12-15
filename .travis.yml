@@ -4,6 +4,8 @@ jobs:
   include:
     - os: linux
       rust: stable
+    - os: windows
+      rust: stable
 
 env:
   - RUSTFLAGS="-Ctarget-feature=+aes,+ssse3" RUSTDOCFLAGS="-Ctarget-feature=+aes,+ssse3" RUST_BACKTRACE=1
