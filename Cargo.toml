@@ -1,6 +1,6 @@
 [package]
 name = "trojan"
-version = "0.11.0"
+version = "0.12.0"
 authors = ["Hoping White <baihaoping@gmail.com>"]
 edition = "2021"
 
