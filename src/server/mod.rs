@@ -110,6 +110,8 @@ pub fn run() -> Result<()> {
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
+    let mut last_status_time = Instant::now();
+    let status_check = Duration::new(60, 0);
     let mut stats = Statistics::new();
     loop {
         poll.poll(&mut events, Some(check_duration))?;
@@ -138,10 +140,13 @@ pub fn run() -> Result<()> {
         if now - last_check_time > check_duration {
             server.check_timeout(now, &poll);
             last_check_time = now;
+        }
+        if now - last_status_time > status_check {
             stats.save(
                 OPTIONS.server_args().status_file.as_str(),
                 OPTIONS.server_args().status_limit,
             );
+            last_status_time = now;
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
+    fs::OpenOptions,
     io::Write,
     net::IpAddr,
 };
@@ -61,7 +61,11 @@ impl Statistics {
     }
 
     pub fn save(&self, file: &str, limit: usize) {
-        match File::open(file).map(|mut file| -> Result<(), std::io::Error> {
+        let mut oo = OpenOptions::new();
+        oo.write(true);
+        oo.truncate(true);
+        oo.create(true);
+        match oo.open(file).map(|mut file| -> Result<(), std::io::Error> {
             let mut conns: Vec<_> = self.conns.iter().collect();
             let limit = if limit == 0 { conns.len() } else { limit };
             conns.sort_by(|(_, data1), (_, data2)| data1.all().cmp(&data2.all()).reverse());
@@ -79,7 +83,7 @@ impl Statistics {
                 for ip in &data.sources {
                     write!(&mut file, " {}", ip)?;
                 }
-                write!(&mut file, "\n")?;
+                writeln!(&mut file)?;
             }
             Ok(())
         }) {
