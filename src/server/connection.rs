@@ -320,12 +320,9 @@ impl Connection {
         );
         match TcpStream::connect(self.target_addr.unwrap()) {
             Ok(tcp_target) => {
-                stats.add_tcp_rx(
-                    0,
-                    self.target_addr.map(|addr| addr.ip()),
-                    self.proxy.source(),
-                );
-                match TcpBackend::new(tcp_target, self.index, self.target_token(), poll) {
+                let dst_ip = self.target_addr.map(|addr| addr.ip());
+                stats.add_tcp_rx(0, dst_ip, self.proxy.source());
+                match TcpBackend::new(tcp_target, dst_ip, self.index, self.target_token(), poll) {
                     Ok(mut backend) => {
                         if !self.data.is_empty() {
                             backend.dispatch(self.data.as_slice(), stats);

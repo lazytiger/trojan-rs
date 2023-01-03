@@ -27,12 +27,18 @@ pub struct TcpBackend {
 }
 
 impl TcpBackend {
-    pub fn new(mut conn: TcpStream, index: usize, token: Token, poll: &Poll) -> Result<TcpBackend> {
+    pub fn new(
+        mut conn: TcpStream,
+        dst_ip: Option<IpAddr>,
+        index: usize,
+        token: Token,
+        poll: &Poll,
+    ) -> Result<TcpBackend> {
         poll.registry()
             .register(&mut conn, token, Interest::READABLE | Interest::WRITABLE)?;
         conn.set_nodelay(true)?;
         Ok(TcpBackend {
-            dst_ip: None,
+            dst_ip,
             conn,
             index,
             timeout: OPTIONS.tcp_idle_duration,
@@ -91,13 +97,6 @@ impl StatusProvider for TcpBackend {
 
     fn get_status(&self) -> ConnStatus {
         self.status
-    }
-
-    fn established(&mut self) {
-        if matches!(self.get_status(), ConnStatus::Connecting) {
-            self.set_status(ConnStatus::Established);
-            self.dst_ip = self.conn.peer_addr().map(|addr| addr.ip()).ok();
-        }
     }
 
     fn close_conn(&mut self) -> bool {
