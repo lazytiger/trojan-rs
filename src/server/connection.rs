@@ -322,7 +322,7 @@ impl Connection {
             Ok(tcp_target) => {
                 stats.add_tcp_rx(
                     0,
-                    tcp_target.peer_addr().map(|addr| addr.ip()).ok(),
+                    self.target_addr.map(|addr| addr.ip()),
                     self.proxy.source(),
                 );
                 match TcpBackend::new(tcp_target, self.index, self.target_token(), poll) {

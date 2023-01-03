@@ -20,7 +20,7 @@ struct TrafficData {
 
 impl TrafficData {
     fn all(&self) -> usize {
-        self.tcp_rx + self.tcp_rx + self.udp_rx + self.udp_tx
+        self.tcp_rx + self.tcp_tx + self.udp_rx + self.udp_tx
     }
 }
 
