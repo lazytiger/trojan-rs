@@ -10,7 +10,9 @@ use rustls::{ServerConfig, ServerConnection};
 
 use crate::{
     resolver::DnsResolver,
-    server::{connection::Connection, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX},
+    server::{
+        connection::Connection, stat::Statistics, CHANNEL_CNT, CHANNEL_PROXY, MAX_INDEX, MIN_INDEX,
+    },
     status::StatusProvider,
     tls_conn::TlsConn,
 };
@@ -38,13 +40,14 @@ pub struct TlsServer {
 }
 
 pub trait Backend: StatusProvider {
-    fn dispatch(&mut self, data: &[u8]);
+    fn dispatch(&mut self, data: &[u8], stats: &mut Statistics);
     fn timeout(&self, t1: Instant, t2: Instant) -> bool {
         t2 - t1 > self.get_timeout()
     }
     fn get_timeout(&self) -> Duration;
     fn writable(&self) -> bool;
-    fn do_read(&mut self, conn: &mut TlsConn);
+    fn do_read(&mut self, conn: &mut TlsConn, stats: &mut Statistics);
+    fn dst_ip(&self) -> Option<IpAddr>;
 }
 
 impl TlsServer {
@@ -117,11 +120,12 @@ impl TlsServer {
         poll: &Poll,
         event: PollEvent,
         resolver: Option<&mut DnsResolver>,
+        stats: &mut Statistics,
     ) {
         let index = self.token2index(event.token());
         if self.conns.contains_key(&index) {
             let conn = self.conns.get_mut(&index).unwrap();
-            conn.ready(poll, event, resolver);
+            conn.ready(poll, event, resolver, stats);
             if conn.destroyed() {
                 self.removed.as_mut().unwrap().push(index);
             }

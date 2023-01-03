@@ -11,13 +11,14 @@ use mio::{
 
 use crate::{
     config::OPTIONS,
-    proto::{CONNECT, Sock5Address, TrojanRequest},
+    proto::{Sock5Address, TrojanRequest, CONNECT},
     resolver::DnsResolver,
     server::{
-        CHANNEL_BACKEND,
-        CHANNEL_CNT,
-        CHANNEL_PROXY,
-        tcp_backend::TcpBackend, tls_server::{Backend, PollEvent}, udp_backend::UdpBackend,
+        stat::Statistics,
+        tcp_backend::TcpBackend,
+        tls_server::{Backend, PollEvent},
+        udp_backend::UdpBackend,
+        CHANNEL_BACKEND, CHANNEL_CNT, CHANNEL_PROXY,
     },
     status::StatusProvider,
     tls_conn::TlsConn,
@@ -82,7 +83,13 @@ impl Connection {
         token.0 % CHANNEL_CNT == CHANNEL_PROXY
     }
 
-    pub fn ready(&mut self, poll: &Poll, event: PollEvent, resolver: Option<&mut DnsResolver>) {
+    pub fn ready(
+        &mut self,
+        poll: &Poll,
+        event: PollEvent,
+        resolver: Option<&mut DnsResolver>,
+        stats: &mut Statistics,
+    ) {
         self.last_active_time = Instant::now();
 
         match event {
@@ -95,7 +102,7 @@ impl Connection {
                             true
                         };
                         if writable {
-                            self.try_read_proxy(poll, resolver);
+                            self.try_read_proxy(poll, resolver, stats);
                         } else {
                             log::trace!(
                                 "backend connection:{} is not writable, stop reading from proxy",
@@ -109,7 +116,7 @@ impl Connection {
                         self.try_send_proxy();
                         if self.proxy.writable() && self.read_backend {
                             if let Some(backend) = self.backend.as_mut() {
-                                backend.do_read(&mut self.proxy);
+                                backend.do_read(&mut self.proxy, stats);
                             }
                             log::trace!(
                                 "proxy connection:{} is writable, restore reading from backend",
@@ -124,17 +131,17 @@ impl Connection {
                             if let Some(backend) = self.backend.as_mut() {
                                 if event.is_readable() {
                                     if self.proxy.writable() {
-                                        backend.do_read(&mut self.proxy);
+                                        backend.do_read(&mut self.proxy, stats);
                                     } else {
                                         log::trace!("proxy connection:{} is not writable, stop reading from backend", self.index);
                                         self.read_backend = true;
                                     }
                                 }
                                 if event.is_writable() {
-                                    backend.dispatch(&[]);
+                                    backend.dispatch(&[], stats);
                                     if backend.writable() && self.read_proxy {
                                         log::trace!("backend connection:{} is writable, restore reading from proxy", self.index);
-                                        self.try_read_proxy(poll, resolver);
+                                        self.try_read_proxy(poll, resolver, stats);
                                         self.read_proxy = false;
                                     }
                                 }
@@ -146,7 +153,7 @@ impl Connection {
                     }
                 }
             }
-            PollEvent::Dns((_, ip)) => self.try_resolve(poll, ip),
+            PollEvent::Dns((_, ip)) => self.try_resolve(poll, ip, stats),
         }
 
         if let Some(backend) = &mut self.backend {
@@ -163,7 +170,7 @@ impl Connection {
         }
     }
 
-    pub fn try_resolve(&mut self, poll: &Poll, ip: Option<IpAddr>) {
+    pub fn try_resolve(&mut self, poll: &Poll, ip: Option<IpAddr>, stats: &mut Statistics) {
         if let Status::DnsWait = self.status {
             if let Sock5Address::Domain(domain, port) = &self.sock5_addr {
                 if let Some(address) = ip {
@@ -175,7 +182,7 @@ impl Connection {
                     );
                     let addr = SocketAddr::new(address, *port);
                     self.target_addr.replace(addr);
-                    self.dispatch(&[], poll, None);
+                    self.dispatch(&[], poll, None, stats);
                 } else {
                     log::error!("connection:{} resolve host:{} failed", self.index, domain);
                     self.proxy.shutdown();
@@ -195,9 +202,14 @@ impl Connection {
         self.proxy.do_send();
     }
 
-    fn try_read_proxy(&mut self, poll: &Poll, resolver: Option<&mut DnsResolver>) {
+    fn try_read_proxy(
+        &mut self,
+        poll: &Poll,
+        resolver: Option<&mut DnsResolver>,
+        stats: &mut Statistics,
+    ) {
         if let Some(buffer) = self.proxy.do_read() {
-            self.dispatch(buffer.as_slice(), poll, resolver);
+            self.dispatch(buffer.as_slice(), poll, resolver, stats);
         }
     }
 
@@ -250,7 +262,13 @@ impl Connection {
         true
     }
 
-    fn dispatch(&mut self, mut buffer: &[u8], poll: &Poll, mut resolver: Option<&mut DnsResolver>) {
+    fn dispatch(
+        &mut self,
+        mut buffer: &[u8],
+        poll: &Poll,
+        mut resolver: Option<&mut DnsResolver>,
+        stats: &mut Statistics,
+    ) {
         log::debug!(
             "connection:{} dispatch {} bytes request data",
             self.index,
@@ -272,19 +290,19 @@ impl Connection {
                             self.proxy.shutdown();
                         } else if self.target_addr.is_none() {
                             log::warn!("connection:{} dns query not done yet", self.index);
-                        } else if self.try_setup_tcp_target(poll) {
+                        } else if self.try_setup_tcp_target(poll, stats) {
                             buffer = &[];
                             self.status = Status::TCPForward;
                             continue;
                         }
-                    } else if self.try_setup_udp_target(poll) {
+                    } else if self.try_setup_udp_target(poll, stats) {
                         self.status = Status::UDPForward;
                         continue;
                     }
                 }
                 _ => {
                     if let Some(backend) = self.backend.as_mut() {
-                        backend.dispatch(buffer);
+                        backend.dispatch(buffer, stats);
                     } else {
                         log::error!("connection:{} has no backend yet", self.index);
                     }
@@ -294,7 +312,7 @@ impl Connection {
         }
     }
 
-    fn try_setup_tcp_target(&mut self, poll: &Poll) -> bool {
+    fn try_setup_tcp_target(&mut self, poll: &Poll, stats: &mut Statistics) -> bool {
         log::debug!(
             "connection:{} make a target connection to {}",
             self.index,
@@ -302,10 +320,15 @@ impl Connection {
         );
         match TcpStream::connect(self.target_addr.unwrap()) {
             Ok(tcp_target) => {
+                stats.add_tcp_rx(
+                    0,
+                    tcp_target.peer_addr().map(|addr| addr.ip()).ok(),
+                    self.proxy.source(),
+                );
                 match TcpBackend::new(tcp_target, self.index, self.target_token(), poll) {
                     Ok(mut backend) => {
                         if !self.data.is_empty() {
-                            backend.dispatch(self.data.as_slice());
+                            backend.dispatch(self.data.as_slice(), stats);
                             self.data.clear();
                             self.data.shrink_to_fit();
                         }
@@ -326,7 +349,7 @@ impl Connection {
         true
     }
 
-    fn try_setup_udp_target(&mut self, poll: &Poll) -> bool {
+    fn try_setup_udp_target(&mut self, poll: &Poll, stats: &mut Statistics) -> bool {
         log::debug!("connection:{} got udp connection", self.index);
         match UdpSocket::bind(OPTIONS.empty_addr.unwrap()) {
             Err(err) => {
@@ -335,6 +358,11 @@ impl Connection {
                 return false;
             }
             Ok(udp_target) => {
+                stats.add_udp_rx(
+                    0,
+                    udp_target.peer_addr().map(|addr| addr.ip()).ok(),
+                    self.proxy.source(),
+                );
                 match UdpBackend::new(udp_target, self.index, self.target_token(), poll) {
                     Ok(backend) => {
                         self.backend.replace(Box::new(backend));

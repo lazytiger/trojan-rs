@@ -1,6 +1,6 @@
 use std::{
     io::{Error, ErrorKind, Read, Write},
-    net::Shutdown,
+    net::{IpAddr, Shutdown},
 };
 
 use mio::{net::TcpStream, Interest, Poll, Token};
@@ -104,6 +104,10 @@ impl TlsConn {
             writable: true,
             status: ConnStatus::Connecting,
         }
+    }
+
+    pub fn source(&self) -> Option<IpAddr> {
+        self.stream.peer_addr().map(|addr| addr.ip()).ok()
     }
 
     pub fn reset_index(&mut self, index: usize, token: Token, poll: &Poll) -> bool {

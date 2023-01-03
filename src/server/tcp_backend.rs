@@ -1,12 +1,15 @@
-use std::{net::Shutdown, time::Duration};
+use std::{
+    net::{IpAddr, Shutdown},
+    time::Duration,
+};
 
 use bytes::BytesMut;
-use mio::{Interest, net::TcpStream, Poll, Token};
+use mio::{net::TcpStream, Interest, Poll, Token};
 
 use crate::{
     config::OPTIONS,
     proto::MAX_PACKET_SIZE,
-    server::tls_server::Backend,
+    server::{stat::Statistics, tls_server::Backend},
     status::{ConnStatus, StatusProvider},
     tcp_util,
     tls_conn::TlsConn,
@@ -20,6 +23,7 @@ pub struct TcpBackend {
     timeout: Duration,
     send_buffer: BytesMut,
     recv_buffer: Vec<u8>,
+    dst_ip: Option<IpAddr>,
 }
 
 impl TcpBackend {
@@ -28,6 +32,7 @@ impl TcpBackend {
             .register(&mut conn, token, Interest::READABLE | Interest::WRITABLE)?;
         conn.set_nodelay(true)?;
         Ok(TcpBackend {
+            dst_ip: conn.peer_addr().map(|addr| addr.ip()).ok(),
             conn,
             index,
             timeout: OPTIONS.tcp_idle_duration,
@@ -45,7 +50,8 @@ impl TcpBackend {
 }
 
 impl Backend for TcpBackend {
-    fn dispatch(&mut self, buffer: &[u8]) {
+    fn dispatch(&mut self, buffer: &[u8], stats: &mut Statistics) {
+        stats.add_tcp_rx(buffer.len(), self.dst_ip(), None);
         // send immediately first
         if self.send_buffer.is_empty() {
             self.do_send(buffer);
@@ -63,12 +69,18 @@ impl Backend for TcpBackend {
         self.send_buffer.is_empty() && self.alive()
     }
 
-    fn do_read(&mut self, conn: &mut TlsConn) {
-        if !tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn) {
+    fn do_read(&mut self, conn: &mut TlsConn, stats: &mut Statistics) {
+        let (ret, total) = tcp_util::tcp_read(self.index, &self.conn, &mut self.recv_buffer, conn);
+        if !ret {
             self.shutdown();
         }
+        stats.add_tcp_tx(total, self.dst_ip(), None);
 
         conn.do_send();
+    }
+
+    fn dst_ip(&self) -> Option<IpAddr> {
+        self.dst_ip.clone()
     }
 }
 

@@ -1,12 +1,12 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::IpAddr, time::Duration};
 
 use bytes::BytesMut;
-use mio::{Interest, net::UdpSocket, Poll, Token};
+use mio::{net::UdpSocket, Interest, Poll, Token};
 
 use crate::{
     config::OPTIONS,
-    proto::{MAX_PACKET_SIZE, UdpAssociate, UdpParseResult},
-    server::tls_server::Backend,
+    proto::{UdpAssociate, UdpParseResult, MAX_PACKET_SIZE},
+    server::{stat::Statistics, tls_server::Backend},
     status::{ConnStatus, StatusProvider},
     tls_conn::TlsConn,
     types::Result,
@@ -22,7 +22,6 @@ pub struct UdpBackend {
     timeout: Duration,
     bytes_read: usize,
     bytes_sent: usize,
-    remote_addr: SocketAddr,
 }
 
 impl UdpBackend {
@@ -34,11 +33,9 @@ impl UdpBackend {
     ) -> Result<UdpBackend> {
         poll.registry()
             .register(&mut socket, token, Interest::READABLE | Interest::WRITABLE)?;
-        let remote_addr = socket.local_addr().unwrap();
         Ok(UdpBackend {
             socket,
             index,
-            remote_addr,
             send_buffer: Default::default(),
             recv_body: vec![0u8; MAX_PACKET_SIZE],
             recv_head: Default::default(),
@@ -49,7 +46,7 @@ impl UdpBackend {
         })
     }
 
-    fn do_send(&mut self, mut buffer: &[u8]) {
+    fn do_send(&mut self, mut buffer: &[u8], stats: &mut Statistics) {
         loop {
             match UdpAssociate::parse(buffer) {
                 UdpParseResult::Packet(packet) => {
@@ -58,6 +55,7 @@ impl UdpBackend {
                         .send_to(&packet.payload[..packet.length], packet.address)
                     {
                         Ok(size) => {
+                            stats.add_udp_rx(size, Some(packet.address.ip()), None);
                             self.bytes_sent += size;
                             if size != packet.length {
                                 log::error!(
@@ -110,13 +108,13 @@ impl UdpBackend {
 }
 
 impl Backend for UdpBackend {
-    fn dispatch(&mut self, buffer: &[u8]) {
+    fn dispatch(&mut self, buffer: &[u8], stats: &mut Statistics) {
         if self.send_buffer.is_empty() {
-            self.do_send(buffer);
+            self.do_send(buffer, stats);
         } else {
             self.send_buffer.extend_from_slice(buffer);
             let buffer = self.send_buffer.split();
-            self.do_send(buffer.as_ref());
+            self.do_send(buffer.as_ref(), stats);
         }
     }
 
@@ -128,11 +126,11 @@ impl Backend for UdpBackend {
         self.alive()
     }
 
-    fn do_read(&mut self, conn: &mut TlsConn) {
+    fn do_read(&mut self, conn: &mut TlsConn, stats: &mut Statistics) {
         loop {
             match self.socket.recv_from(self.recv_body.as_mut_slice()) {
                 Ok((size, addr)) => {
-                    self.remote_addr = addr;
+                    stats.add_udp_tx(size, Some(addr.ip()), conn.source());
                     self.bytes_read += size;
                     log::debug!(
                         "connection:{} got {} bytes udp data from:{}",
@@ -159,6 +157,10 @@ impl Backend for UdpBackend {
             break;
         }
         conn.do_send();
+    }
+
+    fn dst_ip(&self) -> Option<IpAddr> {
+        None
     }
 }
 

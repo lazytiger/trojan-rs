@@ -14,9 +14,15 @@ use rustls_pemfile::{certs, read_one, Item};
 
 pub use tls_server::TlsServer;
 
-use crate::{config::OPTIONS, resolver::DnsResolver, server::tls_server::PollEvent, types::Result};
+use crate::{
+    config::OPTIONS,
+    resolver::DnsResolver,
+    server::{stat::Statistics, tls_server::PollEvent},
+    types::Result,
+};
 
 mod connection;
+mod stat;
 mod tcp_backend;
 mod tls_server;
 mod udp_backend;
@@ -104,6 +110,7 @@ pub fn run() -> Result<()> {
     let mut events = Events::with_capacity(1024);
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
+    let mut stats = Statistics::new();
     loop {
         poll.poll(&mut events, Some(check_duration))?;
         for event in &events {
@@ -113,11 +120,16 @@ pub fn run() -> Result<()> {
                 }
                 Token(RESOLVER) => {
                     resolver.consume(|token, ip| {
-                        server.do_conn_event(&poll, PollEvent::Dns((token, ip)), None);
+                        server.do_conn_event(&poll, PollEvent::Dns((token, ip)), None, &mut stats);
                     });
                 }
                 _ => {
-                    server.do_conn_event(&poll, PollEvent::Network(event), Some(&mut resolver));
+                    server.do_conn_event(
+                        &poll,
+                        PollEvent::Network(event),
+                        Some(&mut resolver),
+                        &mut stats,
+                    );
                 }
             }
         }
@@ -126,6 +138,10 @@ pub fn run() -> Result<()> {
         if now - last_check_time > check_duration {
             server.check_timeout(now, &poll);
             last_check_time = now;
+            stats.save(
+                OPTIONS.server_args().status_file.as_str(),
+                OPTIONS.server_args().status_limit,
+            );
         }
     }
 }

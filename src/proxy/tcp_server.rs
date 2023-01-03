@@ -270,7 +270,9 @@ impl Connection {
             &self.client,
             &mut self.recv_buffer,
             &mut self.server_conn,
-        ) {
+        )
+        .0
+        {
             self.shutdown();
         }
         self.read_client = false;

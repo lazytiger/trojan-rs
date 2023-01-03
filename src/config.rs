@@ -206,6 +206,12 @@ pub struct ServerArgs {
     #[clap(short, long)]
     pub check_auth: bool,
 
+    #[clap(short, long, default_value = "/var/log/trojan.status")]
+    pub status_file: String,
+
+    #[clap(short = 'm', long, default_value = "100")]
+    pub status_limit: usize,
+
     /// ALPN protocol supported
     #[clap(short = 'n', long)]
     pub alpn: Vec<String>,

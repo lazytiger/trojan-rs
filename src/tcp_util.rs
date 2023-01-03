@@ -10,14 +10,16 @@ pub fn tcp_read(
     mut conn: &TcpStream,
     recv_buf: &mut Vec<u8>,
     server_conn: &mut TlsConn,
-) -> bool {
+) -> (bool, usize) {
+    let mut total = 0usize;
     loop {
         match conn.read(recv_buf.as_mut_slice()) {
             Ok(size) => {
                 log::debug!("connection:{} read {} bytes from backend", index, size);
+                total += size;
                 if size == 0 {
                     log::warn!("connection:{} meets end of file", index);
-                    return false;
+                    return (false, total);
                 } else if !server_conn.write_session(&recv_buf.as_slice()[..size]) {
                     break;
                 }
@@ -28,11 +30,11 @@ pub fn tcp_read(
             }
             Err(err) => {
                 log::warn!("connection:{} read from backend failed:{}", index, err);
-                return false;
+                return (false, total);
             }
         }
     }
-    true
+    (true, total)
 }
 
 pub fn tcp_send(
