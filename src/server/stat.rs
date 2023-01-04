@@ -26,8 +26,13 @@ impl TrafficData {
 
 macro_rules! add {
     ($self:ident, $field:ident, $bytes:ident, $dst:ident, $source:ident) => {
-        if $dst.is_none() {
-            return;
+        match $dst {
+            Some(ip) => {
+                if ip.is_loopback() {
+                    return;
+                }
+            }
+            None => return,
         }
         let data = $self.conns.entry($dst.unwrap()).or_default();
         if let Some(source) = $source {
