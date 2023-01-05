@@ -8,6 +8,8 @@ use std::{
 use crossbeam::channel::{unbounded, Sender};
 use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 
+use crate::config::OPTIONS;
+
 pub struct NetProfiler {
     set: HashSet<IpAddr>,
     sender: Sender<IpAddr>,
@@ -28,6 +30,9 @@ impl NetProfiler {
                 let sender = resp_sender.clone();
                 tokio::spawn(async move {
                     let mut pinger = client_copy.pinger(ip, PingIdentifier(id)).await;
+                    pinger.timeout(Duration::from_millis(
+                        OPTIONS.proxy_args().ping_timeout as u64,
+                    ));
                     let mut failed = 0;
                     let mut avg_cost = 0;
                     for i in 0..100u128 {
@@ -37,7 +42,9 @@ impl NetProfiler {
                             failed += 1;
                         }
                     }
-                    if failed < 3 && avg_cost < 200 {
+                    if failed < OPTIONS.proxy_args().bypass_lost_ratio
+                        && avg_cost < OPTIONS.proxy_args().bypass_avg_cost as u128
+                    {
                         if let Err(err) = sender.send(ip) {
                             log::error!("send response ip:{} failed:{}", ip, err);
                         }
@@ -55,8 +62,8 @@ impl NetProfiler {
             resp_receiver.iter().for_each(|ip| {
                 cfg_if::cfg_if! {
                     if #[cfg(unix)] {
-                        if let Err(err) = session.add("byplist", ip) {
-                            log::error!("add ip:{} to ipset byplist failed:{}", ip, err);
+                        if let Err(err) = session.add(OPTIONS.proxy_args().bypass_ipset.as_str(), ip) {
+                            log::error!("add ip:{} to ipset byplist failed:{:?}", ip, err);
                         }
                     } else {
                         log::info!("bypass ip:{}", ip);

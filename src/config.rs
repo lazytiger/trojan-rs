@@ -151,6 +151,22 @@ pub struct ProxyArgs {
     /// Pool size, 0 for disable
     #[clap(short = 'P', long, default_value = "0")]
     pub pool_size: usize,
+
+    /// ping timeout for net profiler
+    #[clap(short = 't', long, default_value = "200")]
+    pub ping_timeout: u16,
+
+    /// bypass ipset name
+    #[clap(short = 'i', long, default_value = "byplist")]
+    pub bypass_ipset: String,
+
+    /// min lost ratio in percent which should be add into bypass ipset
+    #[clap(short = 'r', long, default_value = "3")]
+    pub bypass_lost_ratio: u16,
+
+    /// average cost in milliseconds which should be add into bypass ipset
+    #[clap(short = 'c', long, default_value = "200")]
+    pub bypass_avg_cost: u16,
 }
 
 #[derive(Parser)]

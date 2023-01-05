@@ -606,7 +606,7 @@ dependencies = [
     "hermit-abi",
     "io-lifetimes",
     "rustix",
- "windows-sys",
+    "windows-sys",
 ]
 
 [[package]]
@@ -1323,7 +1323,7 @@ dependencies = [
     "cfg-if",
     "pin-project-lite",
     "tracing-attributes",
- "tracing-core",
+    "tracing-core",
 ]
 
 [[package]]
@@ -1350,7 +1350,7 @@ dependencies = [
 name = "trojan"
 version = "0.12.0"
 dependencies = [
- "backtrace",
+    "backtrace",
     "backtrace-on-stack-overflow",
     "bytes",
     "cfg-if",
