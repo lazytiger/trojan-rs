@@ -34,12 +34,14 @@ smoltcp = "0.8"
 backtrace = "0.3"
 hex = "0.4"
 surge-ping = "0.7"
+tokio = { version = "1.21.2", features = ["full"] }
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.2"
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.2"
+ipset = "0.1"
 
 [dependencies.fern]
 version = "0.6"

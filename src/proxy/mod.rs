@@ -22,6 +22,7 @@ use crate::{
     types::Result,
 };
 
+mod net_profiler;
 mod tcp_server;
 mod udp_cache;
 mod udp_server;
