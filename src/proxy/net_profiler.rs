@@ -241,11 +241,9 @@ impl NetProfiler {
 mod tests {
     use std::{thread::sleep, time::Duration};
 
-    use test_log::test;
-
     use crate::proxy::net_profiler::{start_check_server, NetProfiler};
 
-    #[test]
+    #[test_log::test]
     fn test_net_profiler() {
         let mut profiler = NetProfiler::new(true, 200, 5, "".to_string(), "".to_string());
         profiler.check("104.225.237.172".parse().unwrap());
