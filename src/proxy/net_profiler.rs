@@ -43,7 +43,9 @@ impl NetProfiler {
                     ));
                     let mut failed = 0;
                     let mut avg_cost = 0;
+                    let mut interval = tokio::time::interval(Duration::from_secs(1));
                     for i in 0..100u128 {
+                        interval.tick().await;
                         if let Ok((_, cost)) = pinger.ping(PingSequence(i as u16), &[]).await {
                             avg_cost = ((avg_cost * i) + cost.as_millis()) / (i + 1);
                         } else {
