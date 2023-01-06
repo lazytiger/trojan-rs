@@ -69,7 +69,7 @@ async fn start_response(mut receiver: UnboundedReceiver<IpAddr>, name: String) {
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 if let Err(err) = session.add(name.as_str(), ip) {
-                    log::error!("add ip:{} to ipset byplist failed:{:?}", ip, err);
+                    log::error!("add ip:{} to ipset {} failed:{:?}", ip, name, err);
                 }
             }
         }
@@ -250,6 +250,5 @@ mod tests {
         let mut profiler = NetProfiler::new(true, 200, 5, "".to_string(), "".to_string());
         profiler.check("104.225.237.172".parse().unwrap());
         start_check_server("pha.hopingwhite.com".to_string());
-        //  sleep(Duration::from_secs(120));
     }
 }
