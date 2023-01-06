@@ -7,7 +7,10 @@ use crate::{
     config::OPTIONS,
     idle_pool::IdlePool,
     proto::{TrojanRequest, UdpAssociate, UdpParseResult, MAX_PACKET_SIZE, UDP_ASSOCIATE},
-    proxy::{next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP, MIN_INDEX},
+    proxy::{
+        net_profiler::NetProfiler, next_index, udp_cache::UdpSvrCache, CHANNEL_CNT, CHANNEL_UDP,
+        MIN_INDEX,
+    },
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     sys,
@@ -56,9 +59,10 @@ impl UdpServer {
         pool: &mut IdlePool,
         udp_cache: &mut UdpSvrCache,
         resolver: &DnsResolver,
+        net_profiler: &mut NetProfiler,
     ) {
         loop {
-            if let Err(err) = self.accept_once(poll, pool, udp_cache, resolver) {
+            if let Err(err) = self.accept_once(poll, pool, udp_cache, resolver, net_profiler) {
                 if let TrojanError::StdIo(err) = &err {
                     if err.kind() == ErrorKind::WouldBlock {
                         break;
@@ -75,9 +79,11 @@ impl UdpServer {
         pool: &mut IdlePool,
         udp_cache: &mut UdpSvrCache,
         resolver: &DnsResolver,
+        net_profiler: &mut NetProfiler,
     ) -> Result<()> {
         let (size, src_addr, dst_addr) =
             sys::recv_from_with_destination(&self.udp_listener, self.recv_buffer.as_mut_slice())?;
+        net_profiler.check(dst_addr.ip());
         log::debug!(
             "udp received {} byte from {} to {}",
             size,

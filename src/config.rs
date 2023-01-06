@@ -156,6 +156,10 @@ pub struct ProxyArgs {
     #[clap(short = 't', long, default_value = "200")]
     pub ping_timeout: u16,
 
+    /// ipset name which should not be bypassed.
+    #[clap(short = 'n', long, default_value = "gfwlist")]
+    pub no_bypass_ipset: String,
+
     /// bypass ipset name
     #[clap(short = 'i', long, default_value = "byplist")]
     pub bypass_ipset: String,

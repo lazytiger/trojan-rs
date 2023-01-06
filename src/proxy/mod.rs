@@ -16,7 +16,10 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 pub use crate::idle_pool::IdlePool;
 use crate::{
     config::OPTIONS,
-    proxy::{tcp_server::TcpServer, udp_cache::UdpSvrCache, udp_server::UdpServer},
+    proxy::{
+        net_profiler::NetProfiler, tcp_server::TcpServer, udp_cache::UdpSvrCache,
+        udp_server::UdpServer,
+    },
     resolver::DnsResolver,
     sys,
     types::Result,
@@ -116,6 +119,7 @@ pub fn run() -> Result<()> {
 
     let mut tcp_server = TcpServer::new(tcp_listener);
     let mut udp_server = UdpServer::new(udp_listener);
+    let mut net_profiler = NetProfiler::new();
 
     let mut events = Events::with_capacity(1024);
 
@@ -138,10 +142,16 @@ pub fn run() -> Result<()> {
             log::trace!("dispatch token:{}", event.token().0);
             match event.token() {
                 Token(TCP_LISTENER) => {
-                    tcp_server.accept(&poll, &mut pool, &resolver);
+                    tcp_server.accept(&poll, &mut pool, &resolver, &mut net_profiler);
                 }
                 Token(UDP_LISTENER) => {
-                    udp_server.accept(&poll, &mut pool, &mut udp_cache, &resolver);
+                    udp_server.accept(
+                        &poll,
+                        &mut pool,
+                        &mut udp_cache,
+                        &resolver,
+                        &mut net_profiler,
+                    );
                 }
                 Token(RESOLVER) => {
                     resolver.consume(|_, ip| {

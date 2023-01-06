@@ -16,7 +16,9 @@ use crate::{
     config::OPTIONS,
     idle_pool::IdlePool,
     proto::{TrojanRequest, CONNECT, MAX_PACKET_SIZE},
-    proxy::{next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX},
+    proxy::{
+        net_profiler::NetProfiler, next_index, CHANNEL_CLIENT, CHANNEL_CNT, CHANNEL_TCP, MIN_INDEX,
+    },
     resolver::DnsResolver,
     status::{ConnStatus, StatusProvider},
     sys, tcp_util,
@@ -54,9 +56,15 @@ impl TcpServer {
         }
     }
 
-    pub fn accept(&mut self, poll: &Poll, pool: &mut IdlePool, resolver: &DnsResolver) {
+    pub fn accept(
+        &mut self,
+        poll: &Poll,
+        pool: &mut IdlePool,
+        resolver: &DnsResolver,
+        net_profiler: &mut NetProfiler,
+    ) {
         loop {
-            if let Err(err) = self.accept_once(poll, pool, resolver) {
+            if let Err(err) = self.accept_once(poll, pool, resolver, net_profiler) {
                 if let TrojanError::StdIo(err) = &err {
                     if err.kind() == ErrorKind::WouldBlock {
                         break;
@@ -72,11 +80,13 @@ impl TcpServer {
         poll: &Poll,
         pool: &mut IdlePool,
         resolver: &DnsResolver,
+        net_profiler: &mut NetProfiler,
     ) -> Result<()> {
         let (client, src_addr) = self.tcp_listener.accept()?;
         //sys::set_mark(&client, OPTIONS.marker)?;
         client.set_nodelay(true)?;
         let dst_addr = sys::get_oridst_addr(&client)?;
+        net_profiler.check(dst_addr.ip());
         log::info!("got new connection from:{} to:{}", src_addr, dst_addr);
         if let Some(mut conn) = pool.get(poll, resolver) {
             let index = next_index(&mut self.next_id);
