@@ -35,6 +35,7 @@ backtrace = "0.3"
 hex = "0.4"
 surge-ping = "0.7"
 tokio = { version = "1.21.2", features = ["full"] }
+rand = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 wintun = "0.2"

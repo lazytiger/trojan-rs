@@ -152,9 +152,8 @@ pub struct ProxyArgs {
     #[clap(short = 'P', long, default_value = "0")]
     pub pool_size: usize,
 
-    /// ping timeout for net profiler
-    #[clap(short = 't', long, default_value = "200")]
-    pub ping_timeout: u16,
+    #[clap(short = 'e', long, default_value = "false")]
+    pub enable_bypass: bool,
 
     /// ipset name which should not be bypassed.
     #[clap(short = 'n', long, default_value = "gfwlist")]

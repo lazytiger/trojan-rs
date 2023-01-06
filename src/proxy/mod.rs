@@ -17,7 +17,9 @@ pub use crate::idle_pool::IdlePool;
 use crate::{
     config::OPTIONS,
     proxy::{
-        net_profiler::NetProfiler, tcp_server::TcpServer, udp_cache::UdpSvrCache,
+        net_profiler::{start_check_server, NetProfiler},
+        tcp_server::TcpServer,
+        udp_cache::UdpSvrCache,
         udp_server::UdpServer,
     },
     resolver::DnsResolver,
@@ -119,7 +121,15 @@ pub fn run() -> Result<()> {
 
     let mut tcp_server = TcpServer::new(tcp_listener);
     let mut udp_server = UdpServer::new(udp_listener);
-    let mut net_profiler = NetProfiler::new();
+    let mut net_profiler = NetProfiler::new(
+        OPTIONS.proxy_args().enable_bypass,
+        OPTIONS.proxy_args().bypass_avg_cost as u128,
+        OPTIONS.proxy_args().bypass_lost_ratio,
+        OPTIONS.proxy_args().bypass_ipset.clone(),
+        OPTIONS.proxy_args().no_bypass_ipset.clone(),
+    );
+
+    start_check_server(OPTIONS.proxy_args().hostname.clone());
 
     let mut events = Events::with_capacity(1024);
 
