@@ -27,6 +27,7 @@ pub enum TrojanError {
     MainAdapterNotFound,
 }
 
+#[allow(dead_code)]
 pub enum CopyResult {
     RxBlock,
     TxBlock,

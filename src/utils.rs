@@ -19,6 +19,7 @@ use crate::types::{
     Result, TrojanError,
 };
 
+#[allow(dead_code)]
 pub fn copy_stream(
     from: &mut impl Read,
     to: &mut impl Write,
@@ -34,6 +35,7 @@ pub fn copy_stream(
     }
 }
 
+#[allow(dead_code)]
 pub fn send_all(writer: &mut impl Write, buffer: &mut BytesMut) -> Result<bool> {
     if buffer.is_empty() {
         return Ok(true);
@@ -64,6 +66,7 @@ pub fn send_all(writer: &mut impl Write, buffer: &mut BytesMut) -> Result<bool> 
     ret
 }
 
+#[allow(dead_code)]
 pub fn read_once(reader: &mut impl Read, buffer: &mut BytesMut) -> Result<bool> {
     buffer.reserve(1500);
     let mut nb = buffer.split_off(buffer.len());

@@ -18,6 +18,7 @@ pub struct TlsConn {
 }
 
 impl TlsConn {
+    #[allow(dead_code)]
     pub(crate) fn close(&mut self, poll: &Poll) {
         let _ = self.stream.shutdown(Shutdown::Both);
         let _ = poll.registry().deregister(&mut self.stream);
@@ -116,6 +117,7 @@ impl TlsConn {
         self.reregister(poll)
     }
 
+    #[allow(dead_code)]
     pub fn set_token(&mut self, token: Token, poll: &Poll) -> bool {
         self.token = token;
         poll.registry()
