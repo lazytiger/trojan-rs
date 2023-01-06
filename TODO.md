@@ -2,3 +2,4 @@
 * proxy和server模式需要按wintun的模式进行修改
 * DnsResolver去掉
 * IdlePool简化
+* 添加feature以针对window和linux平台的编译问题
