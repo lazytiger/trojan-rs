@@ -152,8 +152,13 @@ pub struct ProxyArgs {
     #[clap(short = 'P', long, default_value = "0")]
     pub pool_size: usize,
 
+    /// Enable bypass check
     #[clap(short = 'e', long, default_value = "false")]
     pub enable_bypass: bool,
+
+    /// Bypass timeout for recheck.
+    #[clap(short = 't', long, default_value = "3600")]
+    pub bypass_timeout: u64,
 
     /// ipset name which should not be bypassed.
     #[clap(short = 'n', long, default_value = "gfwlist")]

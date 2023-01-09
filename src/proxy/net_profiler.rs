@@ -1,21 +1,23 @@
 use std::{
-    collections::HashSet,
     net::IpAddr,
     sync::{Arc, RwLock},
     thread,
     time::Duration,
 };
+use std::collections::HashMap;
+use std::time::Instant;
 
 use dns_lookup::lookup_host;
 use rand::random;
-use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
+use surge_ping::{Client, ConfigBuilder, ICMP, PingIdentifier, PingSequence};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 
 pub struct NetProfiler {
-    set: HashSet<IpAddr>,
+    set: HashMap<IpAddr, Instant>,
+    timeout: u64,
     sender: Option<UnboundedSender<IpAddr>>,
 }
 
@@ -145,10 +147,10 @@ async fn do_check(ip: IpAddr, client: Arc<Client>, id: u16, sender: UnboundedSen
     }
 }
 
-async fn check_server(host: String) {
+async fn check_server(host: String, timeout: u64) {
     let config = ConfigBuilder::default().kind(ICMP::V4).build();
     let client = Client::new(&config).unwrap();
-    let mut interval = tokio::time::interval(Duration::from_secs(3600));
+    let mut interval = tokio::time::interval(Duration::from_secs(timeout));
     loop {
         interval.tick().await;
         let ip = if let Ok(Some(ip)) =
@@ -181,16 +183,17 @@ async fn check_server(host: String) {
     }
 }
 
-pub fn start_check_server(host: String) {
-    thread::spawn(|| {
+pub fn start_check_server(host: String, timeout: u64) {
+    thread::spawn(move || {
         let runtime = Runtime::new().unwrap();
-        runtime.block_on(check_server(host));
+        runtime.block_on(check_server(host, timeout));
     });
 }
 
 impl NetProfiler {
     pub fn new(
         enable: bool,
+        timeout: u64,
         avg_cost: u128,
         lost_ratio: u16,
         bypass_ipset: String,
@@ -222,16 +225,22 @@ impl NetProfiler {
         };
 
         Self {
-            set: HashSet::new(),
+            set: HashMap::new(),
+            timeout,
             sender,
         }
     }
     pub fn check(&mut self, ip: IpAddr) {
         if let Some(sender) = &self.sender {
-            if self.set.insert(ip) {
-                if let Err(err) = sender.send(ip) {
-                    log::error!("send ip:{} failed:{}", err, ip);
+            if let Some(start) = self.set.get_mut(&ip) {
+                if start.elapsed().as_secs() < self.timeout {
+                    return;
                 }
+            }
+
+            self.set.insert(ip, Instant::now());
+            if let Err(err) = sender.send(ip) {
+                log::error!("send ip:{} failed:{}", err, ip);
             }
         }
     }
@@ -241,12 +250,12 @@ impl NetProfiler {
 mod tests {
     use std::{thread::sleep, time::Duration};
 
-    use crate::proxy::net_profiler::{start_check_server, NetProfiler};
+    use crate::proxy::net_profiler::{NetProfiler, start_check_server};
 
     #[test_log::test]
     fn test_net_profiler() {
-        let mut profiler = NetProfiler::new(true, 200, 5, "".to_string(), "".to_string());
+        let mut profiler = NetProfiler::new(true, 3600, 200, 5, "".to_string(), "".to_string());
         profiler.check("104.225.237.172".parse().unwrap());
-        start_check_server("pha.hopingwhite.com".to_string());
+        start_check_server("pha.hopingwhite.com".to_string(), 30);
     }
 }
