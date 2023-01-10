@@ -59,6 +59,9 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
             let mut session = ipset::Session::new();
+            if let Err(err) = session.flush(name.as_str()) {
+                log::error!("flush ipset {} failed:{:?}", name, err);
+            }
         }
     }
     loop {
