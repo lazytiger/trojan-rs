@@ -1,15 +1,14 @@
 use std::{
+    collections::HashMap,
     net::IpAddr,
     sync::{Arc, RwLock},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
-use std::collections::HashMap;
-use std::time::Instant;
 
 use dns_lookup::lookup_host;
 use rand::random;
-use surge_ping::{Client, ConfigBuilder, ICMP, PingIdentifier, PingSequence};
+use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -37,8 +36,8 @@ lazy_static::lazy_static! {
 
 async fn start_check_routine(
     req_receiver: UnboundedReceiver<IpAddr>,
-    resp_sender: UnboundedSender<IpAddr>,
-    resp_receiver: UnboundedReceiver<IpAddr>,
+    resp_sender: UnboundedSender<(IpAddr, bool)>,
+    resp_receiver: UnboundedReceiver<(IpAddr, bool)>,
     bypass_ipset: String,
     nobypass_ipset: String,
 ) {
@@ -54,7 +53,7 @@ async fn start_check_routine(
 }
 
 #[allow(unused_variables)]
-async fn start_response(mut receiver: UnboundedReceiver<IpAddr>, name: String) {
+async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: String) {
     log::info!("start response routine");
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
@@ -62,7 +61,7 @@ async fn start_response(mut receiver: UnboundedReceiver<IpAddr>, name: String) {
         }
     }
     loop {
-        let ip = if let Some(ip) = receiver.recv().await {
+        let (ip, add) = if let Some(ip) = receiver.recv().await {
             ip
         } else {
             break;
@@ -70,7 +69,11 @@ async fn start_response(mut receiver: UnboundedReceiver<IpAddr>, name: String) {
         log::warn!("{} should be bypassed", ip);
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
-                if let Err(err) = session.add(name.as_str(), ip) {
+                if let Err(err) = if add {
+                    session.add(name.as_str(), ip)
+                } else {
+                    session.del(name.as_str(), ip)
+                } {
                     log::error!("add ip:{} to ipset {} failed:{:?}", ip, name, err);
                 }
             }
@@ -82,7 +85,7 @@ async fn start_response(mut receiver: UnboundedReceiver<IpAddr>, name: String) {
 #[allow(unused_variables)]
 async fn start_request(
     mut receiver: UnboundedReceiver<IpAddr>,
-    sender: UnboundedSender<IpAddr>,
+    sender: UnboundedSender<(IpAddr, bool)>,
     name: String,
 ) {
     log::info!("start request routine");
@@ -114,7 +117,12 @@ async fn start_request(
     log::info!("stop request routine");
 }
 
-async fn do_check(ip: IpAddr, client: Arc<Client>, id: u16, sender: UnboundedSender<IpAddr>) {
+async fn do_check(
+    ip: IpAddr,
+    client: Arc<Client>,
+    id: u16,
+    sender: UnboundedSender<(IpAddr, bool)>,
+) {
     log::info!("start checking {}", ip);
     let mut pinger = client.pinger(ip, PingIdentifier(id)).await;
     pinger.timeout(Duration::from_millis(999));
@@ -137,10 +145,10 @@ async fn do_check(ip: IpAddr, client: Arc<Client>, id: u16, sender: UnboundedSen
         lost_ratio
     );
     if let Err(err) = CONDITION.read().map(|cond| {
-        if lost_ratio < cond.lost_ratio && avg_cost < cond.avg_cost {
-            if let Err(err) = sender.send(ip) {
-                log::error!("send response ip:{} failed:{}", ip, err);
-            }
+        if let Err(err) =
+            sender.send((ip, lost_ratio < cond.lost_ratio && avg_cost < cond.avg_cost))
+        {
+            log::error!("send response ip:{} failed:{}", ip, err);
         }
     }) {
         log::error!("read on condition failed:{}", err);
@@ -250,7 +258,7 @@ impl NetProfiler {
 mod tests {
     use std::{thread::sleep, time::Duration};
 
-    use crate::proxy::net_profiler::{NetProfiler, start_check_server};
+    use crate::proxy::net_profiler::{start_check_server, NetProfiler};
 
     #[test_log::test]
     fn test_net_profiler() {
