@@ -1378,7 +1378,7 @@ dependencies = [
 
 [[package]]
 name = "trojan"
-version = "0.13.1"
+version = "0.13.2"
 dependencies = [
  "backtrace",
  "backtrace-on-stack-overflow",

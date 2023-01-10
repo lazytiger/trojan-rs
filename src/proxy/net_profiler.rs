@@ -17,7 +17,8 @@ use tokio::{
 pub struct NetProfiler {
     set: HashMap<IpAddr, Instant>,
     timeout: u64,
-    sender: Option<UnboundedSender<IpAddr>>,
+    check_sender: Option<UnboundedSender<IpAddr>>,
+    resp_sender: Option<UnboundedSender<(IpAddr, bool)>>,
 }
 
 struct Condition {
@@ -207,7 +208,7 @@ impl NetProfiler {
         bypass_ipset: String,
         nobypass_ipset: String,
     ) -> Self {
-        let sender = if enable {
+        let (check_sender, resp_sender) = if enable {
             if let Err(err) = CONDITION.write().map(|mut cond| {
                 cond.lost_ratio = lost_ratio;
                 cond.avg_cost = avg_cost;
@@ -216,39 +217,46 @@ impl NetProfiler {
             }
             let (req_sender, req_receiver) = mpsc::unbounded_channel();
             let (resp_sender, resp_receiver) = mpsc::unbounded_channel();
+            let sender = resp_sender.clone();
             thread::spawn(|| {
                 let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
                 runtime.block_on(start_check_routine(
                     req_receiver,
-                    resp_sender,
+                    sender,
                     resp_receiver,
                     bypass_ipset,
                     nobypass_ipset,
                 ));
                 log::info!("check thread stopped");
             });
-            Some(req_sender)
+            (Some(req_sender), Some(resp_sender))
         } else {
-            None
+            (None, None)
         };
 
         Self {
             set: HashMap::new(),
             timeout,
-            sender,
+            check_sender,
+            resp_sender,
         }
     }
     pub fn check(&mut self, ip: IpAddr) {
-        if let Some(sender) = &self.sender {
+        if let Some(sender) = &self.resp_sender {
             if let Some(start) = self.set.get_mut(&ip) {
                 if start.elapsed().as_secs() < self.timeout {
                     return;
+                } else {
+                    if let Err(err) = sender.send((ip, false)) {
+                        log::error!("send remove ip:{} failed:{}", ip, err);
+                    }
                 }
             }
 
-            self.set.insert(ip, Instant::now());
-            if let Err(err) = sender.send(ip) {
-                log::error!("send ip:{} failed:{}", err, ip);
+            if let None = self.set.insert(ip, Instant::now()) {
+                if let Err(err) = self.check_sender.as_ref().unwrap().send(ip) {
+                    log::error!("send ip:{} failed:{}", err, ip);
+                }
             }
         }
     }
