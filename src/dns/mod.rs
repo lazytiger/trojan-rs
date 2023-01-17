@@ -1,6 +1,8 @@
-use std::{thread, time::Duration};
+use std::{path::Path, thread, time::Duration};
 
+use crossbeam::channel::{unbounded, Sender};
 use mio::{Events, Poll};
+use notify::{Event, EventHandler, RecursiveMode, Watcher};
 use winapi::{
     shared::minwindef::{BOOL, DWORD, FALSE, TRUE},
     um::{consoleapi::SetConsoleCtrlHandler, wincon},
@@ -8,8 +10,8 @@ use winapi::{
 
 use server::DnsServer;
 
-use crate::{dns::adapter::get_adapter_index, OPTIONS, types::Result};
 pub use crate::dns::adapter::{get_adapter_ip, get_main_adapter_gwif, set_dns_server};
+use crate::{dns::adapter::get_adapter_index, types::Result, OPTIONS};
 
 mod adapter;
 mod domain;
@@ -37,6 +39,23 @@ extern "system" fn console_callback(ctrl_type: DWORD) -> BOOL {
     FALSE
 }
 
+struct FileMonitor {
+    sender: Sender<Event>,
+}
+
+impl EventHandler for FileMonitor {
+    fn handle_event(&mut self, event: notify::Result<Event>) {
+        match event {
+            Ok(event) => {
+                if let Err(err) = self.sender.send(event) {
+                    log::error!("send event failed:{}", err);
+                }
+            }
+            Err(err) => log::error!("handle event failed:{}", err),
+        }
+    }
+}
+
 pub fn run() -> Result<()> {
     unsafe {
         if FALSE == SetConsoleCtrlHandler(Some(console_callback), TRUE) {
@@ -51,6 +70,12 @@ pub fn run() -> Result<()> {
     }
     let index = get_adapter_index(OPTIONS.dns_args().tun_name.as_str()).unwrap();
 
+    let (sender, receiver) = unbounded();
+    let monitor = FileMonitor { sender };
+    let mut watcher = notify::recommended_watcher(monitor)?;
+    let watched_file = Path::new(OPTIONS.dns_args().blocked_domain_list.as_str());
+    watcher.watch(&watched_file, RecursiveMode::NonRecursive)?;
+
     let mut poll = Poll::new()?;
     let mut events = Events::with_capacity(1024);
     let mut dns_server = DnsServer::new(index);
@@ -60,8 +85,14 @@ pub fn run() -> Result<()> {
     }
 
     log::warn!("dns server is ready");
+    let timeout = Duration::from_secs(1);
     loop {
-        poll.poll(&mut events, None)?;
+        let count = receiver.try_iter().count();
+        if count > 0 {
+            log::warn!("update domain now");
+            dns_server.update_domain();
+        }
+        poll.poll(&mut events, Some(timeout))?;
         for event in &events {
             dns_server.ready(event, &poll);
         }

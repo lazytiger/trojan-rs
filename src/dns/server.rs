@@ -79,6 +79,18 @@ impl DnsServer {
         self.listener.local_addr().unwrap().ip().to_string()
     }
 
+    pub fn update_domain(&mut self) {
+        let mut domain_map = DomainMap::new();
+        let file = File::open(OPTIONS.dns_args().blocked_domain_list.as_str()).unwrap();
+        let reader = BufReader::new(file);
+        reader.lines().for_each(|line| {
+            if let Ok(line) = line {
+                domain_map.add_domain(line.as_str());
+            }
+        });
+        self.blocked_domains = domain_map;
+    }
+
     pub fn setup(&mut self, poll: &Poll) {
         poll.registry()
             .register(&mut self.trusted, Token(DNS_TRUSTED), Interest::READABLE)
@@ -89,16 +101,7 @@ impl DnsServer {
         poll.registry()
             .register(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
             .unwrap();
-
-        let mut domain_map = DomainMap::new();
-        let file = File::open(OPTIONS.dns_args().blocked_domain_list.as_str()).unwrap();
-        let reader = BufReader::new(file);
-        reader.lines().for_each(|line| {
-            if let Ok(line) = line {
-                domain_map.add_domain(line.as_str());
-            }
-        });
-        self.blocked_domains = domain_map;
+        self.update_domain();
 
         let mut message = Message::new();
         message.set_message_type(MessageType::Response);

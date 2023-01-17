@@ -25,6 +25,7 @@ pub enum TrojanError {
     DnsProto(trust_dns_proto::error::ProtoError),
     #[from(ignore)]
     MainAdapterNotFound,
+    Notify(notify::Error),
 }
 
 #[allow(dead_code)]
