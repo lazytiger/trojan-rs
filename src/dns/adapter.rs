@@ -83,7 +83,6 @@ pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
     let mut ret = None;
     unsafe {
         get_adapters(|adapter| {
-            println!("index:{} type:{}", adapter.Index, adapter.Type);
             if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET
                 && adapter.Type != ipifcons::IF_TYPE_IEEE80211
                 && adapter.Type != ipifcons::IF_TYPE_IEEE80212

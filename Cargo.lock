@@ -432,9 +432,9 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bdd7b0849075e79ee9a1836df22c717d1eba30451796fdc631b04565dd11e2a"
 dependencies = [
-    "libc",
-    "log",
-    "reopen",
+ "libc",
+ "log",
+ "reopen",
 ]
 
 [[package]]
@@ -443,10 +443,10 @@ version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e884668cd0c7480504233e951174ddc3b382f7c2666e3b7310b5c4e7b0c37f9"
 dependencies = [
-    "cfg-if",
-    "libc",
-    "redox_syscall",
-    "windows-sys",
+ "cfg-if",
+ "libc",
+ "redox_syscall",
+ "windows-sys",
 ]
 
 [[package]]
@@ -455,7 +455,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9c384f161156f5260c24a097c56119f9be8c798586aecc13afbcbe7b7e26bf8"
 dependencies = [
-    "percent-encoding",
+ "percent-encoding",
 ]
 
 [[package]]
@@ -464,7 +464,7 @@ version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76ee7a02da4d231650c7cea31349b889be2f45ddb3ef3032d2ec8185f6313fd2"
 dependencies = [
-    "libc",
+ "libc",
 ]
 
 [[package]]
@@ -473,7 +473,7 @@ version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52ba265a92256105f45b719605a571ffe2d1f0fea3807304b522c1d778f79eed"
 dependencies = [
-    "futures-core",
+ "futures-core",
 ]
 
 [[package]]
@@ -608,8 +608,8 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e14ddfc70884202db2244c223200c204c2bda1bc6e0998d11b5e024d657209e6"
 dependencies = [
-    "unicode-bidi",
-    "unicode-normalization",
+ "unicode-bidi",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -618,9 +618,9 @@ version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8069d3ec154eb856955c1c0fbffefbf5f3c40a104ec912d4797314c1801abff"
 dependencies = [
-    "bitflags",
-    "inotify-sys",
-    "libc",
+ "bitflags",
+ "inotify-sys",
+ "libc",
 ]
 
 [[package]]
@@ -629,7 +629,7 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb"
 dependencies = [
-    "libc",
+ "libc",
 ]
 
 [[package]]
@@ -638,8 +638,8 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46112a93252b123d31a119a8d1a1ac19deac4fac6e0e8b0df58f0d4e5870e63c"
 dependencies = [
-    "libc",
-    "windows-sys",
+ "libc",
+ "windows-sys",
 ]
 
 [[package]]
@@ -684,7 +684,7 @@ version = "0.3.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49409df3e3bf0856b916e2ceaca09ee28e6871cf7d9ce97a692cacfdb2a25a47"
 dependencies = [
-    "wasm-bindgen",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -693,8 +693,8 @@ version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c8fc60ba15bf51257aa9807a48a61013db043fcf3a78cb0d916e8e396dcad98"
 dependencies = [
-    "kqueue-sys",
-    "libc",
+ "kqueue-sys",
+ "libc",
 ]
 
 [[package]]
@@ -703,8 +703,8 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8367585489f01bc55dd27404dcf56b95e6da061a256a666ab23be9ba96a2e587"
 dependencies = [
-    "bitflags",
-    "libc",
+ "bitflags",
+ "libc",
 ]
 
 [[package]]
@@ -829,8 +829,8 @@ dependencies = [
  "bitflags",
  "cc",
  "cfg-if",
-    "libc",
-    "memoffset 0.6.5",
+ "libc",
+ "memoffset 0.6.5",
 ]
 
 [[package]]
@@ -845,16 +845,16 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2c66da08abae1c024c01d635253e402341b4060a12e99b31c7594063bf490a"
 dependencies = [
-    "bitflags",
-    "crossbeam-channel",
-    "filetime",
-    "fsevent-sys",
-    "inotify",
-    "kqueue",
-    "libc",
-    "mio",
-    "walkdir",
-    "winapi",
+ "bitflags",
+ "crossbeam-channel",
+ "filetime",
+ "fsevent-sys",
+ "inotify",
+ "kqueue",
+ "libc",
+ "mio",
+ "walkdir",
+ "winapi",
 ]
 
 [[package]]
@@ -863,8 +863,8 @@ version = "0.1.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "225d3389fb3509a24c93f5c29eb6bde2586b98d9f016636dff58d7c6f7569cd9"
 dependencies = [
-    "autocfg",
-    "num-traits",
+ "autocfg",
+ "num-traits",
 ]
 
 [[package]]
@@ -1188,7 +1188,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0864aeff53f8c05aa08d86e5ef839d3dfcf07aeba2db32f12db0ef716e87bd55"
 dependencies = [
-    "base64",
+ "base64",
 ]
 
 [[package]]
@@ -1197,7 +1197,7 @@ version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
-    "winapi-util",
+ "winapi-util",
 ]
 
 [[package]]
@@ -1477,27 +1477,27 @@ dependencies = [
  "crossbeam",
  "derive_more",
  "dns-lookup",
-    "env_logger",
-    "fern",
-    "hex",
-    "ipset",
-    "itertools",
-    "lazy_static",
-    "libc",
-    "libloading",
-    "log",
-    "mio",
-    "notify",
-    "rand",
-    "rayon",
-    "rustls",
-    "rustls-pemfile",
-    "sha2",
-    "smoltcp",
-    "socket2",
-    "surge-ping",
-    "test-log",
-    "tokio",
+ "env_logger",
+ "fern",
+ "hex",
+ "ipset",
+ "itertools",
+ "lazy_static",
+ "libc",
+ "libloading",
+ "log",
+ "mio",
+ "notify",
+ "rand",
+ "rayon",
+ "rustls",
+ "rustls-pemfile",
+ "sha2",
+ "smoltcp",
+ "socket2",
+ "surge-ping",
+ "test-log",
+ "tokio",
  "trust-dns-proto",
  "webpki",
  "webpki-roots",
@@ -1577,8 +1577,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d68c799ae75762b8c3fe375feb6600ef5602c883c5d21eb51c09f22b83c4643"
 dependencies = [
  "form_urlencoded",
-    "idna 0.3.0",
-    "percent-encoding",
+ "idna 0.3.0",
+ "percent-encoding",
 ]
 
 [[package]]
@@ -1593,9 +1593,9 @@ version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "808cf2735cd4b6866113f648b791c6adc5714537bc222d9347bb203386ffda56"
 dependencies = [
-    "same-file",
-    "winapi",
-    "winapi-util",
+ "same-file",
+ "winapi",
+ "winapi-util",
 ]
 
 [[package]]
