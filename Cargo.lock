@@ -650,11 +650,12 @@ checksum = "30e22bd8629359895450b59ea7a776c850561b96a3b1d31321c1949d9e6c9146"
 
 [[package]]
 name = "ipset"
-version = "0.1.2"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72fbfcc8b9b3bee677ea58d9a6a37dc8d2555e8c78e519d0ff16b8ba4e7e0503"
+checksum = "592ff215b47918caf4dc3d0eee33021e14b2f50af44f36a2b27829039d6e7bae"
 dependencies = [
- "libc",
+    "derive_more",
+    "libc",
 ]
 
 [[package]]
