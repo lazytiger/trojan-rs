@@ -47,7 +47,7 @@ wintun = "0.2"
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.2"
-ipset = { version = "0.1" }
+ipset = { version = "0.2" }
 
 [dependencies.fern]
 version = "0.6"
