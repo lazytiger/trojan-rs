@@ -58,9 +58,9 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
     log::info!("start response routine");
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
-            let mut session = ipset::Session::new();
-            if let Err(err) = session.flush(name.as_str()) {
-                log::error!("flush ipset {} failed:{:?}", name, err);
+            let mut session:ipset::Session<ipset::types::HashIp> = ipset::Session::new(name);
+            if let Err(err) = session.flush() {
+                log::error!("flush ipset failed:{:?}", err);
             }
         }
     }
@@ -74,11 +74,11 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 if let Err(err) = if add {
-                    session.add(name.as_str(), ip)
+                    session.add(ip)
                 } else {
-                    session.del(name.as_str(), ip)
+                    session.del(ip)
                 } {
-                    log::error!("add ip:{} to ipset {} failed:{:?}", ip, name, err);
+                    log::error!("add ip:{} to ipset failed:{:?}", ip,  err);
                 }
             }
         }
@@ -97,7 +97,7 @@ async fn start_request(
     let client = Arc::new(Client::new(&config).unwrap());
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
-            let mut session = ipset::Session::new();
+            let mut session:ipset::Session<ipset::types::HashIp> = ipset::Session::new(name);
         }
     }
     let mut id = 0u16;
@@ -109,7 +109,7 @@ async fn start_request(
         };
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
-                if let Ok(true) = session.test(name.as_str(), ip) {
+                if let Ok(true) = session.test(ip) {
                     continue;
                 }
             }

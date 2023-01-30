@@ -1,6 +1,6 @@
 [package]
 name = "trojan"
-version = "0.13.4"
+version = "0.13.5"
 authors = ["Hoping White <baihaoping@gmail.com>"]
 edition = "2021"
 
@@ -46,8 +46,8 @@ env_logger = "0.10"
 wintun = "0.2"
 
 [target.'cfg(not(windows))'.dependencies]
-backtrace-on-stack-overflow = "0.2"
-ipset = { version = "0.2" }
+backtrace-on-stack-overflow = "0.3"
+ipset = { version = "0.3" }
 
 [dependencies.fern]
 version = "0.6"
