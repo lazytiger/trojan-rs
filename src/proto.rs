@@ -9,16 +9,18 @@ use crate::config::OPTIONS;
 
 /// protocol code for CONNECT command
 pub const CONNECT: u8 = 0x01;
+/// protocol code for PING command
+pub const PING: u8 = 0x2;
 /// protocol code for UDP_ASSOCIATE command
 pub const UDP_ASSOCIATE: u8 = 0x03;
 /// max packet size for udp, MTU = 1500 minus IP head size
 pub const MAX_PACKET_SIZE: usize = 1450;
 /// protocol code for IPV4 type
-const IPV4: u8 = 0x01;
+pub const IPV4: u8 = 0x01;
 /// protocol code for DOMAIN type
 const DOMAIN: u8 = 0x03;
 /// protocol code for IPV6 type
-const IPV6: u8 = 0x04;
+pub const IPV6: u8 = 0x04;
 
 /// Trojan Socks5 address enum
 pub enum Sock5Address {
@@ -70,7 +72,7 @@ impl<'a> TrojanRequest<'a> {
             log::error!("unknown protocol, invalid size");
             return None;
         }
-        if buffer[0] != CONNECT && buffer[0] != UDP_ASSOCIATE {
+        if buffer[0] != CONNECT && buffer[0] != UDP_ASSOCIATE && buffer[0] != PING {
             log::error!(
                 "unknown protocol, expected valid command, found:{}",
                 buffer[0]

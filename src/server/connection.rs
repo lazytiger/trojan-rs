@@ -11,9 +11,10 @@ use mio::{
 
 use crate::{
     config::OPTIONS,
-    proto::{Sock5Address, TrojanRequest, CONNECT},
+    proto::{Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     resolver::DnsResolver,
     server::{
+        ping_backend::PingBackend,
         stat::Statistics,
         tcp_backend::TcpBackend,
         tls_server::{Backend, PollEvent},
@@ -29,6 +30,7 @@ enum Status {
     DnsWait,
     TCPForward,
     UDPForward,
+    PingServing,
 }
 
 pub struct Connection {
@@ -283,21 +285,33 @@ impl Connection {
                     }
                 }
                 Status::DnsWait => {
-                    if self.command == CONNECT {
-                        //if dns query is not done, cache data now
-                        if let Err(err) = self.data.write(buffer) {
-                            log::warn!("connection:{} cache data failed {}", self.index, err);
-                            self.proxy.shutdown();
-                        } else if self.target_addr.is_none() {
-                            log::warn!("connection:{} dns query not done yet", self.index);
-                        } else if self.try_setup_tcp_target(poll, stats) {
-                            buffer = &[];
-                            self.status = Status::TCPForward;
-                            continue;
+                    match self.command {
+                        CONNECT => {
+                            //if dns query is not done, cache data now
+                            if let Err(err) = self.data.write(buffer) {
+                                log::warn!("connection:{} cache data failed {}", self.index, err);
+                                self.proxy.shutdown();
+                            } else if self.target_addr.is_none() {
+                                log::warn!("connection:{} dns query not done yet", self.index);
+                            } else if self.try_setup_tcp_target(poll, stats) {
+                                buffer = &[];
+                                self.status = Status::TCPForward;
+                                continue;
+                            }
                         }
-                    } else if self.try_setup_udp_target(poll, stats) {
-                        self.status = Status::UDPForward;
-                        continue;
+                        PING => {
+                            if self.try_setup_ping_target() {
+                                self.status = Status::PingServing;
+                                continue;
+                            }
+                        }
+                        UDP_ASSOCIATE => {
+                            if self.try_setup_udp_target(poll, stats) {
+                                self.status = Status::UDPForward;
+                                continue;
+                            }
+                        }
+                        _ => unreachable!("invalid command:{}", self.command),
                     }
                 }
                 _ => {
@@ -371,6 +385,11 @@ impl Connection {
                 }
             }
         }
+        true
+    }
+
+    fn try_setup_ping_target(&mut self) -> bool {
+        self.backend.replace(Box::new(PingBackend::new()));
         true
     }
 

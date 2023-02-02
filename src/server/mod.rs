@@ -22,18 +22,20 @@ use crate::{
 };
 
 mod connection;
+mod ping_backend;
 mod stat;
 mod tcp_backend;
 mod tls_server;
 mod udp_backend;
 
-const MIN_INDEX: usize = 2;
+const MIN_INDEX: usize = 3;
 const MAX_INDEX: usize = usize::MAX / CHANNEL_CNT;
 const CHANNEL_CNT: usize = 2;
 const CHANNEL_PROXY: usize = 0;
 const CHANNEL_BACKEND: usize = 1;
 const RESOLVER: usize = 2;
 const LISTENER: usize = 1;
+const UDP_PING: usize = 3;
 
 fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
     let cert_file = File::open(filename).unwrap();
@@ -125,6 +127,7 @@ pub fn run() -> Result<()> {
                         server.do_conn_event(&poll, PollEvent::Dns((token, ip)), None, &mut stats);
                     });
                 }
+                Token(UDP_PING) => {}
                 _ => {
                     server.do_conn_event(
                         &poll,

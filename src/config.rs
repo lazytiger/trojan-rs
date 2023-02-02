@@ -239,6 +239,10 @@ pub struct ServerArgs {
     /// ALPN protocol supported
     #[clap(short = 'n', long)]
     pub alpn: Vec<String>,
+
+    /// Port for ping server
+    #[clap(long)]
+    pub ping_port: u16,
 }
 
 impl Opts {
