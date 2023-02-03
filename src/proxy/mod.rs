@@ -143,9 +143,6 @@ pub fn run() -> Result<()> {
 
     let mut net_profiler = NetProfiler::new(
         OPTIONS.proxy_args().enable_bypass,
-        OPTIONS.proxy_args().bypass_timeout,
-        OPTIONS.proxy_args().bypass_avg_cost as u128,
-        OPTIONS.proxy_args().bypass_lost_ratio,
         OPTIONS.proxy_args().bypass_ipset.clone(),
         OPTIONS.proxy_args().no_bypass_ipset.clone(),
     );
@@ -194,6 +191,7 @@ pub fn run() -> Result<()> {
         }
         udp_server.remove_closed();
         tcp_server.remove_closed();
+        net_profiler.update();
         let now = Instant::now();
         if now - last_check_time > check_duration {
             tcp_server.check_timeout(&poll, now);

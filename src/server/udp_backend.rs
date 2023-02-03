@@ -156,7 +156,7 @@ impl Backend for UdpBackend {
                     );
                     let send = if OPTIONS.server_args().disable_udp_hole {
                         if let Some(t) = self.sources.get(&addr) {
-                            if t.elapsed() > Duration::from_secs(30) {
+                            if t.elapsed() > Duration::from_secs(60) {
                                 log::error!("udp packet from {} discard because timeout", addr);
                                 false
                             } else {

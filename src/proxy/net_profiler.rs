@@ -8,6 +8,7 @@ use std::{
 
 use bytes::{Buf, BufMut, BytesMut};
 use dns_lookup::lookup_host;
+use itertools::Itertools;
 use mio::{event::Event, Poll, Token};
 use rand::random;
 use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
@@ -21,42 +22,70 @@ use crate::{
     status::StatusProvider, tls_conn::TlsConn,
 };
 
+struct PingResult {
+    last_time: Instant,
+    local_lost: u8,
+    local_ping: u16,
+    remote_lost: u8,
+    remote_ping: u16,
+}
+
+impl PingResult {
+    pub(crate) fn is_complete(&self) -> bool {
+        self.local_lost != u8::MAX
+            && self.local_ping != u16::MAX
+            && self.remote_lost != u8::MAX
+            && self.remote_ping != u16::MAX
+    }
+}
+
+impl Default for PingResult {
+    fn default() -> Self {
+        Self {
+            last_time: Instant::now(),
+            local_lost: u8::MAX,
+            local_ping: u16::MAX,
+            remote_lost: u8::MAX,
+            remote_ping: u16::MAX,
+        }
+    }
+}
+
 pub struct NetProfiler {
-    set: HashMap<IpAddr, Instant>,
-    timeout: u64,
+    set: HashMap<IpAddr, PingResult>,
     check_sender: Option<UnboundedSender<IpAddr>>,
-    resp_sender: Option<UnboundedSender<(IpAddr, bool)>>,
+    resp_receiver: Option<UnboundedReceiver<(IpAddr, u16, u8)>>,
+    ipset_sender: Option<UnboundedSender<(IpAddr, bool)>>,
     pub conn: Option<TlsConn>,
     pub send_buffer: BytesMut,
     pub recv_buffer: BytesMut,
 }
 
-impl NetProfiler {}
-
+#[derive(Clone)]
 struct Condition {
-    avg_cost: u128,
-    lost_ratio: u16,
+    ping: u16,
+    lost: u8,
 }
 
 lazy_static::lazy_static! {
     static ref CONDITION:RwLock<Condition> = RwLock::new(
         Condition{
-            avg_cost:200,
-            lost_ratio:5,
+            ping:200,
+            lost:5,
         }
     );
 }
 
 async fn start_check_routine(
     req_receiver: UnboundedReceiver<IpAddr>,
-    resp_sender: UnboundedSender<(IpAddr, bool)>,
-    resp_receiver: UnboundedReceiver<(IpAddr, bool)>,
+    resp_sender: UnboundedSender<(IpAddr, u16, u8)>,
+    ipset_receiver: UnboundedReceiver<(IpAddr, bool)>,
     bypass_ipset: String,
     nobypass_ipset: String,
 ) {
     log::info!("start check routine");
     let handle1 = tokio::spawn(start_request(req_receiver, resp_sender, nobypass_ipset));
-    let handle2 = tokio::spawn(start_response(resp_receiver, bypass_ipset));
+    let handle2 = tokio::spawn(start_response(ipset_receiver, bypass_ipset));
     if let Err(err) = handle2.await {
         log::error!("response routine failed:{}", err);
     }
@@ -101,7 +130,7 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
 #[allow(unused_variables)]
 async fn start_request(
     mut receiver: UnboundedReceiver<IpAddr>,
-    sender: UnboundedSender<(IpAddr, bool)>,
+    sender: UnboundedSender<(IpAddr, u16, u8)>,
     name: String,
 ) {
     log::info!("start request routine");
@@ -137,7 +166,7 @@ async fn do_check(
     ip: IpAddr,
     client: Arc<Client>,
     id: u16,
-    sender: UnboundedSender<(IpAddr, bool)>,
+    sender: UnboundedSender<(IpAddr, u16, u8)>,
 ) {
     log::info!("start checking {}", ip);
     let mut pinger = client.pinger(ip, PingIdentifier(id)).await;
@@ -160,14 +189,8 @@ async fn do_check(
         avg_cost,
         lost_ratio
     );
-    if let Err(err) = CONDITION.read().map(|cond| {
-        if let Err(err) =
-            sender.send((ip, lost_ratio < cond.lost_ratio && avg_cost < cond.avg_cost))
-        {
-            log::error!("send response ip:{} failed:{}", ip, err);
-        }
-    }) {
-        log::error!("read on condition failed:{}", err);
+    if let Err(err) = sender.send((ip, avg_cost as u16, lost_ratio)) {
+        log::error!("send response ip:{} failed:{}", ip, err);
     }
 }
 
@@ -197,10 +220,12 @@ async fn check_server(host: String, timeout: u64) {
                 lost_ratio += 1;
             }
         }
-        log::info!("ip:{} avg_cost:{}, lost_ratio:{}", ip, avg_cost, lost_ratio);
+        if avg_cost > 300 || lost_ratio > 10 {
+            log::error!("ip:{} avg_cost:{}, lost_ratio:{}", ip, avg_cost, lost_ratio);
+        }
         if let Err(err) = CONDITION.write().map(|mut cond| {
-            cond.lost_ratio = lost_ratio;
-            cond.avg_cost = avg_cost;
+            cond.lost = lost_ratio as u8;
+            cond.ping = avg_cost as u16;
         }) {
             log::error!("write on condition failed:{}", err);
         }
@@ -215,45 +240,38 @@ pub fn start_check_server(host: String, timeout: u64) {
 }
 
 impl NetProfiler {
-    pub fn new(
-        enable: bool,
-        timeout: u64,
-        avg_cost: u128,
-        lost_ratio: u16,
-        bypass_ipset: String,
-        nobypass_ipset: String,
-    ) -> Self {
-        let (check_sender, resp_sender) = if enable {
+    pub fn new(enable: bool, bypass_ipset: String, nobypass_ipset: String) -> Self {
+        let (check_sender, resp_receiver, ipset_sender) = if enable {
             if let Err(err) = CONDITION.write().map(|mut cond| {
-                cond.lost_ratio = lost_ratio;
-                cond.avg_cost = avg_cost;
+                cond.lost = 3;
+                cond.ping = 200;
             }) {
                 log::error!("set condition failed:{}", err);
             }
             let (req_sender, req_receiver) = mpsc::unbounded_channel();
             let (resp_sender, resp_receiver) = mpsc::unbounded_channel();
-            let sender = resp_sender.clone();
+            let (ipset_sender, ipset_receiver) = mpsc::unbounded_channel();
             thread::spawn(|| {
                 let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
                 runtime.block_on(start_check_routine(
                     req_receiver,
-                    sender,
-                    resp_receiver,
+                    resp_sender,
+                    ipset_receiver,
                     bypass_ipset,
                     nobypass_ipset,
                 ));
                 log::info!("check thread stopped");
             });
-            (Some(req_sender), Some(resp_sender))
+            (Some(req_sender), Some(resp_receiver), Some(ipset_sender))
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         Self {
             set: HashMap::new(),
-            timeout,
             check_sender,
-            resp_sender,
+            resp_receiver,
+            ipset_sender,
             conn: None,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
@@ -320,7 +338,7 @@ impl NetProfiler {
         self.initialize(poll, resolver, pool);
     }
 
-    pub fn check(&mut self, ip: IpAddr) {
+    fn send_remote_ip(&mut self, ip: &IpAddr) {
         match ip {
             IpAddr::V4(ip) => {
                 self.send_buffer.put_u8(proto::IPV4);
@@ -334,24 +352,88 @@ impl NetProfiler {
         if let Some(conn) = &mut self.conn {
             conn.write_session(self.send_buffer.split().as_ref());
         }
-        if let Some(sender) = &self.resp_sender {
-            if let Some(start) = self.set.get_mut(&ip) {
-                if start.elapsed().as_secs() < self.timeout {
-                    return;
-                } else {
-                    if let Err(err) = sender.send((ip, false)) {
-                        log::error!("send remove ip:{} failed:{}", ip, err);
-                    }
+    }
+
+    pub fn check(&mut self, ip: IpAddr) {
+        if self.check_sender.is_none() {
+            return;
+        }
+
+        self.send_remote_ip(&ip);
+
+        if let Err(err) = self.check_sender.as_ref().unwrap().send(ip) {
+            log::error!("send ip:{} to check routine failed:{}", ip, err);
+        } else {
+            self.set.entry(ip).or_default();
+        }
+    }
+
+    pub fn update(&mut self) {
+        if self.resp_receiver.is_none() {
+            return;
+        }
+        while let Ok((ip, ping, lost)) = self.resp_receiver.as_mut().unwrap().try_recv() {
+            if let Some(pr) = self.set.get_mut(&ip) {
+                pr.local_lost = lost.min(u8::MAX - 1);
+                pr.local_ping = ping.min(u16::MAX - 1);
+            } else {
+                log::error!("ip:{} not found in set", ip);
+            }
+        }
+
+        let cond = CONDITION.read();
+        if cond.is_err() {
+            return;
+        }
+
+        let cond: Condition = cond.unwrap().clone();
+
+        let mut ips1 = Vec::new();
+        let mut ips0 = Vec::new();
+        for (key, group) in &self
+            .set
+            .iter()
+            .group_by(|(_ip, pr)| if pr.is_complete() { 1 } else { 0 })
+        {
+            if key == 1 {
+                ips1 = group.map(|(ip, _)| ip.clone()).collect();
+            } else {
+                ips0 = group
+                    .filter_map(|(ip, pr)| {
+                        if pr.last_time.elapsed().as_secs() > 100 {
+                            Some(ip.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+            }
+        }
+
+        ips0.iter().for_each(|ip| {
+            self.send_remote_ip(ip);
+        });
+
+        ips1.iter().for_each(|ip| {
+            let pr = self.set.get(ip).unwrap();
+            let mut bypass = false;
+            let proxy_ping = cond.ping + pr.remote_ping;
+            let proxy_lost =
+                100 - ((100.0 - cond.lost as f32) * (100.0 - pr.remote_lost as f32) / 100.0) as u8;
+            if pr.local_ping < proxy_ping && pr.local_lost < proxy_lost {
+                if pr.local_ping > pr.remote_ping {
+                    bypass = true;
                 }
             }
 
-            if let None = self.set.insert(ip, Instant::now()) {
-                if let Err(err) = self.check_sender.as_ref().unwrap().send(ip) {
-                    log::error!("send ip:{} failed:{}", err, ip);
+            if bypass {
+                if let Err(err) = self.ipset_sender.as_ref().unwrap().send((ip.clone(), true)) {
+                    log::error!("send {} to ipset routine failed:{}", ip, err);
                 }
             }
-        }
+        })
     }
+
     fn decode(&mut self) {
         while !self.recv_buffer.is_empty() {
             let (ip, ping, lost): (IpAddr, _, _) = match self.recv_buffer.as_ref()[0] {
@@ -381,6 +463,12 @@ impl NetProfiler {
                 }
                 _ => unreachable!("invalid address type:{}", self.recv_buffer.as_ref()[0]),
             };
+            if let Some(pr) = self.set.get_mut(&ip) {
+                pr.remote_lost = lost.min(u8::MAX - 1);
+                pr.remote_ping = ping.min(u16::MAX - 1);
+            } else {
+                log::error!("ip:{} not found in set", ip);
+            }
         }
     }
 }

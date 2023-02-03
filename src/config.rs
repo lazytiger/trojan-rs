@@ -156,8 +156,8 @@ pub struct ProxyArgs {
     #[clap(short = 'e', long, default_value = "false")]
     pub enable_bypass: bool,
 
-    /// Bypass timeout for recheck.
-    #[clap(short = 't', long, default_value = "3600")]
+    /// Bypass timeout for check server.
+    #[clap(short = 't', long, default_value = "100")]
     pub bypass_timeout: u64,
 
     /// ipset name which should not be bypassed.
@@ -167,14 +167,6 @@ pub struct ProxyArgs {
     /// bypass ipset name
     #[clap(short = 'i', long, default_value = "byplist")]
     pub bypass_ipset: String,
-
-    /// min lost ratio in percent which should be add into bypass ipset
-    #[clap(short = 'r', long, default_value = "3")]
-    pub bypass_lost_ratio: u16,
-
-    /// average cost in milliseconds which should be add into bypass ipset
-    #[clap(short = 'c', long, default_value = "200")]
-    pub bypass_avg_cost: u16,
 }
 
 #[derive(Parser)]
