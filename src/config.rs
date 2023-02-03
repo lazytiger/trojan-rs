@@ -240,7 +240,8 @@ pub struct ServerArgs {
     #[clap(short = 'n', long)]
     pub alpn: Vec<String>,
 
-    /// Disable udp hole punch
+    /// Disable udp hole punch, if enabled, a udp packet from remote will be discarded if no packet send
+    /// from this socket before or at least 30 seconds before.
     #[clap(short = 'd', long)]
     pub disable_udp_hole: bool,
 }
