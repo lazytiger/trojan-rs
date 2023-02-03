@@ -229,14 +229,12 @@ async fn check_server(host: String, timeout: u64) {
                 received += 1;
             }
         }
-        if avg_cost > 300 || 100 - received > 10 {
-            log::error!(
-                "proxy server is unstable, ip:{} avg_cost:{}, lost_ratio:{}",
-                ip,
-                avg_cost,
-                100 - received
-            );
-        }
+        log::error!(
+            "proxy server status, ip:{} ping:{}, lost:{}",
+            ip,
+            avg_cost,
+            100 - received
+        );
         if let Err(err) = CONDITION.write().map(|mut cond| {
             cond.lost = (100 - received) as u8;
             cond.ping = avg_cost as u16;
