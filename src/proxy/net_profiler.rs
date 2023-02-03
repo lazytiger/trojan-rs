@@ -472,9 +472,10 @@ impl NetProfiler {
                 log::error!("send {} to ipset routine failed:{}", ip, err);
             } else {
                 log::error!(
-                    "ip:{:?}, result:{:?}, proxy_ping:{}, proxy_lost:{}, bypass:{}",
+                    "ip:{:?}, local_ping:{}, local_lost:{}, proxy_ping:{}, proxy_lost:{}, bypass:{}",
                     ip,
-                    pr,
+                    pr.local_ping,
+                    pr.local_lost,
                     proxy_ping,
                     proxy_lost,
                     bypass
