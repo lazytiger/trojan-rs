@@ -67,6 +67,7 @@ pub struct NetProfiler {
     pub send_buffer: BytesMut,
     pub recv_buffer: BytesMut,
     pub timeout: u64,
+    pub local_threshold: u16,
 }
 
 #[derive(Clone)]
@@ -252,7 +253,13 @@ pub fn start_check_server(host: String, timeout: u64) {
 }
 
 impl NetProfiler {
-    pub fn new(enable: bool, timeout: u64, bypass_ipset: String, nobypass_ipset: String) -> Self {
+    pub fn new(
+        enable: bool,
+        timeout: u64,
+        local_threshold: u16,
+        bypass_ipset: String,
+        nobypass_ipset: String,
+    ) -> Self {
         let (check_sender, resp_receiver, ipset_sender) = if enable {
             if let Err(err) = CONDITION.write().map(|mut cond| {
                 cond.lost = 3;
@@ -285,6 +292,7 @@ impl NetProfiler {
             check_sender,
             resp_receiver,
             ipset_sender,
+            local_threshold,
             conn: None,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
@@ -456,7 +464,7 @@ impl NetProfiler {
             let proxy_lost =
                 100 - ((100.0 - cond.lost as f32) * (100.0 - pr.remote_lost as f32) / 100.0) as u8;
             if pr.local_lost != 100 && pr.local_ping <= proxy_ping && pr.local_lost <= proxy_lost {
-                if pr.local_ping > pr.remote_ping {
+                if pr.local_ping > self.local_threshold || pr.local_ping > pr.remote_ping {
                     bypass = true;
                 }
             }
