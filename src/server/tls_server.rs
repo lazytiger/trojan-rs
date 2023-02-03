@@ -61,6 +61,12 @@ impl TlsServer {
         }
     }
 
+    pub(crate) fn poll_ping(&mut self, stats: &mut Statistics) {
+        self.conns.iter_mut().for_each(|(_, conn)| {
+            conn.poll_ping(stats);
+        })
+    }
+
     pub fn accept(&mut self, poll: &Poll) {
         loop {
             match self.listener.accept() {

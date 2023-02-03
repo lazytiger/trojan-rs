@@ -35,7 +35,6 @@ const CHANNEL_PROXY: usize = 0;
 const CHANNEL_BACKEND: usize = 1;
 const RESOLVER: usize = 2;
 const LISTENER: usize = 1;
-const UDP_PING: usize = 3;
 
 fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
     let cert_file = File::open(filename).unwrap();
@@ -127,7 +126,6 @@ pub fn run() -> Result<()> {
                         server.do_conn_event(&poll, PollEvent::Dns((token, ip)), None, &mut stats);
                     });
                 }
-                Token(UDP_PING) => {}
                 _ => {
                     server.do_conn_event(
                         &poll,
@@ -139,6 +137,7 @@ pub fn run() -> Result<()> {
             }
         }
         server.remove_closed();
+        server.poll_ping(&mut stats);
         let now = Instant::now();
         if now - last_check_time > check_duration {
             server.check_timeout(now, &poll);

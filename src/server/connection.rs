@@ -11,6 +11,7 @@ use mio::{
 
 use crate::{
     config::OPTIONS,
+    proto,
     proto::{Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     resolver::DnsResolver,
     server::{
@@ -47,6 +48,8 @@ pub struct Connection {
     read_proxy: bool,
 }
 
+impl Connection {}
+
 impl Connection {
     pub fn new(index: usize, proxy: TlsConn) -> Connection {
         Connection {
@@ -70,6 +73,14 @@ impl Connection {
         if let Some(backend) = &mut self.backend {
             backend.shutdown();
             backend.check_status(poll);
+        }
+    }
+
+    pub(crate) fn poll_ping(&mut self, stats: &mut Statistics) {
+        if self.command == proto::PING {
+            if let Some(backend) = &mut self.backend {
+                backend.do_read(&mut self.proxy, stats)
+            }
         }
     }
 

@@ -157,7 +157,7 @@ pub struct ProxyArgs {
     pub enable_bypass: bool,
 
     /// Bypass timeout for check server.
-    #[clap(short = 't', long, default_value = "100")]
+    #[clap(short = 't', long, default_value = "3600")]
     pub bypass_timeout: u64,
 
     /// ipset name which should not be bypassed.
@@ -236,6 +236,10 @@ pub struct ServerArgs {
     /// from this socket before or at least 30 seconds before.
     #[clap(short = 'D', long)]
     pub disable_udp_hole: bool,
+
+    /// Timeout for cached result.
+    #[clap(long)]
+    pub cached_ping_timeout: u64,
 }
 
 impl Opts {

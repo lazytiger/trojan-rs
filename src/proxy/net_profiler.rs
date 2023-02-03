@@ -22,12 +22,14 @@ use crate::{
     status::StatusProvider, tls_conn::TlsConn,
 };
 
+#[derive(Debug)]
 struct PingResult {
     last_time: Instant,
     local_lost: u8,
     local_ping: u16,
     remote_lost: u8,
     remote_ping: u16,
+    sent: bool,
 }
 
 impl PingResult {
@@ -36,6 +38,10 @@ impl PingResult {
             && self.local_ping != u16::MAX
             && self.remote_lost != u8::MAX
             && self.remote_ping != u16::MAX
+    }
+
+    fn is_bypass(&self) -> bool {
+        self.local_ping == u16::MAX - 1 && self.local_lost == u8::MAX - 1
     }
 }
 
@@ -47,6 +53,7 @@ impl Default for PingResult {
             local_ping: u16::MAX,
             remote_lost: u8::MAX,
             remote_ping: u16::MAX,
+            sent: true,
         }
     }
 }
@@ -59,6 +66,7 @@ pub struct NetProfiler {
     pub conn: Option<TlsConn>,
     pub send_buffer: BytesMut,
     pub recv_buffer: BytesMut,
+    pub timeout: u64,
 }
 
 #[derive(Clone)]
@@ -151,6 +159,9 @@ async fn start_request(
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 if let Ok(true) = session.test(ip) {
+                    if let Err(err) = sender.send((ip, u16::MAX, u8::MAX)) {
+                        log::error!("send local ping for {} failed:{}", ip, err);
+                    }
                     continue;
                 }
             }
@@ -171,15 +182,14 @@ async fn do_check(
     log::info!("start checking {}", ip);
     let mut pinger = client.pinger(ip, PingIdentifier(id)).await;
     pinger.timeout(Duration::from_millis(999));
-    let mut lost_ratio = 0;
     let mut avg_cost = 0;
+    let mut received = 0;
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     for i in 0..100u128 {
         interval.tick().await;
         if let Ok((_, cost)) = pinger.ping(PingSequence(i as u16), &[]).await {
-            avg_cost = ((avg_cost * i) + cost.as_millis()) / (i + 1);
-        } else {
-            lost_ratio += 1;
+            avg_cost = ((avg_cost * received) + cost.as_millis()) / (received + 1);
+            received += 1;
         }
     }
 
@@ -187,9 +197,9 @@ async fn do_check(
         "ip:{}, avg_cost:{}, lost_ratio:{}",
         ip,
         avg_cost,
-        lost_ratio
+        100 - received,
     );
-    if let Err(err) = sender.send((ip, avg_cost as u16, lost_ratio)) {
+    if let Err(err) = sender.send((ip, avg_cost as u16, (100 - received) as u8)) {
         log::error!("send response ip:{} failed:{}", ip, err);
     }
 }
@@ -210,21 +220,25 @@ async fn check_server(host: String, timeout: u64) {
         let mut pinger = client.pinger(ip, PingIdentifier(random())).await;
         pinger.timeout(Duration::from_millis(999));
         let mut avg_cost = 0;
-        let mut lost_ratio = 0;
+        let mut received = 0;
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         for i in 0..100u128 {
             tick.tick().await;
             if let Ok((_, cost)) = pinger.ping(PingSequence(i as u16), &[]).await {
-                avg_cost = ((avg_cost * i) + cost.as_millis()) / (i + 1);
-            } else {
-                lost_ratio += 1;
+                avg_cost = ((avg_cost * received) + cost.as_millis()) / (received + 1);
+                received += 1;
             }
         }
-        if avg_cost > 300 || lost_ratio > 10 {
-            log::error!("ip:{} avg_cost:{}, lost_ratio:{}", ip, avg_cost, lost_ratio);
+        if avg_cost > 300 || 100 - received > 10 {
+            log::error!(
+                "proxy server is unstable, ip:{} avg_cost:{}, lost_ratio:{}",
+                ip,
+                avg_cost,
+                100 - received
+            );
         }
         if let Err(err) = CONDITION.write().map(|mut cond| {
-            cond.lost = lost_ratio as u8;
+            cond.lost = (100 - received) as u8;
             cond.ping = avg_cost as u16;
         }) {
             log::error!("write on condition failed:{}", err);
@@ -240,7 +254,7 @@ pub fn start_check_server(host: String, timeout: u64) {
 }
 
 impl NetProfiler {
-    pub fn new(enable: bool, bypass_ipset: String, nobypass_ipset: String) -> Self {
+    pub fn new(enable: bool, timeout: u64, bypass_ipset: String, nobypass_ipset: String) -> Self {
         let (check_sender, resp_receiver, ipset_sender) = if enable {
             if let Err(err) = CONDITION.write().map(|mut cond| {
                 cond.lost = 3;
@@ -269,6 +283,7 @@ impl NetProfiler {
 
         Self {
             set: HashMap::new(),
+            timeout,
             check_sender,
             resp_receiver,
             ipset_sender,
@@ -350,7 +365,9 @@ impl NetProfiler {
             }
         }
         if let Some(conn) = &mut self.conn {
-            conn.write_session(self.send_buffer.split().as_ref());
+            if conn.write_session(self.send_buffer.split().as_ref()) {
+                conn.do_send();
+            }
         }
     }
 
@@ -360,7 +377,7 @@ impl NetProfiler {
         }
 
         if let Some(pr) = self.set.get(&ip) {
-            if pr.last_time.elapsed().as_secs() < 3600 {
+            if pr.is_bypass() || pr.last_time.elapsed().as_secs() < self.timeout {
                 return;
             }
         }
@@ -372,6 +389,7 @@ impl NetProfiler {
         } else {
             let pr = self.set.entry(ip).or_default();
             pr.last_time = Instant::now();
+            pr.sent = false;
         }
     }
 
@@ -398,17 +416,23 @@ impl NetProfiler {
 
         let mut ips1 = Vec::new();
         let mut ips0 = Vec::new();
-        for (key, group) in &self
-            .set
-            .iter()
-            .group_by(|(_ip, pr)| if pr.is_complete() { 1 } else { 0 })
-        {
+        for (key, group) in &self.set.iter().group_by(|(_ip, pr)| {
+            if pr.is_complete() {
+                if pr.sent {
+                    2
+                } else {
+                    1
+                }
+            } else {
+                0
+            }
+        }) {
             if key == 1 {
                 ips1 = group.map(|(ip, _)| ip.clone()).collect();
             } else {
                 ips0 = group
                     .filter_map(|(ip, pr)| {
-                        if pr.last_time.elapsed().as_secs() > 100 {
+                        if !pr.is_bypass() && pr.last_time.elapsed().as_secs() > 100 {
                             Some(ip.clone())
                         } else {
                             None
@@ -420,10 +444,13 @@ impl NetProfiler {
 
         ips0.iter().for_each(|ip| {
             self.send_remote_ip(ip);
+            self.set.get_mut(ip).unwrap().last_time = Instant::now();
+            log::error!("ip:{} does not receive remote result, retry now", ip);
         });
 
         ips1.iter().for_each(|ip| {
-            let pr = self.set.get(ip).unwrap();
+            let pr = self.set.get_mut(ip).unwrap();
+            pr.sent = true;
             let mut bypass = false;
             let proxy_ping = cond.ping + pr.remote_ping;
             let proxy_lost =
@@ -441,6 +468,8 @@ impl NetProfiler {
                 .send((ip.clone(), bypass))
             {
                 log::error!("send {} to ipset routine failed:{}", ip, err);
+            } else {
+                log::error!("ip:{:?} bypass:{}", pr, bypass);
             }
         })
     }

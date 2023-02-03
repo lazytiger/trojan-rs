@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
     thread,
@@ -14,19 +15,34 @@ use tokio::{
         mpsc,
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
+    time::Instant,
 };
 
 use crate::{
+    config::OPTIONS,
     proto,
     server::{stat::Statistics, tls_server::Backend},
     status::{ConnStatus, StatusProvider},
     tls_conn::TlsConn,
 };
 
+#[derive(Debug, Clone)]
 pub struct PingResult {
+    time: Instant,
     ip: IpAddr,
     lost: u8,
     ping: u16,
+}
+
+impl Default for PingResult {
+    fn default() -> Self {
+        Self {
+            time: Instant::now(),
+            ip: IpAddr::V4(Ipv4Addr::from(0)),
+            lost: u8::MAX,
+            ping: 0,
+        }
+    }
 }
 
 pub struct PingBackend {
@@ -36,6 +52,8 @@ pub struct PingBackend {
     timeout: Duration,
     req_sender: UnboundedSender<IpAddr>,
     resp_receiver: UnboundedReceiver<PingResult>,
+    cached_result: HashMap<IpAddr, PingResult>,
+    cache_timeout: u64,
 }
 
 impl PingBackend {
@@ -43,18 +61,36 @@ impl PingBackend {
         let (req_sender, req_receiver) = mpsc::unbounded_channel();
         let (resp_sender, resp_receiver) = mpsc::unbounded_channel();
         thread::spawn(|| {
+            log::error!("check routine started");
             let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
             runtime.block_on(start_check_routine(req_receiver, resp_sender));
-            log::info!("check thread stopped");
+            log::error!("check thread stopped");
         });
         Self {
             send_buffer: Default::default(),
             recv_buffer: Default::default(),
             status: ConnStatus::Established,
             timeout: Duration::from_secs(u64::MAX),
+            cached_result: HashMap::new(),
             req_sender,
             resp_receiver,
+            cache_timeout: OPTIONS.server_args().cached_ping_timeout,
         }
+    }
+
+    fn send_result(&mut self, pr: &PingResult) {
+        match pr.ip {
+            IpAddr::V4(ip) => {
+                self.send_buffer.put_u8(proto::IPV4);
+                self.send_buffer.extend_from_slice(ip.octets().as_slice());
+            }
+            IpAddr::V6(ip) => {
+                self.send_buffer.put_u8(proto::IPV6);
+                self.send_buffer.extend_from_slice(ip.octets().as_slice())
+            }
+        };
+        self.send_buffer.put_u16(pr.ping);
+        self.send_buffer.put_u8(pr.lost);
     }
 }
 
@@ -85,21 +121,21 @@ async fn start_check_routine(
 async fn do_check(ip: IpAddr, id: u16, client: Arc<Client>, sender: UnboundedSender<PingResult>) {
     let mut pinger = client.pinger(ip, PingIdentifier(id)).await;
     pinger.timeout(Duration::from_millis(999));
-    let mut lost_ratio = 0;
+    let mut received = 0;
     let mut avg_cost = 0;
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     for i in 0..100u128 {
         interval.tick().await;
         if let Ok((_, cost)) = pinger.ping(PingSequence(i as u16), &[]).await {
-            avg_cost = ((avg_cost * i) + cost.as_millis()) / (i + 1);
-        } else {
-            lost_ratio += 1;
+            avg_cost = ((avg_cost * received) + cost.as_millis()) / (received + 1);
+            received += 1;
         }
     }
     if let Err(err) = sender.send(PingResult {
         ip,
-        lost: lost_ratio,
+        lost: (100 - received) as u8,
         ping: avg_cost as u16,
+        time: Instant::now(),
     }) {
         log::error!("send result failed:{}", err);
     }
@@ -129,6 +165,7 @@ impl Backend for PingBackend {
                     Ipv6Addr::from(data).into()
                 }
                 _ => {
+                    log::error!("invalid address type, close connection");
                     self.shutdown();
                     break;
                 }
@@ -138,10 +175,16 @@ impl Backend for PingBackend {
                 self.shutdown();
                 break;
             }
-            if let Err(err) = self.req_sender.send(addr) {
-                log::error!("send req_sender failed:{}", err);
-                self.shutdown();
-                break;
+
+            let result = self.cached_result.entry(addr).or_default().clone();
+            if result.lost <= 100 && result.time.elapsed().as_secs() < self.cache_timeout {
+                self.send_result(&result);
+            } else {
+                if let Err(err) = self.req_sender.send(addr) {
+                    log::error!("send req_sender failed:{}", err);
+                    self.shutdown();
+                    break;
+                }
             }
         }
     }
@@ -156,24 +199,17 @@ impl Backend for PingBackend {
 
     fn do_read(&mut self, conn: &mut TlsConn, _stats: &mut Statistics) {
         while let Ok(pr) = self.resp_receiver.try_recv() {
-            match pr.ip {
-                IpAddr::V4(ip) => {
-                    self.send_buffer.put_u8(proto::IPV4);
-                    self.send_buffer.extend_from_slice(ip.octets().as_slice());
-                }
-                IpAddr::V6(ip) => {
-                    self.send_buffer.put_u8(proto::IPV6);
-                    self.send_buffer.extend_from_slice(ip.octets().as_slice())
-                }
-            };
-            self.send_buffer.put_u16(pr.ping);
-            self.send_buffer.put_u8(pr.lost);
+            self.send_result(&pr);
+            self.cached_result.insert(pr.ip, pr);
         }
         if self.send_buffer.is_empty() {
             return;
         }
         let data = self.send_buffer.split();
-        if !conn.write_session(data.as_ref()) {
+        if conn.write_session(data.as_ref()) {
+            conn.do_send();
+        } else {
+            log::error!("send data to remote failed");
             self.set_status(ConnStatus::PeerClosed);
         }
     }
@@ -186,6 +222,7 @@ impl Backend for PingBackend {
 impl StatusProvider for PingBackend {
     fn set_status(&mut self, status: ConnStatus) {
         if matches!(status, ConnStatus::Shutdown) {
+            log::error!("ping backend shutdown now");
             if let Err(err) = self.req_sender.send(Ipv4Addr::new(0, 0, 0, 0).into()) {
                 log::error!("stop sender failed:{}", err);
             }

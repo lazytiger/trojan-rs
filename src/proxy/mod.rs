@@ -124,10 +124,7 @@ pub fn run() -> Result<()> {
     let mut tcp_server = TcpServer::new(tcp_listener);
     let mut udp_server = UdpServer::new(udp_listener);
 
-    start_check_server(
-        OPTIONS.proxy_args().hostname.clone(),
-        OPTIONS.proxy_args().bypass_timeout,
-    );
+    start_check_server(OPTIONS.proxy_args().hostname.clone(), 150);
 
     let mut events = Events::with_capacity(1024);
 
@@ -143,6 +140,7 @@ pub fn run() -> Result<()> {
 
     let mut net_profiler = NetProfiler::new(
         OPTIONS.proxy_args().enable_bypass,
+        OPTIONS.proxy_args().bypass_timeout,
         OPTIONS.proxy_args().bypass_ipset.clone(),
         OPTIONS.proxy_args().no_bypass_ipset.clone(),
     );
