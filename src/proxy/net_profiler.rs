@@ -1,12 +1,14 @@
 use std::{
     collections::HashMap,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4},
     sync::{Arc, RwLock},
     thread,
     time::{Duration, Instant},
 };
 
+use bytes::{Buf, BufMut, BytesMut};
 use dns_lookup::lookup_host;
+use mio::{event::Event, Poll, Token};
 use rand::random;
 use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
@@ -14,12 +16,22 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 
+use crate::{
+    idle_pool::IdlePool, proto, proto::TrojanRequest, proxy::PINGER, resolver::DnsResolver,
+    status::StatusProvider, tls_conn::TlsConn,
+};
+
 pub struct NetProfiler {
     set: HashMap<IpAddr, Instant>,
     timeout: u64,
     check_sender: Option<UnboundedSender<IpAddr>>,
     resp_sender: Option<UnboundedSender<(IpAddr, bool)>>,
+    pub conn: Option<TlsConn>,
+    pub send_buffer: BytesMut,
+    pub recv_buffer: BytesMut,
 }
+
+impl NetProfiler {}
 
 struct Condition {
     avg_cost: u128,
@@ -242,9 +254,86 @@ impl NetProfiler {
             timeout,
             check_sender,
             resp_sender,
+            conn: None,
+            send_buffer: BytesMut::new(),
+            recv_buffer: BytesMut::new(),
         }
     }
+
+    pub fn initialize(&mut self, poll: &Poll, resolver: &DnsResolver, pool: &mut IdlePool) -> bool {
+        if let Some(mut conn) = pool.get(&poll, &resolver) {
+            if conn.reset_index(0, Token(PINGER), &poll) {
+                let mut data = BytesMut::new();
+                let addr = SocketAddr::V4(SocketAddrV4::new(0.into(), 0));
+                TrojanRequest::generate(&mut data, proto::PING, &addr);
+                if conn.write_session(data.as_ref()) {
+                    self.conn.replace(conn);
+                    return true;
+                }
+            }
+            conn.shutdown();
+        }
+        false
+    }
+
+    pub fn ready(
+        &mut self,
+        event: &Event,
+        poll: &Poll,
+        pool: &mut IdlePool,
+        resolver: &DnsResolver,
+    ) {
+        if self.conn.is_none() {
+            return;
+        }
+
+        if event.is_readable() {
+            let conn = self.conn.as_mut().unwrap();
+            if let Some(data) = conn.do_read() {
+                self.recv_buffer.extend_from_slice(data.as_slice());
+                self.decode();
+            }
+        }
+
+        if event.is_writable() {
+            let data = self.send_buffer.split();
+            let conn = self.conn.as_mut().unwrap();
+            if !data.is_empty() {
+                conn.write_session(data.as_ref());
+            }
+            conn.established();
+            conn.do_send();
+        }
+
+        if let Some(conn) = &self.conn {
+            if conn.is_shutdown() {
+                self.reset(poll, pool, resolver);
+            }
+        }
+    }
+
+    fn reset(&mut self, poll: &Poll, pool: &mut IdlePool, resolver: &DnsResolver) {
+        if let Some(conn) = &mut self.conn {
+            conn.shutdown();
+        }
+        self.conn.take();
+        self.initialize(poll, resolver, pool);
+    }
+
     pub fn check(&mut self, ip: IpAddr) {
+        match ip {
+            IpAddr::V4(ip) => {
+                self.send_buffer.put_u8(proto::IPV4);
+                self.send_buffer.extend_from_slice(ip.octets().as_slice());
+            }
+            IpAddr::V6(ip) => {
+                self.send_buffer.put_u8(proto::IPV6);
+                self.send_buffer.extend_from_slice(ip.octets().as_slice());
+            }
+        }
+        if let Some(conn) = &mut self.conn {
+            conn.write_session(self.send_buffer.split().as_ref());
+        }
         if let Some(sender) = &self.resp_sender {
             if let Some(start) = self.set.get_mut(&ip) {
                 if start.elapsed().as_secs() < self.timeout {
@@ -263,18 +352,35 @@ impl NetProfiler {
             }
         }
     }
-}
-
-#[allow(unused_imports)]
-mod tests {
-    use std::{thread::sleep, time::Duration};
-
-    use crate::proxy::net_profiler::{start_check_server, NetProfiler};
-
-    #[test_log::test]
-    fn test_net_profiler() {
-        let mut profiler = NetProfiler::new(true, 3600, 200, 5, "".to_string(), "".to_string());
-        profiler.check("104.225.237.172".parse().unwrap());
-        start_check_server("pha.hopingwhite.com".to_string(), 30);
+    fn decode(&mut self) {
+        while !self.recv_buffer.is_empty() {
+            let (ip, ping, lost): (IpAddr, _, _) = match self.recv_buffer.as_ref()[0] {
+                proto::IPV4 => {
+                    if self.recv_buffer.len() < 8 {
+                        break;
+                    }
+                    let mut octets = [0u8; 4];
+                    octets.copy_from_slice(&self.recv_buffer.as_ref()[1..5]);
+                    self.recv_buffer.advance(5);
+                    let ping = self.recv_buffer.get_u16();
+                    let lost = self.recv_buffer.get_u8();
+                    let ip = Ipv4Addr::from(octets);
+                    (ip.into(), ping, lost)
+                }
+                proto::IPV6 => {
+                    if self.recv_buffer.len() < 20 {
+                        break;
+                    }
+                    let mut octets = [0u8; 16];
+                    octets.copy_from_slice(&self.recv_buffer.as_ref()[1..17]);
+                    self.recv_buffer.advance(17);
+                    let ping = self.recv_buffer.get_u16();
+                    let lost = self.recv_buffer.get_u8();
+                    let ip = Ipv6Addr::from(octets);
+                    (ip.into(), ping, lost)
+                }
+                _ => unreachable!("invalid address type:{}", self.recv_buffer.as_ref()[0]),
+            };
+        }
     }
 }

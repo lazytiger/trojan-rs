@@ -33,7 +33,7 @@ mod udp_cache;
 mod udp_server;
 
 /// minimal index used in `IdlePool`, `TcpServer` and `UdpServer`
-const MIN_INDEX: usize = 2;
+const MIN_INDEX: usize = 3;
 /// maximum index used in `IdlePool`, `TcpServer` and `UdpServer`
 const MAX_INDEX: usize = usize::MAX / CHANNEL_CNT;
 /// Token used for TcpListener
@@ -42,6 +42,8 @@ const TCP_LISTENER: usize = 1;
 const UDP_LISTENER: usize = 2;
 /// Token used for dns resolver
 const RESOLVER: usize = 3;
+/// Token used for ping
+const PINGER: usize = 4;
 /// total channel count for Poll
 const CHANNEL_CNT: usize = 4;
 /// channel index  for `IdlePool`
@@ -121,14 +123,6 @@ pub fn run() -> Result<()> {
 
     let mut tcp_server = TcpServer::new(tcp_listener);
     let mut udp_server = UdpServer::new(udp_listener);
-    let mut net_profiler = NetProfiler::new(
-        OPTIONS.proxy_args().enable_bypass,
-        OPTIONS.proxy_args().bypass_timeout,
-        OPTIONS.proxy_args().bypass_avg_cost as u128,
-        OPTIONS.proxy_args().bypass_lost_ratio,
-        OPTIONS.proxy_args().bypass_ipset.clone(),
-        OPTIONS.proxy_args().no_bypass_ipset.clone(),
-    );
 
     start_check_server(
         OPTIONS.proxy_args().hostname.clone(),
@@ -146,6 +140,18 @@ pub fn run() -> Result<()> {
     );
     pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
     pool.init(&poll, &resolver);
+
+    let mut net_profiler = NetProfiler::new(
+        OPTIONS.proxy_args().enable_bypass,
+        OPTIONS.proxy_args().bypass_timeout,
+        OPTIONS.proxy_args().bypass_avg_cost as u128,
+        OPTIONS.proxy_args().bypass_lost_ratio,
+        OPTIONS.proxy_args().bypass_ipset.clone(),
+        OPTIONS.proxy_args().no_bypass_ipset.clone(),
+    );
+    if !net_profiler.initialize(&poll, &resolver, &mut pool) {
+        panic!("net profiler initialize failed");
+    }
 
     let mut last_check_time = Instant::now();
     let check_duration = Duration::new(1, 0);
@@ -171,6 +177,9 @@ pub fn run() -> Result<()> {
                     resolver.consume(|_, ip| {
                         pool.resolve(ip);
                     });
+                }
+                Token(PINGER) => {
+                    net_profiler.ready(event, &poll, &mut pool, &resolver);
                 }
                 Token(i) if i % CHANNEL_CNT == CHANNEL_IDLE => {
                     pool.ready(event, &poll);

@@ -240,9 +240,9 @@ pub struct ServerArgs {
     #[clap(short = 'n', long)]
     pub alpn: Vec<String>,
 
-    /// Port for ping server
-    #[clap(long)]
-    pub ping_port: u16,
+    /// Disable udp hole punch
+    #[clap(short = 'd', long)]
+    pub disable_udp_hole: bool,
 }
 
 impl Opts {

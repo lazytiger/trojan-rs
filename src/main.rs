@@ -1,6 +1,8 @@
 #![feature(get_mut_unchecked)]
 #![feature(test)]
 
+extern crate core;
+
 use std::panic;
 
 use backtrace::Backtrace;

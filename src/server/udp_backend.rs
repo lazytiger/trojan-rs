@@ -1,4 +1,8 @@
-use std::{net::IpAddr, time::Duration};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, SocketAddr},
+    time::{Duration, Instant},
+};
 
 use bytes::BytesMut;
 use mio::{net::UdpSocket, Interest, Poll, Token};
@@ -22,6 +26,7 @@ pub struct UdpBackend {
     timeout: Duration,
     bytes_read: usize,
     bytes_sent: usize,
+    sources: HashMap<SocketAddr, Instant>,
 }
 
 impl UdpBackend {
@@ -43,6 +48,7 @@ impl UdpBackend {
             timeout: OPTIONS.udp_idle_duration,
             bytes_read: 0,
             bytes_sent: 0,
+            sources: HashMap::new(),
         })
     }
 
@@ -50,6 +56,9 @@ impl UdpBackend {
         loop {
             match UdpAssociate::parse(buffer) {
                 UdpParseResult::Packet(packet) => {
+                    if OPTIONS.server_args().disable_udp_hole {
+                        self.sources.insert(packet.address, Instant::now());
+                    }
                     match self
                         .socket
                         .send_to(&packet.payload[..packet.length], packet.address)
@@ -138,11 +147,28 @@ impl Backend for UdpBackend {
                         size,
                         addr
                     );
-                    self.recv_head.clear();
-                    UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
-                    if conn.write_session(self.recv_head.as_ref())
-                        && conn.write_session(&self.recv_body.as_slice()[..size])
-                    {
+                    let send = if OPTIONS.server_args().disable_udp_hole {
+                        if let Some(t) = self.sources.get(&addr) {
+                            if t.elapsed() > Duration::from_secs(30) {
+                                false
+                            } else {
+                                true
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        true
+                    };
+                    if send {
+                        self.recv_head.clear();
+                        UdpAssociate::generate(&mut self.recv_head, &addr, size as u16);
+                        if conn.write_session(self.recv_head.as_ref())
+                            && conn.write_session(&self.recv_body.as_slice()[..size])
+                        {
+                            continue;
+                        }
+                    } else {
                         continue;
                     }
                 }
