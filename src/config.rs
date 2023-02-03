@@ -242,7 +242,7 @@ pub struct ServerArgs {
 
     /// Disable udp hole punch, if enabled, a udp packet from remote will be discarded if no packet send
     /// from this socket before or at least 30 seconds before.
-    #[clap(short = 'd', long)]
+    #[clap(short = 'D', long)]
     pub disable_udp_hole: bool,
 }
 

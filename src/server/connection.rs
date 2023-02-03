@@ -374,7 +374,13 @@ impl Connection {
                     udp_target.peer_addr().map(|addr| addr.ip()).ok(),
                     self.proxy.source(),
                 );
-                match UdpBackend::new(udp_target, self.index, self.target_token(), poll) {
+                match UdpBackend::new(
+                    udp_target,
+                    self.proxy.source(),
+                    self.index,
+                    self.target_token(),
+                    poll,
+                ) {
                     Ok(backend) => {
                         self.backend.replace(Box::new(backend));
                     }

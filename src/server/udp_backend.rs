@@ -26,12 +26,14 @@ pub struct UdpBackend {
     timeout: Duration,
     bytes_read: usize,
     bytes_sent: usize,
+    source: Option<IpAddr>,
     sources: HashMap<SocketAddr, Instant>,
 }
 
 impl UdpBackend {
     pub fn new(
         mut socket: UdpSocket,
+        source: Option<IpAddr>,
         index: usize,
         token: Token,
         poll: &Poll,
@@ -41,6 +43,7 @@ impl UdpBackend {
         Ok(UdpBackend {
             socket,
             index,
+            source,
             send_buffer: Default::default(),
             recv_body: vec![0u8; MAX_PACKET_SIZE],
             recv_head: Default::default(),
@@ -102,7 +105,11 @@ impl UdpBackend {
                     }
                 }
                 UdpParseResult::InvalidProtocol => {
-                    log::error!("connection:{} got invalid udp protocol", self.index);
+                    log::error!(
+                        "connection:{}-{:?} got invalid udp protocol",
+                        self.index,
+                        self.source
+                    );
                     self.shutdown();
                     return;
                 }

@@ -176,7 +176,7 @@ fn parse_address(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Address)> {
             Some((18, Sock5Address::Socket(addr)))
         }
         _ => {
-            log::warn!("unknown protocol, invalid address type:{}", atyp);
+            log::error!("unknown protocol, invalid address type:{}", atyp);
             None
         }
     }
@@ -279,7 +279,7 @@ impl<'a> UdpAssociate<'a> {
                 return UdpParseResult::Continued;
             }
             if buffer[2] != b'\r' || buffer[3] != b'\n' {
-                log::warn!("udp packet expected CRLF after length");
+                log::error!("udp packet expected CRLF after length");
                 return UdpParseResult::InvalidProtocol;
             }
             match addr {
@@ -289,7 +289,7 @@ impl<'a> UdpAssociate<'a> {
                     payload: &buffer[4..],
                 }),
                 _ => {
-                    log::warn!("udp packet only accept ip address");
+                    log::error!("udp packet only accept ip address");
                     UdpParseResult::InvalidProtocol
                 }
             }
