@@ -359,12 +359,19 @@ impl NetProfiler {
             return;
         }
 
+        if let Some(pr) = self.set.get(&ip) {
+            if pr.last_time.elapsed().as_secs() < 3600 {
+                return;
+            }
+        }
+
         self.send_remote_ip(&ip);
 
         if let Err(err) = self.check_sender.as_ref().unwrap().send(ip) {
             log::error!("send ip:{} to check routine failed:{}", ip, err);
         } else {
-            self.set.entry(ip).or_default();
+            let pr = self.set.entry(ip).or_default();
+            pr.last_time = Instant::now();
         }
     }
 
@@ -376,6 +383,7 @@ impl NetProfiler {
             if let Some(pr) = self.set.get_mut(&ip) {
                 pr.local_lost = lost.min(u8::MAX - 1);
                 pr.local_ping = ping.min(u16::MAX - 1);
+                log::error!("ip:{} local lost:{}, local ping:{}", ip, lost, ping);
             } else {
                 log::error!("ip:{} not found in set", ip);
             }
@@ -426,10 +434,13 @@ impl NetProfiler {
                 }
             }
 
-            if bypass {
-                if let Err(err) = self.ipset_sender.as_ref().unwrap().send((ip.clone(), true)) {
-                    log::error!("send {} to ipset routine failed:{}", ip, err);
-                }
+            if let Err(err) = self
+                .ipset_sender
+                .as_ref()
+                .unwrap()
+                .send((ip.clone(), bypass))
+            {
+                log::error!("send {} to ipset routine failed:{}", ip, err);
             }
         })
     }
@@ -466,6 +477,7 @@ impl NetProfiler {
             if let Some(pr) = self.set.get_mut(&ip) {
                 pr.remote_lost = lost.min(u8::MAX - 1);
                 pr.remote_ping = ping.min(u16::MAX - 1);
+                log::error!("ip:{} remote lost:{}, remote ping:{}", ip, lost, ping);
             } else {
                 log::error!("ip:{} not found in set", ip);
             }
