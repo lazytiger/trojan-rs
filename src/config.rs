@@ -168,7 +168,7 @@ pub struct ProxyArgs {
     #[clap(short = 'i', long, default_value = "byplist")]
     pub bypass_ipset: String,
 
-    #[clap(long, default_value = "75")]
+    #[clap(long, default_value = "50")]
     pub local_threshold: u16,
 }
 
