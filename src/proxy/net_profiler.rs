@@ -294,6 +294,10 @@ impl NetProfiler {
     }
 
     pub fn initialize(&mut self, poll: &Poll, resolver: &DnsResolver, pool: &mut IdlePool) -> bool {
+        if self.ipset_sender.is_none() {
+            return true;
+        }
+        log::error!("net profiler remote reconnect now");
         if let Some(mut conn) = pool.get(&poll, &resolver) {
             if conn.reset_index(0, Token(PINGER), &poll) {
                 let mut data = BytesMut::new();
@@ -401,7 +405,6 @@ impl NetProfiler {
             if let Some(pr) = self.set.get_mut(&ip) {
                 pr.local_lost = lost.min(u8::MAX - 1);
                 pr.local_ping = ping.min(u16::MAX - 1);
-                log::error!("ip:{} local lost:{}, local ping:{}", ip, lost, ping);
             } else {
                 log::error!("ip:{} not found in set", ip);
             }
@@ -418,18 +421,18 @@ impl NetProfiler {
         let mut ips0 = Vec::new();
         for (key, group) in &self.set.iter().group_by(|(_ip, pr)| {
             if pr.is_complete() {
-                if pr.sent {
-                    2
+                if pr.sent || pr.is_bypass() {
+                    2 //already sent
                 } else {
-                    1
+                    1 //should send
                 }
             } else {
-                0
+                0 //not complete
             }
         }) {
             if key == 1 {
                 ips1 = group.map(|(ip, _)| ip.clone()).collect();
-            } else {
+            } else if key == 0 {
                 ips0 = group
                     .filter_map(|(ip, pr)| {
                         if !pr.is_bypass() && pr.last_time.elapsed().as_secs() > 100 {
@@ -445,7 +448,6 @@ impl NetProfiler {
         ips0.iter().for_each(|ip| {
             self.send_remote_ip(ip);
             self.set.get_mut(ip).unwrap().last_time = Instant::now();
-            log::error!("ip:{} does not receive remote result, retry now", ip);
         });
 
         ips1.iter().for_each(|ip| {
@@ -455,7 +457,7 @@ impl NetProfiler {
             let proxy_ping = cond.ping + pr.remote_ping;
             let proxy_lost =
                 100 - ((100.0 - cond.lost as f32) * (100.0 - pr.remote_lost as f32) / 100.0) as u8;
-            if pr.local_ping < proxy_ping && pr.local_lost < proxy_lost {
+            if pr.local_lost != 100 && pr.local_ping <= proxy_ping && pr.local_lost <= proxy_lost {
                 if pr.local_ping > pr.remote_ping {
                     bypass = true;
                 }
@@ -469,7 +471,14 @@ impl NetProfiler {
             {
                 log::error!("send {} to ipset routine failed:{}", ip, err);
             } else {
-                log::error!("ip:{:?} bypass:{}", pr, bypass);
+                log::error!(
+                    "ip:{:?}, result:{:?}, proxy_ping:{}, proxy_lost:{}, bypass:{}",
+                    ip,
+                    pr,
+                    proxy_ping,
+                    proxy_lost,
+                    bypass
+                );
             }
         })
     }
@@ -506,7 +515,6 @@ impl NetProfiler {
             if let Some(pr) = self.set.get_mut(&ip) {
                 pr.remote_lost = lost.min(u8::MAX - 1);
                 pr.remote_ping = ping.min(u16::MAX - 1);
-                log::error!("ip:{} remote lost:{}, remote ping:{}", ip, lost, ping);
             } else {
                 log::error!("ip:{} not found in set", ip);
             }
