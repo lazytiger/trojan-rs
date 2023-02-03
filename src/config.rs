@@ -238,7 +238,7 @@ pub struct ServerArgs {
     pub disable_udp_hole: bool,
 
     /// Timeout for cached result.
-    #[clap(long)]
+    #[clap(long, default_value = "600")]
     pub cached_ping_timeout: u64,
 }
 
