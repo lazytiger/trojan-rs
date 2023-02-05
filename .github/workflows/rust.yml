@@ -31,7 +31,6 @@ jobs:
             rustup
             musl-dev
             gcc
-            musl-dev
             ipset
             ipset-dev
             p7zip
