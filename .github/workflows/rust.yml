@@ -29,9 +29,6 @@ jobs:
             libgit2-dev
             git
             rustup
-            clang15
-            clang15-dev
-            llvm15-dev
             musl-dev
             gcc
             musl-dev
@@ -41,10 +38,6 @@ jobs:
             mingw-w64-gcc
       - name: build x86_64 Linux
         shell: alpine-x86_64.sh {0}
-        env:
-          CC_x86_64_unknown_linux_musl: clang
-          AR_x86_64_unknown_linux_musl: llvm-ar
-          CARGO_TARGET_x86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-Clinker=lld"
         run: |
           rustup-init --default-toolchain nightly -y
           rustup target add x86_64-unknown-linux-musl
