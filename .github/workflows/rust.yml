@@ -15,10 +15,59 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
-      - name: Install Dependencies
-        run: sudo apt-get install libipset-dev -y
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Setup Alpine Linux for x86_64
+        uses: jirutka/setup-alpine@v1
+        with:
+          branch: v3.17
+          arch: x86_64
+          shell-name: alpine-x86_64.sh
+          packages: >
+            build-base
+            libgit2-dev
+            git
+            rustup
+            clang15
+            clang15-dev
+            llvm15-dev
+            musl-dev
+            gcc
+            musl-dev
+            ipset
+            ipset-dev
+            p7zip
+            mingw-w64-gcc
+      - name: build x86_64 Linux
+        shell: alpine-x86_64.sh {0}
+        env:
+          CC_x86_64_unknown_linux_musl: clang
+          AR_x86_64_unknown_linux_musl: llvm-ar
+          CARGO_TARGET_x86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-Clinker=lld"
+        run: |
+          rustup-init --default-toolchain nightly -y
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --target x86_64-unknown-linux-musl --release --verbose
+          7z a trojan-x86_64-unknown-linux-musl ./target/x86_64-unknown-linux-musl/release/trojan
+      - name: build x86_64 Windows
+        shell: alpine-x86_64.sh {0}
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          cargo build --target x86_64-pc-windows-gnu --release --verbose
+          7z a trojan-x86_64-pc-windows-gnu ./target/x86_64-pc-windows-gnu/release/trojan.exe
+      - name: Check Sha256SUM
+        shell: bash
+        run: |
+          for trojan_7z in $(ls | grep trojan | grep 7z)
+            do
+            echo $(sha256sum $trojan_7z) > $trojan_7z.sha256.txt
+          done
+      - name: Upload Artifacts
+        uses: nanoufo/action-upload-artifacts-and-release-assets@v1.5
+        with:
+          path: |
+            trojan-x86_64-unknown-linux-musl.7z
+            trojan-x86_64-pc-windows-gnu.7z
+            trojan-x86_64-unknown-linux-musl.7z.sha256.txt
+            trojan-x86_64-pc-windows-gnu.7z.sha256.txt
