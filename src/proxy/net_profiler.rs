@@ -463,8 +463,8 @@ impl NetProfiler {
             let proxy_ping = cond.ping + pr.remote_ping;
             let proxy_lost =
                 100 - ((100.0 - cond.lost as f32) * (100.0 - pr.remote_lost as f32) / 100.0) as u8;
-            if pr.local_lost != 100 && pr.local_ping < proxy_ping + 5 && pr.local_lost < proxy_lost + 2 {
-                if pr.local_ping > self.local_threshold || pr.local_ping > pr.remote_ping {
+            if pr.local_ping < proxy_ping + 5 && pr.local_lost < proxy_lost + 2 {
+                if pr.local_ping > self.local_threshold {
                     bypass = true;
                 }
             }
