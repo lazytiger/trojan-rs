@@ -67,6 +67,7 @@ pub struct NetProfiler {
     pub send_buffer: BytesMut,
     pub recv_buffer: BytesMut,
     pub timeout: u64,
+    pub local_threshold: u16,
 }
 
 #[derive(Clone)]
@@ -229,14 +230,12 @@ async fn check_server(host: String, timeout: u64) {
                 received += 1;
             }
         }
-        if avg_cost > 300 || 100 - received > 10 {
-            log::error!(
-                "proxy server is unstable, ip:{} avg_cost:{}, lost_ratio:{}",
-                ip,
-                avg_cost,
-                100 - received
-            );
-        }
+        log::error!(
+            "proxy server status, ip:{} ping:{}, lost:{}",
+            ip,
+            avg_cost,
+            100 - received
+        );
         if let Err(err) = CONDITION.write().map(|mut cond| {
             cond.lost = (100 - received) as u8;
             cond.ping = avg_cost as u16;
@@ -254,7 +253,13 @@ pub fn start_check_server(host: String, timeout: u64) {
 }
 
 impl NetProfiler {
-    pub fn new(enable: bool, timeout: u64, bypass_ipset: String, nobypass_ipset: String) -> Self {
+    pub fn new(
+        enable: bool,
+        timeout: u64,
+        local_threshold: u16,
+        bypass_ipset: String,
+        nobypass_ipset: String,
+    ) -> Self {
         let (check_sender, resp_receiver, ipset_sender) = if enable {
             if let Err(err) = CONDITION.write().map(|mut cond| {
                 cond.lost = 3;
@@ -287,6 +292,7 @@ impl NetProfiler {
             check_sender,
             resp_receiver,
             ipset_sender,
+            local_threshold,
             conn: None,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
@@ -457,8 +463,8 @@ impl NetProfiler {
             let proxy_ping = cond.ping + pr.remote_ping;
             let proxy_lost =
                 100 - ((100.0 - cond.lost as f32) * (100.0 - pr.remote_lost as f32) / 100.0) as u8;
-            if pr.local_lost != 100 && pr.local_ping <= proxy_ping && pr.local_lost <= proxy_lost {
-                if pr.local_ping > pr.remote_ping {
+            if pr.local_ping < proxy_ping + 5 && pr.local_lost < proxy_lost + 2 {
+                if pr.local_ping > self.local_threshold {
                     bypass = true;
                 }
             }
@@ -472,9 +478,10 @@ impl NetProfiler {
                 log::error!("send {} to ipset routine failed:{}", ip, err);
             } else {
                 log::error!(
-                    "ip:{:?}, result:{:?}, proxy_ping:{}, proxy_lost:{}, bypass:{}",
+                    "ip:{:?}, local_ping:{}, local_lost:{}, proxy_ping:{}, proxy_lost:{}, bypass:{}",
                     ip,
-                    pr,
+                    pr.local_ping,
+                    pr.local_lost,
                     proxy_ping,
                     proxy_lost,
                     bypass
