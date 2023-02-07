@@ -67,7 +67,7 @@ pub struct NetProfiler {
     conn: Option<TlsConn>,
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
-    timeout: u64,
+    timeout: Duration,
     local_threshold: u16,
     next_check: Instant,
 }
@@ -290,7 +290,7 @@ impl NetProfiler {
 
         Self {
             set: HashMap::new(),
-            timeout,
+            timeout: Duration::from_secs(timeout),
             check_sender,
             resp_receiver,
             ipset_sender,
@@ -390,7 +390,7 @@ impl NetProfiler {
         }
 
         if let Some(pr) = self.set.get(&ip) {
-            if pr.is_no_bypass() || pr.last_time.elapsed().as_secs() < self.timeout {
+            if pr.is_no_bypass() || pr.last_time.elapsed() < self.timeout {
                 return;
             }
         }
@@ -499,10 +499,11 @@ impl NetProfiler {
                 if v.is_no_bypass() {
                     continue;
                 }
-                if v.last_time <= self.next_check {
+                let due_time = v.last_time + self.timeout;
+                if due_time <= self.next_check {
                     ips.push(k.clone());
-                } else if next_check > v.last_time {
-                    next_check = v.last_time;
+                } else if next_check > due_time {
+                    next_check = due_time;
                 }
             }
         }
