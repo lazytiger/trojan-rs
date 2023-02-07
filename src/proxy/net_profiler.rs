@@ -492,9 +492,10 @@ impl NetProfiler {
             }
         });
 
-        let mut ips = Vec::new();
-        let mut next_check = Instant::now() + self.timeout;
+        let mut next_check = Instant::now();
         if self.next_check < next_check {
+            next_check += self.timeout;
+            let mut ips = Vec::new();
             for (k, v) in &self.set {
                 if v.is_no_bypass() {
                     continue;
@@ -506,10 +507,10 @@ impl NetProfiler {
                     next_check = due_time;
                 }
             }
-        }
-        self.next_check = next_check;
-        for ip in ips {
-            self.check(ip);
+            self.next_check = next_check;
+            for ip in ips {
+                self.check(ip);
+            }
         }
     }
 
