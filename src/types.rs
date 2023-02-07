@@ -1,4 +1,5 @@
 use derive_more::From;
+use log::SetLoggerError;
 
 #[allow(dead_code)]
 #[derive(From, Debug)]
@@ -26,6 +27,7 @@ pub enum TrojanError {
     #[from(ignore)]
     MainAdapterNotFound,
     Notify(notify::Error),
+    SetLogger(SetLoggerError),
 }
 
 #[allow(dead_code)]

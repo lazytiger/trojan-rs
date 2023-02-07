@@ -34,7 +34,7 @@ fn main() {
     unsafe {
         backtrace_on_stack_overflow::enable()
     };
-    config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level);
+    config::setup_logger(&OPTIONS.log_file, OPTIONS.log_level).unwrap();
     panic::set_hook(Box::new(|info| {
         let trace = Backtrace::new();
         let message = info.to_string();
