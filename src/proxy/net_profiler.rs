@@ -493,7 +493,7 @@ impl NetProfiler {
         });
 
         let mut ips = Vec::new();
-        let mut next_check = Instant::now();
+        let mut next_check = Instant::now() + self.timeout;
         if self.next_check < next_check {
             for (k, v) in &self.set {
                 if v.is_no_bypass() {
