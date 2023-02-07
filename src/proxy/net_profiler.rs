@@ -12,7 +12,7 @@ use dns_lookup::lookup_host;
 use itertools::Itertools;
 use mio::{event::Event, Poll, Token};
 use rand::random;
-use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
+use surge_ping::{Client, ConfigBuilder, ICMP, PingIdentifier, PingSequence};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -472,6 +472,7 @@ impl NetProfiler {
                 }
             }
 
+
             if let Err(err) = self
                 .ipset_sender
                 .as_ref()
@@ -489,6 +490,10 @@ impl NetProfiler {
                     proxy_lost,
                     bypass
                 );
+            }
+
+            if !bypass {
+                self.set.remove(ip);
             }
         });
 
