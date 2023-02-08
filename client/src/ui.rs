@@ -85,7 +85,7 @@ impl MainUi {
             }
         }
 
-        log::info!("cmd:{:?}", cmd);
+        log::debug!("cmd:{:?}", cmd);
 
         match cmd.spawn() {
             Ok(child) => {
@@ -125,7 +125,8 @@ impl MainUi {
                 cmd.arg("--add-route");
             }
 
-            log::info!("{:?}", cmd);
+            log::debug!("{:?}", cmd);
+
             match cmd.spawn() {
                 Ok(child) => {
                     self.dns.replace(child);
