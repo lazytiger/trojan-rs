@@ -13,7 +13,6 @@ pub(crate) struct Config {
     pub pool_size: u32,
     pub poison_dns: String,
     pub trust_dns: String,
-    pub root_dir: String,
 }
 
 #[derive(From, Debug, Display)]
