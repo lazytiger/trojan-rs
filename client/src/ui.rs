@@ -99,42 +99,42 @@ impl MainUi {
         }
     }
 
-    fn check_status(&mut self) {
-        if self.dns.is_none()
-            && self.config.enable_dns
-            && self.wintun.is_some()
-            && self.wintun_start_time.elapsed().as_secs() > 10
-        {
-            let mut cmd = Command::new("bin\\trojan.exe");
-            cmd.arg("-l")
-                .arg("logs\\dns.log")
-                .arg("-L")
-                .arg(self.config.log_level.to_string().as_str())
-                .arg("-a")
-                .arg("127.0.0.1:60080")
-                .arg("-p")
-                .arg(self.config.password.as_str())
-                .arg("dns")
-                .arg("-n")
-                .arg(self.config.iface_name.as_str())
-                .arg("--blocked-domain-list")
-                .arg("config\\domain.txt")
-                .arg("--poisoned-dns")
-                .arg(self.config.poison_dns.as_str());
-            if !self.config.enable_ipset {
-                cmd.arg("--add-route");
-            }
-
-            log::debug!("{:?}", cmd);
-
-            match cmd.spawn() {
-                Ok(child) => {
-                    self.dns.replace(child);
-                    log::info!("dns started");
+    fn check_status(&mut self, ctx: &Context) {
+        if self.dns.is_none() && self.config.enable_dns && self.wintun.is_some() {
+            if self.wintun_start_time.elapsed().as_secs() > 10 {
+                let mut cmd = Command::new("bin\\trojan.exe");
+                cmd.arg("-l")
+                    .arg("logs\\dns.log")
+                    .arg("-L")
+                    .arg(self.config.log_level.to_string().as_str())
+                    .arg("-a")
+                    .arg("127.0.0.1:60080")
+                    .arg("-p")
+                    .arg(self.config.password.as_str())
+                    .arg("dns")
+                    .arg("-n")
+                    .arg(self.config.iface_name.as_str())
+                    .arg("--blocked-domain-list")
+                    .arg("config\\domain.txt")
+                    .arg("--poisoned-dns")
+                    .arg(self.config.poison_dns.as_str());
+                if !self.config.enable_ipset {
+                    cmd.arg("--add-route");
                 }
-                Err(err) => {
-                    log::error!("dns start failed:{}", err);
+
+                log::debug!("{:?}", cmd);
+
+                match cmd.spawn() {
+                    Ok(child) => {
+                        self.dns.replace(child);
+                        log::info!("dns started");
+                    }
+                    Err(err) => {
+                        log::error!("dns start failed:{}", err);
+                    }
                 }
+            } else {
+                ctx.request_repaint();
             }
         }
 
@@ -231,7 +231,7 @@ impl MainUi {
 
 impl App for MainUi {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        self.check_status();
+        self.check_status(ctx);
         TopBottomPanel::bottom("bottom").show(ctx, |ui| {
             if ui
                 .button(
@@ -326,5 +326,9 @@ impl App for MainUi {
                     }
                 });
         });
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.stop();
     }
 }
