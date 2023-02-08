@@ -2,7 +2,7 @@
 
 use eframe::{
     egui::{Context, FontData, FontDefinitions, FontFamily, Vec2},
-    Theme,
+    IconData, Theme,
 };
 
 use crate::ui::MainUi;
@@ -40,20 +40,25 @@ fn setup_custom_fonts(ctx: &Context, data: &'static [u8]) {
 
 fn main() {
     egui_logger::init().unwrap();
+    let icon = image::load_from_memory(include_bytes!("../res/icon.png"))
+        .map(|img| IconData {
+            rgba: img.to_rgba8().to_vec(),
+            width: img.width(),
+            height: img.height(),
+        })
+        .ok();
     let native_options = eframe::NativeOptions {
         initial_window_size: Some(Vec2::new(473.0, 800.0)),
         resizable: false,
         default_theme: Theme::Light,
+        icon_data: icon,
         ..Default::default()
     };
     eframe::run_native(
         "Trojan代理",
         native_options,
         Box::new(|ctx| {
-            setup_custom_fonts(
-                &ctx.egui_ctx,
-                include_bytes!("../../res/STSong.ttf").as_ref(),
-            );
+            setup_custom_fonts(&ctx.egui_ctx, include_bytes!("../res/STSong.ttf").as_ref());
             let mut style = (*ctx.egui_ctx.style()).clone();
             style
                 .text_styles
