@@ -1,5 +1,6 @@
 #![feature(get_mut_unchecked)]
 #![feature(test)]
+#![windows_subsystem = "windows"]
 
 extern crate core;
 
