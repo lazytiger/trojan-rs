@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons"] }
+winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons", "iphlpapi"] }
 widestring = "1.0"
 log = "0.4"
