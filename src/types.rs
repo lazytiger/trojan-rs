@@ -14,7 +14,6 @@ pub enum TrojanError {
     InvalidDnsName(rustls::client::InvalidDnsNameError),
     Webpki(webpki::Error),
     CrossbeamRecv(crossbeam::channel::RecvError),
-    Smoltcp(smoltcp::Error),
     #[from(ignore)]
     NonWindowsPlatform,
     #[from(ignore)]
