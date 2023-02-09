@@ -1,6 +1,6 @@
 #![feature(get_mut_unchecked)]
 #![feature(test)]
-#![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 extern crate core;
 

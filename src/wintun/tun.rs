@@ -9,7 +9,6 @@ use smoltcp::{
     socket::{
         tcp::{Socket as TcpSocket, SocketBuffer},
         udp::{PacketBuffer, PacketMetadata, Socket as UdpSocket},
-        Socket,
     },
     time::Instant,
     wire::{
@@ -33,6 +32,7 @@ pub struct WintunDevice<'a> {
     udp_wakers: Wakers,
     tcp_set: HashSet<IpEndpoint>,
     udp_set: HashSet<IpEndpoint>,
+    handles: HashMap<SocketHandle, (IpEndpoint, bool)>,
     mtu: usize,
 }
 
@@ -46,6 +46,7 @@ impl<'a> WintunDevice<'a> {
             udp_wakers: Wakers::new(),
             tcp_set: HashSet::new(),
             udp_set: HashSet::new(),
+            handles: HashMap::new(),
         }
     }
 
@@ -67,6 +68,7 @@ impl<'a> WintunDevice<'a> {
         socket.set_nagle_enabled(false);
         socket.set_ack_delay(None);
         self.tcp_set.insert(endpoint);
+        self.handles.insert(handle, (endpoint, true));
     }
 
     pub fn ensure_udp_socket(&mut self, endpoint: IpEndpoint) {
@@ -92,33 +94,29 @@ impl<'a> WintunDevice<'a> {
         socket.register_recv_waker(rx);
         socket.register_send_waker(tx);
         self.udp_set.insert(endpoint);
+        self.handles.insert(handle, (endpoint, false));
     }
 
     pub fn remove_socket(&mut self, handle: SocketHandle) {
         let sockets = unsafe { Arc::get_mut_unchecked(&mut self.sockets) };
-        if let None = sockets
-            .iter_mut()
-            .find(|(handle1, _)| handle == *handle1)
-            .map(|(_, socket)| match socket {
-                Socket::Udp(socket) => {
-                    let endpoint = socket.endpoint();
-                    let endpoint = IpEndpoint::new(endpoint.addr.unwrap(), endpoint.port);
-                    self.udp_set.remove(&endpoint);
-                    socket.register_send_waker(self.udp_wakers.get_dummy_waker());
-                    socket.register_recv_waker(self.udp_wakers.get_dummy_waker());
-                    socket.close();
-                }
-                Socket::Tcp(socket) => {
-                    let endpoint = socket.local_endpoint().unwrap();
-                    self.tcp_set.remove(&endpoint);
-                }
-                _ => {}
-            })
-        {
+        if let Some((endpoint, is_tcp)) = self.handles.get(&handle) {
+            let endpoint = endpoint.clone();
+            let is_tcp = *is_tcp;
+            if is_tcp {
+                self.tcp_set.remove(&endpoint);
+            } else {
+                let socket: &mut UdpSocket = sockets.get_mut(handle);
+                socket.register_send_waker(self.udp_wakers.get_dummy_waker());
+                socket.register_recv_waker(self.udp_wakers.get_dummy_waker());
+                socket.close();
+                self.udp_set.remove(&endpoint);
+            }
+        } else {
             log::error!("handle:{} not found in socket set", handle);
         }
 
         sockets.remove(handle);
+        self.handles.remove(&handle);
     }
 
     pub fn get_udp_events(&self) -> HashMap<SocketHandle, Event> {
