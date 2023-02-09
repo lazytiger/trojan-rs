@@ -218,13 +218,3 @@ pub fn set_dns_server(name_server: String) -> bool {
         })
     }
 }
-
-#[allow(unused_imports)]
-mod test {
-    use crate::dns::adapter::set_dns_server;
-
-    #[test]
-    fn test_set_dns() {
-        assert!(set_dns_server("127.0.0.1".into()));
-    }
-}

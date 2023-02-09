@@ -13,6 +13,7 @@ use eframe::{
     },
     App, Frame,
 };
+use wintool::adapter::set_dns_server;
 
 use crate::types::{Config, Result};
 
@@ -175,6 +176,7 @@ impl MainUi {
         if let Some(dns) = &mut self.dns {
             log::error!("dns is killed");
             dns.kill().unwrap();
+            set_dns_server("".into());
         }
         self.wintun.take();
         self.dns.take();
