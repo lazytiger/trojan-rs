@@ -1,9 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::{backtrace::Backtrace, fs::OpenOptions, io::Write};
+
 use eframe::{
     egui::{Context, FontData, FontDefinitions, FontFamily, Vec2},
     IconData, Theme,
 };
+
+use wintool::adapter::set_dns_server;
 
 use crate::ui::MainUi;
 
@@ -39,6 +43,23 @@ fn setup_custom_fonts(ctx: &Context, data: &'static [u8]) {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        let trace = Backtrace::capture();
+        let message = info.to_string();
+        set_dns_server("".into());
+        if let Ok(mut file) = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open("crash.log")
+        {
+            let _ = write!(
+                &mut file,
+                "client crash with error:{}\ntrace:{:?}",
+                message, trace
+            );
+        }
+    }));
     egui_logger::init().unwrap();
     let icon = image::load_from_memory(include_bytes!("../res/icon.png"))
         .map(|img| IconData {
