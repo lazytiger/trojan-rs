@@ -387,9 +387,6 @@ impl Sock5Address {
                 buffer.put_u8(IPV6);
                 buffer.extend_from_slice(v6.as_bytes());
             }
-            _ => {
-                unreachable!()
-            }
         }
         buffer.put_u16(endpoint.port);
     }

@@ -2,13 +2,12 @@ use std::{
     collections::{HashMap, HashSet},
     io::{Error, ErrorKind, Write},
     sync::Arc,
-    task::Waker,
     time::{Duration, Instant},
 };
 
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
-use smoltcp::{iface::SocketHandle, socket::TcpSocket};
+use smoltcp::{iface::SocketHandle, socket::tcp::Socket};
 
 use crate::{
     idle_pool::IdlePool,
@@ -17,11 +16,11 @@ use crate::{
     tls_conn::TlsConn,
     types::{CopyResult, TrojanError},
     utils::copy_stream,
-    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
+    wintun::{tun::WintunDevice, waker::WakerMode, CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX},
 };
 
 pub struct TcpStreamRef<'a, 'b> {
-    socket: &'a mut TcpSocket<'b>,
+    socket: &'a mut Socket<'b>,
 }
 
 impl<'a, 'b> std::io::Read for TcpStreamRef<'a, 'b> {
@@ -31,7 +30,10 @@ impl<'a, 'b> std::io::Read for TcpStreamRef<'a, 'b> {
             match self.socket.recv_slice(buf) {
                 Ok(0) => Err(ErrorKind::WouldBlock.into()),
                 Ok(n) => Ok(n),
-                Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
+                Err(_) => Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    std::io::Error::last_os_error(),
+                )),
             }
         } else if self.socket.is_active() {
             Err(ErrorKind::WouldBlock.into())
@@ -48,7 +50,7 @@ impl<'a, 'b> std::io::Write for TcpStreamRef<'a, 'b> {
             match self.socket.send_slice(buf) {
                 Ok(0) => Err(ErrorKind::WouldBlock.into()),
                 Ok(n) => Ok(n),
-                Err(err) => Err(Error::new(ErrorKind::UnexpectedEof, err)),
+                Err(_) => Err(Error::new(ErrorKind::UnexpectedEof, Error::last_os_error())),
             }
         } else if self.socket.is_active() {
             Err(ErrorKind::WouldBlock.into())
@@ -89,17 +91,9 @@ impl Connection {
         }
     }
 
-    fn close_stream(
-        &mut self,
-        is_local: bool,
-        sockets: &mut SocketSet,
-        poll: &Poll,
-        waker: &Waker,
-    ) {
+    fn close_stream(&mut self, is_local: bool, device: &mut WintunDevice, poll: &Poll) {
         if is_local && !self.lclosed {
-            let socket = sockets.get_socket::<TcpSocket>(self.local);
-            socket.register_recv_waker(waker);
-            socket.register_send_waker(waker);
+            let socket = device.get_tcp_socket_mut(self.local, WakerMode::Dummy);
             //FIXME close should be polled again
             socket.close();
             self.lclosed = true;
@@ -116,59 +110,58 @@ impl Connection {
 
     pub fn do_local(
         &mut self,
-        sockets: &mut SocketSet,
+        device: &mut WintunDevice,
         poll: &Poll,
         event: &crate::wintun::waker::Event,
-        wakers: &mut Wakers,
     ) {
         self.last_active = Instant::now();
         if event.is_readable() {
             log::info!("local readable now");
-            self.local_to_remote(sockets, poll, wakers.get_dummy_waker());
+            self.local_to_remote(device, poll);
         }
         if event.is_writable() {
             log::info!("local writable now");
-            self.remote_to_local(sockets, poll, wakers.get_dummy_waker());
+            self.remote_to_local(device, poll);
         }
-        self.check_half_close(sockets, poll, wakers.get_dummy_waker());
-        self.reregister_local(wakers, sockets);
+        self.check_half_close(device, poll);
+        self.reregister_local(device);
     }
 
-    fn reregister_local(&mut self, wakers: &mut Wakers, sockets: &mut SocketSet) {
+    fn reregister_local(&mut self, device: &mut WintunDevice) {
         if self.lclosed {
             return;
         }
-        let (rx, tx) = wakers.get_wakers(self.local);
-        let socket = sockets.get_socket::<TcpSocket>(self.local);
-        if !self.lbuffer.is_empty() {
-            //local buffer is not empty, should send data later.
-            socket.register_send_waker(tx);
-        }
-        if self.rbuffer.is_empty() && !self.rclosed {
-            //remote buffer is empty, should recv data later.
-            socket.register_recv_waker(rx);
-        }
+        let mode = match (
+            !self.lbuffer.is_empty(),
+            self.rbuffer.is_empty() && !self.rclosed,
+        ) {
+            (true, true) => WakerMode::Both,
+            (true, false) => WakerMode::Send,
+            (false, true) => WakerMode::Recv,
+            (false, false) => WakerMode::None,
+        };
+        device.get_tcp_socket_mut(self.local, mode);
     }
 
-    fn flush_remote(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
+    fn flush_remote(&mut self, device: &mut WintunDevice, poll: &Poll) {
         match self.remote.flush() {
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
                 log::info!("remote connection flush blocked");
             }
             Err(err) => {
                 log::info!("flush data to remote failed:{}", err);
-                self.close_stream(false, sockets, poll, waker);
+                self.close_stream(false, device, poll);
             }
             Ok(()) => log::info!("flush data successfully"),
         }
     }
 
-    fn local_to_remote(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
+    fn local_to_remote(&mut self, device: &mut WintunDevice, poll: &Poll) {
         log::info!("copy local request to remote");
-        let socket = sockets.get_socket::<TcpSocket>(self.local);
+        let socket = device.get_tcp_socket_mut(self.local, WakerMode::None);
         if !self.established {
             if !socket.is_active() {
-                self.close_stream(true, sockets, poll, waker);
+                self.close_stream(true, device, poll);
             }
             return;
         }
@@ -178,36 +171,33 @@ impl Connection {
             Ok(CopyResult::RxBlock) => log::info!("local reading blocked"),
             Err(TrojanError::RxBreak(err)) => {
                 log::info!("local break with error:{:?}", err);
-                self.close_stream(true, sockets, poll, waker)
+                self.close_stream(true, device, poll)
             }
             Err(TrojanError::TxBreak(err)) => {
                 log::info!("remote break with err:{:?}", err);
-                self.close_stream(false, sockets, poll, waker)
+                self.close_stream(false, device, poll)
             }
             _ => unreachable!(),
         }
         if !self.rclosed {
-            self.flush_remote(sockets, poll, waker);
+            self.flush_remote(device, poll);
         }
     }
 
-    pub fn do_remote(
-        &mut self,
-        sockets: &mut SocketSet,
-        poll: &Poll,
-        event: &Event,
-        wakers: &mut Wakers,
-    ) {
+    pub fn do_remote(&mut self, device: &mut WintunDevice, poll: &Poll, event: &Event) {
         self.last_active = Instant::now();
         if event.is_writable() {
             log::info!("remote writable");
             if !self.established {
                 if self.lclosed {
-                    self.close_stream(false, sockets, poll, wakers.get_dummy_waker());
+                    self.close_stream(false, device, poll);
                     return;
                 } else {
                     let mut request = BytesMut::new();
-                    let endpoint = sockets.get_socket::<TcpSocket>(self.local).local_endpoint();
+                    let endpoint = device
+                        .get_tcp_socket_mut(self.local, WakerMode::None)
+                        .local_endpoint()
+                        .unwrap();
                     TrojanRequest::generate_endpoint(&mut request, CONNECT, &endpoint);
                     log::info!("send trojan request {} bytes", request.len());
                     if self.remote.write(request.as_ref()).is_ok() {
@@ -215,26 +205,26 @@ impl Connection {
                         log::info!("connection is ready now");
                     } else {
                         log::warn!("send trojan request failed");
-                        self.close(sockets, poll, wakers.get_dummy_waker());
+                        self.close(device, poll);
                         return;
                     }
                 }
             }
-            self.local_to_remote(sockets, poll, wakers.get_dummy_waker());
+            self.local_to_remote(device, poll);
         }
 
         if event.is_readable() {
             log::info!("remote readable");
-            self.remote_to_local(sockets, poll, wakers.get_dummy_waker());
+            self.remote_to_local(device, poll);
         }
 
-        self.check_half_close(sockets, poll, wakers.get_dummy_waker());
-        self.reregister_local(wakers, sockets);
+        self.check_half_close(device, poll);
+        self.reregister_local(device);
     }
 
-    fn remote_to_local(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
+    fn remote_to_local(&mut self, device: &mut WintunDevice, poll: &Poll) {
         log::info!("copy remote data to local");
-        let socket = sockets.get_socket::<TcpSocket>(self.local);
+        let socket = device.get_tcp_socket_mut(self.local, WakerMode::None);
         let mut local = TcpStreamRef { socket };
         let ret = copy_stream(&mut self.remote, &mut local, &mut self.lbuffer);
         let send_size = socket.send_queue();
@@ -243,50 +233,50 @@ impl Connection {
             Ok(CopyResult::TxBlock) => log::info!("local sending blocked"),
             Err(TrojanError::RxBreak(err)) => {
                 log::info!("remote connection break with:{:?}", err);
-                self.close_stream(false, sockets, poll, waker);
+                self.close_stream(false, device, poll);
             }
             Err(TrojanError::TxBreak(err)) => {
                 log::info!("local connection break with:{:?}", err);
-                self.close_stream(true, sockets, poll, waker)
+                self.close_stream(true, device, poll)
             }
             _ => unreachable!(),
         }
         //smoltcp sending is asynchronous, so send queue should be checked.
         if self.rclosed && !self.lclosed && self.lbuffer.is_empty() && send_size == 0 {
             log::info!("connection remote closed and nothing to send, close local now",);
-            self.close_stream(true, sockets, poll, waker);
+            self.close_stream(true, device, poll);
         }
     }
 
-    pub fn is_closed(&self, sockets: &mut SocketSet) -> bool {
-        let socket = sockets.get_socket::<TcpSocket>(self.local);
-        self.rclosed && matches!(socket.state(), smoltcp::socket::TcpState::Closed)
+    pub fn is_closed(&self, device: &mut WintunDevice) -> bool {
+        let socket = device.get_tcp_socket_mut(self.local, WakerMode::None);
+        self.rclosed && matches!(socket.state(), smoltcp::socket::tcp::State::Closed)
     }
 
-    pub fn abort_local(&self, sockets: &mut SocketSet) {
-        let socket = sockets.get_socket::<TcpSocket>(self.local);
+    pub fn abort_local(&self, device: &mut WintunDevice) {
+        let socket = device.get_tcp_socket_mut(self.local, WakerMode::None);
         socket.abort();
     }
 
-    pub fn close(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
-        self.close_stream(true, sockets, poll, waker);
-        self.close_stream(false, sockets, poll, waker);
+    pub fn close(&mut self, device: &mut WintunDevice, poll: &Poll) {
+        self.close_stream(true, device, poll);
+        self.close_stream(false, device, poll);
     }
 
-    fn check_half_close(&mut self, sockets: &mut SocketSet, poll: &Poll, waker: &Waker) {
+    fn check_half_close(&mut self, device: &mut WintunDevice, poll: &Poll) {
         if self.lclosed && !self.rclosed && self.rbuffer.is_empty() {
             log::info!(
                 "connection:{} local closed and nothing to send, close remote now",
                 self.local
             );
-            self.close_stream(false, sockets, poll, waker);
+            self.close_stream(false, device, poll);
         }
         if self.rclosed && !self.lclosed && self.lbuffer.is_empty() {
             log::info!(
                 "connection:{} remote closed and nothing to send, close local now",
                 self.local
             );
-            self.close_stream(true, sockets, poll, waker);
+            self.close_stream(true, device, poll);
         }
     }
 }
@@ -323,22 +313,15 @@ impl TcpServer {
         pool: &mut IdlePool,
         poll: &Poll,
         resolver: &DnsResolver,
-        wakers: &mut Wakers,
-        sockets: &mut SocketSet,
+        device: &mut WintunDevice,
     ) {
-        for (handle, event) in wakers.get_events().iter() {
+        for (handle, event) in device.get_tcp_events().iter() {
             let handle = *handle;
             log::info!("new request, handle:{}, event:{:?}", handle, event);
-            let socket = sockets.get_socket::<TcpSocket>(handle);
-            let endpoint = socket.local_endpoint();
-            if socket.is_listening() && !self.handle2conns.contains_key(&handle) {
-                log::info!(
-                    "socket:{} {} is still listening, remove now",
-                    handle,
-                    endpoint,
-                );
-                sockets.remove_socket(handle);
-                continue; // Filter unused syn packet
+            let socket = device.get_tcp_socket_mut(handle, WakerMode::None);
+            if socket.is_listening() {
+                device.remove_socket(handle);
+                continue;
             }
             let conn = self.handle2conns.entry(handle).or_insert_with(|| {
                 log::info!("found new tcp connection");
@@ -351,24 +334,18 @@ impl TcpServer {
             self.token2conns
                 .entry(conn.token)
                 .or_insert_with(|| conn.clone());
-            unsafe { Arc::get_mut_unchecked(conn).do_local(sockets, poll, event, wakers) };
-            if conn.is_closed(sockets) {
+            unsafe { Arc::get_mut_unchecked(conn).do_local(device, poll, event) };
+            if conn.is_closed(device) {
                 self.removed.insert(conn.local);
             }
             log::info!("handle:{} is done", handle);
         }
     }
 
-    pub(crate) fn do_remote(
-        &mut self,
-        event: &Event,
-        poll: &Poll,
-        sockets: &mut SocketSet,
-        wakers: &mut Wakers,
-    ) {
+    pub(crate) fn do_remote(&mut self, event: &Event, poll: &Poll, device: &mut WintunDevice) {
         if let Some(conn) = self.token2conns.get_mut(&event.token()) {
-            unsafe { Arc::get_mut_unchecked(conn).do_remote(sockets, poll, event, wakers) };
-            if conn.is_closed(sockets) {
+            unsafe { Arc::get_mut_unchecked(conn).do_remote(device, poll, event) };
+            if conn.is_closed(device) {
                 self.removed.insert(conn.local);
             }
         } else {
@@ -376,13 +353,13 @@ impl TcpServer {
         }
     }
 
-    pub fn remove_closed(&mut self, sockets: &mut SocketSet) {
+    pub fn remove_closed(&mut self, device: &mut WintunDevice) {
         for handle in &self.removed {
             if let Some(conn) = self.handle2conns.get(handle) {
                 let conn = conn.clone();
                 self.handle2conns.remove(handle);
                 self.token2conns.remove(&conn.token);
-                sockets.remove_socket(*handle);
+                device.remove_socket(*handle);
                 log::info!("handle:{} removed", handle);
             } else {
                 log::warn!("handle:{} not found", handle);
@@ -391,13 +368,7 @@ impl TcpServer {
         self.removed.clear();
     }
 
-    pub(crate) fn check_timeout(
-        &mut self,
-        poll: &Poll,
-        now: Instant,
-        sockets: &mut SocketSet,
-        waker: &Waker,
-    ) {
+    pub(crate) fn check_timeout(&mut self, poll: &Poll, now: Instant, device: &mut WintunDevice) {
         log::info!("tcp server check timeout");
         let conns: Vec<_> = self
             .token2conns
@@ -405,7 +376,7 @@ impl TcpServer {
             .filter_map(|(_, conn)| {
                 let elapsed = now - conn.last_active;
                 if conn.lclosed && elapsed > Duration::from_secs(120) {
-                    conn.abort_local(sockets);
+                    conn.abort_local(device);
                     Some(conn.clone())
                 } else if elapsed > Duration::from_secs(3600) {
                     Some(conn.clone())
@@ -416,11 +387,11 @@ impl TcpServer {
             .collect();
         for mut conn in conns {
             unsafe {
-                Arc::get_mut_unchecked(&mut conn).close(sockets, poll, waker);
+                Arc::get_mut_unchecked(&mut conn).close(device, poll);
             }
             self.removed.insert(conn.local);
         }
 
-        self.remove_closed(sockets);
+        self.remove_closed(device);
     }
 }

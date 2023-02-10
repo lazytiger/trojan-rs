@@ -1,4 +1,5 @@
 use derive_more::From;
+use log::SetLoggerError;
 
 #[allow(dead_code)]
 #[derive(From, Debug)]
@@ -13,7 +14,6 @@ pub enum TrojanError {
     InvalidDnsName(rustls::client::InvalidDnsNameError),
     Webpki(webpki::Error),
     CrossbeamRecv(crossbeam::channel::RecvError),
-    Smoltcp(smoltcp::Error),
     #[from(ignore)]
     NonWindowsPlatform,
     #[from(ignore)]
@@ -26,6 +26,7 @@ pub enum TrojanError {
     #[from(ignore)]
     MainAdapterNotFound,
     Notify(notify::Error),
+    SetLogger(SetLoggerError),
 }
 
 #[allow(dead_code)]

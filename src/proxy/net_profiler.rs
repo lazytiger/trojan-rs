@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4},
+    ops::Add,
     sync::{Arc, RwLock},
     thread,
     time::{Duration, Instant},
@@ -40,7 +41,7 @@ impl PingResult {
             && self.remote_ping != u16::MAX
     }
 
-    fn is_bypass(&self) -> bool {
+    fn is_no_bypass(&self) -> bool {
         self.local_ping == u16::MAX - 1 && self.local_lost == u8::MAX - 1
     }
 }
@@ -63,11 +64,12 @@ pub struct NetProfiler {
     check_sender: Option<UnboundedSender<IpAddr>>,
     resp_receiver: Option<UnboundedReceiver<(IpAddr, u16, u8)>>,
     ipset_sender: Option<UnboundedSender<(IpAddr, bool)>>,
-    pub conn: Option<TlsConn>,
-    pub send_buffer: BytesMut,
-    pub recv_buffer: BytesMut,
-    pub timeout: u64,
-    pub local_threshold: u16,
+    conn: Option<TlsConn>,
+    send_buffer: BytesMut,
+    recv_buffer: BytesMut,
+    timeout: Duration,
+    local_threshold: u16,
+    next_check: Instant,
 }
 
 #[derive(Clone)]
@@ -288,7 +290,7 @@ impl NetProfiler {
 
         Self {
             set: HashMap::new(),
-            timeout,
+            timeout: Duration::from_secs(timeout),
             check_sender,
             resp_receiver,
             ipset_sender,
@@ -296,6 +298,7 @@ impl NetProfiler {
             conn: None,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
+            next_check: Instant::now().add(Duration::from_secs(timeout)),
         }
     }
 
@@ -387,7 +390,7 @@ impl NetProfiler {
         }
 
         if let Some(pr) = self.set.get(&ip) {
-            if pr.is_bypass() || pr.last_time.elapsed().as_secs() < self.timeout {
+            if pr.is_no_bypass() || pr.last_time.elapsed() < self.timeout {
                 return;
             }
         }
@@ -427,7 +430,7 @@ impl NetProfiler {
         let mut ips0 = Vec::new();
         for (key, group) in &self.set.iter().group_by(|(_ip, pr)| {
             if pr.is_complete() {
-                if pr.sent || pr.is_bypass() {
+                if pr.sent || pr.is_no_bypass() {
                     2 //already sent
                 } else {
                     1 //should send
@@ -441,7 +444,7 @@ impl NetProfiler {
             } else if key == 0 {
                 ips0 = group
                     .filter_map(|(ip, pr)| {
-                        if !pr.is_bypass() && pr.last_time.elapsed().as_secs() > 100 {
+                        if !pr.is_no_bypass() && pr.last_time.elapsed().as_secs() > 100 {
                             Some(ip.clone())
                         } else {
                             None
@@ -469,6 +472,7 @@ impl NetProfiler {
                 }
             }
 
+
             if let Err(err) = self
                 .ipset_sender
                 .as_ref()
@@ -487,7 +491,28 @@ impl NetProfiler {
                     bypass
                 );
             }
-        })
+        });
+
+        let mut next_check = Instant::now();
+        if self.next_check < next_check {
+            next_check += self.timeout;
+            let mut ips = Vec::new();
+            for (k, v) in &self.set {
+                if v.is_no_bypass() {
+                    continue;
+                }
+                let due_time = v.last_time + self.timeout;
+                if due_time <= self.next_check {
+                    ips.push(k.clone());
+                } else if next_check > due_time {
+                    next_check = due_time;
+                }
+            }
+            self.next_check = next_check;
+            for ip in ips {
+                self.check(ip);
+            }
+        }
     }
 
     fn decode(&mut self) {

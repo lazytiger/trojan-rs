@@ -1,20 +1,20 @@
 use std::{
-    collections::BTreeMap,
     convert::TryInto,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     thread,
+    time::SystemTime,
 };
 
 use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use smoltcp::{
-    iface::{Interface, InterfaceBuilder, Routes},
+    iface::{Config, Interface, SocketSet},
     socket::Socket,
     time::{Duration, Instant},
     wire::{IpAddress, IpCidr, Ipv4Address},
 };
-use wintun::{Adapter, Session};
+use wintun::Adapter;
 
 pub use route::route_add_with_if;
 
@@ -23,7 +23,7 @@ use crate::{
     proxy::IdlePool,
     resolver::DnsResolver,
     types::{Result, TrojanError},
-    wintun::{ipset::IPSet, tcp::TcpServer, tun::WintunInterface, udp::UdpServer, waker::Wakers},
+    wintun::{ipset::IPSet, tcp::TcpServer, tun::WintunDevice, udp::UdpServer},
     OPTIONS,
 };
 
@@ -33,8 +33,6 @@ mod tcp;
 mod tun;
 mod udp;
 mod waker;
-
-pub(crate) type SocketSet<'a> = Interface<'a, WintunInterface>;
 
 /// Token used for DNS resolver
 const RESOLVER: usize = 1;
@@ -88,19 +86,22 @@ fn prepare_idle_pool(poll: &Poll, resolver: &DnsResolver) -> Result<IdlePool> {
     Ok(pool)
 }
 
-fn prepare_device<'a>(session: Arc<Session>) -> Interface<'a, WintunInterface> {
-    let ip_addrs = [IpCidr::new(IpAddress::v4(0, 0, 0, 1), 0)];
-
-    let mut routes = Routes::new(BTreeMap::new());
-    routes
+fn prepare_device(device: &mut WintunDevice) -> Interface {
+    let mut config = Config::default();
+    config.random_seed = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut interface = Interface::new(config, device);
+    interface.set_any_ip(true);
+    interface
+        .routes_mut()
         .add_default_ipv4_route(Ipv4Address::new(0, 0, 0, 1))
         .unwrap();
-    let interface =
-        InterfaceBuilder::new(WintunInterface::new(session, OPTIONS.wintun_args().mtu), [])
-            .any_ip(true)
-            .ip_addrs(ip_addrs)
-            .routes(routes)
-            .finalize();
+
+    interface.update_ip_addrs(|ips| {
+        ips.push(IpCidr::new(IpAddress::v4(0, 0, 0, 1), 0)).unwrap();
+    });
     interface
 }
 
@@ -141,7 +142,9 @@ pub fn run() -> Result<()> {
     let mut udp_server = UdpServer::new();
     let mut tcp_server = TcpServer::new();
 
-    let mut interface = prepare_device(session);
+    let mut sockets = Arc::new(SocketSet::new([]));
+    let mut device = WintunDevice::new(session.clone(), OPTIONS.wintun_args().mtu, sockets.clone());
+    let mut interface = prepare_device(&mut device);
 
     while get_adapter_ip(OPTIONS.wintun_args().name.as_str()).is_none() {
         thread::sleep(std::time::Duration::new(1, 0));
@@ -155,22 +158,15 @@ pub fn run() -> Result<()> {
     let check_duration = std::time::Duration::new(60, 0);
     let mut now = Instant::now();
 
-    let mut udp_wakers = Wakers::new();
-    let mut tcp_wakers = Wakers::new();
-    let sockets: *mut Interface<WintunInterface> = unsafe { std::mem::transmute(&mut interface) };
-    interface
-        .device_mut()
-        .init(sockets, &mut tcp_wakers, &mut udp_wakers);
     loop {
-        if let Err(err) = interface.poll(now) {
-            log::info!("interface error:{}", err);
+        let sockets = unsafe { Arc::get_mut_unchecked(&mut sockets) };
+        if interface.poll(now, &mut device, sockets) {
+            udp_server.do_local(&mut pool, &poll, &resolver, &mut device);
+            tcp_server.do_local(&mut pool, &poll, &resolver, &mut device);
         }
 
-        udp_server.do_local(&mut pool, &poll, &resolver, &mut udp_wakers, &mut interface);
-        tcp_server.do_local(&mut pool, &poll, &resolver, &mut tcp_wakers, &mut interface);
-
         now = Instant::now();
-        let timeout = interface.poll_delay(now).or(timeout);
+        let timeout = interface.poll_delay(now, sockets).or(timeout);
         poll.poll(
             &mut events,
             timeout.map(|d| std::time::Duration::from_millis(d.total_millis())),
@@ -186,44 +182,47 @@ pub fn run() -> Result<()> {
                     pool.ready(event, &poll);
                 }
                 i if i % CHANNEL_CNT == CHANNEL_UDP => {
-                    udp_server.do_remote(event, &poll, &mut interface);
+                    udp_server.do_remote(event, &poll, &mut device);
                 }
                 _ => {
-                    tcp_server.do_remote(event, &poll, &mut interface, &mut tcp_wakers);
+                    tcp_server.do_remote(event, &poll, &mut device);
                 }
             }
         }
 
-        tcp_server.remove_closed(&mut interface);
+        tcp_server.remove_closed(&mut device);
         udp_server.remove_closed();
 
         let now = std::time::Instant::now();
         if now - last_check_time > check_duration {
-            tcp_server.check_timeout(&poll, now, &mut interface, tcp_wakers.get_dummy_waker());
-            let sockets_count = interface.sockets().fold(0, |count, (handle, socket)| {
-                if let Socket::Tcp(socket) = socket {
-                    log::info!(
-                        "tcp socket:{} {} {} <-> {}",
-                        handle,
-                        socket.state(),
-                        socket.remote_endpoint(),
-                        socket.local_endpoint()
-                    );
-                    count + 1
-                } else {
-                    count
-                }
-            });
-            log::info!("total tcp sockets count:{}", sockets_count);
-            udp_server.check_timeout(now, &mut interface, udp_wakers.get_dummy_waker());
-            let sockets_count = interface.sockets().fold(0, |count, (_, socket)| {
-                if matches!(socket, Socket::Udp(_)) {
-                    count + 1
-                } else {
-                    count
-                }
-            });
-            log::info!("total udp sockets count:{}", sockets_count);
+            tcp_server.check_timeout(&poll, now, &mut device);
+            udp_server.check_timeout(now, &mut device);
+
+            let (tcp_count, udp_count) = sockets.iter().fold(
+                (0, 0),
+                |(mut tcp_count, mut udp_count), (handle, socket)| {
+                    match socket {
+                        Socket::Udp(socket) => {
+                            log::info!("udp socket:{} {:?}", handle, socket.endpoint(),);
+                            udp_count += 1;
+                        }
+                        Socket::Tcp(socket) => {
+                            log::info!(
+                                "tcp socket:{} {} {:?} <-> {:?}",
+                                handle,
+                                socket.state(),
+                                socket.remote_endpoint(),
+                                socket.local_endpoint()
+                            );
+                            tcp_count += 1;
+                        }
+                        _ => {}
+                    }
+                    (tcp_count, udp_count)
+                },
+            );
+            log::info!("total tcp sockets count:{}", tcp_count);
+            log::info!("total udp sockets count:{}", udp_count);
             pool.check_timeout(&poll);
             last_check_time = now;
         }

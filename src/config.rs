@@ -1,5 +1,6 @@
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::Path,
     thread::sleep,
     time::Duration,
 };
@@ -362,7 +363,21 @@ impl Opts {
     }
 }
 
-pub fn setup_logger(logfile: &str, level: u8) {
+pub fn setup_logger(logfile: &str, level: u8) -> crate::types::Result<()> {
+    let path = Path::new(logfile);
+    if path.exists() {
+        let mut suffix = 1;
+        loop {
+            let new_file = logfile.to_string() + "." + suffix.to_string().as_str();
+            let path = Path::new(new_file.as_str());
+            if !path.exists() {
+                std::fs::rename(logfile, new_file.as_str())?;
+                break;
+            } else {
+                suffix += 1;
+            }
+        }
+    }
     let level = match level {
         0x00 => log::LevelFilter::Trace,
         0x01 => log::LevelFilter::Debug,
@@ -395,7 +410,8 @@ pub fn setup_logger(logfile: &str, level: u8) {
     } else {
         builder = builder.chain(std::io::stdout());
     }
-    builder.apply().unwrap();
+    builder.apply()?;
+    Ok(())
 }
 
 lazy_static::lazy_static! {
