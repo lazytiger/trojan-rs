@@ -13,6 +13,7 @@ use eframe::{
     },
     App, Frame,
 };
+
 use wintool::adapter::set_dns_server;
 
 use crate::types::{Config, Result};
@@ -156,6 +157,9 @@ impl MainUi {
         if let Some(dns) = &mut self.dns {
             if let Ok(None) = dns.try_wait() {
             } else {
+                if !set_dns_server("".into()) {
+                    log::error!("reset dns failed");
+                }
                 let err = dns
                     .stderr
                     .take()
@@ -170,18 +174,13 @@ impl MainUi {
 
     fn stop(&mut self) {
         if let Some(wintun) = &mut self.wintun {
-            wintun.kill().unwrap();
+            let _ = wintun.kill();
             log::error!("wintun is killed");
         }
         if let Some(dns) = &mut self.dns {
             log::error!("dns is killed");
-            dns.kill().unwrap();
-            if !set_dns_server("".into()) {
-                log::error!("reset dns failed");
-            }
+            let _ = dns.kill();
         }
-        self.wintun.take();
-        self.dns.take();
     }
 
     pub(crate) fn get_log_level(level: u8) -> &'static str {
