@@ -10,10 +10,11 @@ use winapi::{
 
 use server::DnsServer;
 
-pub use crate::dns::adapter::{get_adapter_ip, get_main_adapter_gwif, set_dns_server};
-use crate::{dns::adapter::get_adapter_index, types::Result, OPTIONS};
+use crate::{types::Result, OPTIONS};
+pub use wintool::adapter::{
+    get_adapter_index, get_adapter_ip, get_main_adapter_gwif, set_dns_server,
+};
 
-mod adapter;
 mod domain;
 mod server;
 

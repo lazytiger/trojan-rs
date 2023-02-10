@@ -2,13 +2,16 @@ use std::{
     collections::{HashMap, HashSet},
     io::{ErrorKind, Write},
     sync::Arc,
-    task::Waker,
     time::{Duration, Instant},
 };
 
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
-use smoltcp::{iface::SocketHandle, socket::UdpSocket, wire::IpEndpoint, Error};
+use smoltcp::{
+    iface::SocketHandle,
+    socket::udp::{RecvError, SendError, Socket},
+    wire::IpEndpoint,
+};
 
 use crate::{
     idle_pool::IdlePool,
@@ -16,7 +19,7 @@ use crate::{
     resolver::DnsResolver,
     tls_conn::TlsConn,
     utils::{read_once, send_all},
-    wintun::{waker::Wakers, SocketSet, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
+    wintun::{tun::WintunDevice, waker::WakerMode, CHANNEL_CNT, CHANNEL_UDP, MAX_INDEX, MIN_INDEX},
     OPTIONS,
 };
 
@@ -33,7 +36,7 @@ fn next_token() -> Token {
 }
 
 pub struct UdpSocketRef<'a, 'b> {
-    socket: &'a mut UdpSocket<'b>,
+    socket: &'a mut Socket<'b>,
     endpoint: Option<IpEndpoint>,
 }
 
@@ -44,8 +47,7 @@ impl<'a, 'b> std::io::Read for UdpSocketRef<'a, 'b> {
                 self.endpoint.replace(endpoint);
                 Ok(n)
             }
-            Err(Error::Exhausted) => Err(ErrorKind::WouldBlock.into()),
-            Err(err) => Err(std::io::Error::new(ErrorKind::UnexpectedEof, err)),
+            Err(RecvError::Exhausted) => Err(ErrorKind::WouldBlock.into()),
         }
     }
 }
@@ -55,8 +57,11 @@ impl<'a, 'b> std::io::Write for UdpSocketRef<'a, 'b> {
         let endpoint = self.endpoint.unwrap();
         match self.socket.send_slice(buf, endpoint) {
             Ok(()) => Ok(buf.len()),
-            Err(Error::Exhausted) => Err(ErrorKind::WouldBlock.into()),
-            Err(err) => Err(std::io::Error::new(ErrorKind::UnexpectedEof, err)),
+            Err(SendError::BufferFull) => Err(ErrorKind::WouldBlock.into()),
+            Err(SendError::Unaddressable) => Err(std::io::Error::new(
+                ErrorKind::AddrNotAvailable,
+                std::io::Error::last_os_error(),
+            )),
         }
     }
 
@@ -96,7 +101,7 @@ impl Connection {
         self.local_to_remote(poll, header, body);
     }
 
-    fn do_remote(&mut self, poll: &Poll, socket: &mut UdpSocket, event: &Event) {
+    fn do_remote(&mut self, poll: &Poll, socket: &mut Socket, event: &Event) {
         self.last_remote = Instant::now();
         if event.is_writable() {
             if !self.established {
@@ -198,7 +203,7 @@ impl Connection {
         self.flush_remote(poll);
     }
 
-    fn remote_to_local(&mut self, socket: &mut UdpSocket, poll: &Poll) {
+    fn remote_to_local(&mut self, socket: &mut Socket, poll: &Poll) {
         let mut socket = UdpSocketRef {
             socket,
             endpoint: Some(self.endpoint),
@@ -281,7 +286,7 @@ impl UdpServer {
         }
     }
 
-    pub fn check_timeout(&mut self, now: Instant, sockets: &mut SocketSet, waker: &Waker) {
+    pub fn check_timeout(&mut self, now: Instant, device: &mut WintunDevice) {
         let conns: Vec<_> = self
             .handles
             .iter()
@@ -299,12 +304,7 @@ impl UdpServer {
             .collect();
 
         for handle in conns {
-            let socket = sockets.get_socket::<UdpSocket>(handle);
-            socket.register_send_waker(waker);
-            socket.register_recv_waker(waker);
-            socket.close();
-            sockets.remove_socket(handle);
-
+            device.remove_socket(handle);
             self.handles.remove(&handle);
         }
     }
@@ -314,13 +314,10 @@ impl UdpServer {
         pool: &mut IdlePool,
         poll: &Poll,
         resolver: &DnsResolver,
-        wakers: &mut Wakers,
-        sockets: &mut SocketSet,
+        device: &mut WintunDevice,
     ) {
-        for (handle, _) in wakers.get_events().iter() {
-            let socket = sockets.get_socket::<UdpSocket>(*handle);
-            let (rx_waker, _) = wakers.get_wakers(*handle);
-            socket.register_recv_waker(rx_waker);
+        for (handle, _) in device.get_udp_events().iter() {
+            let socket = device.get_udp_socket_mut(*handle, WakerMode::Recv);
             let dst_endpoint = socket.endpoint();
             let info = self
                 .handles
@@ -329,7 +326,11 @@ impl UdpServer {
             info.0 = Instant::now();
             while let Ok((data, src_endpoint)) = socket.recv() {
                 self.buffer.clear();
-                UdpAssociate::generate_endpoint(&mut self.buffer, &dst_endpoint, data.len() as u16);
+                UdpAssociate::generate_endpoint(
+                    &mut self.buffer,
+                    &IpEndpoint::new(dst_endpoint.addr.unwrap(), dst_endpoint.port),
+                    data.len() as u16,
+                );
                 //self.buffer.extend_from_slice(data);
                 log::info!(
                     "got udp request from {} to {} with {} bytes",
@@ -373,14 +374,14 @@ impl UdpServer {
         }
     }
 
-    pub fn do_remote(&mut self, event: &Event, poll: &Poll, sockets: &mut SocketSet) {
+    pub fn do_remote(&mut self, event: &Event, poll: &Poll, device: &mut WintunDevice) {
         if let Some(conn) = self.token2conns.get_mut(&event.token()) {
             log::debug!(
                 "remote event for token:{} - handle:{}",
                 event.token().0,
                 conn.local
             );
-            let socket = sockets.get_socket::<UdpSocket>(conn.local);
+            let socket = device.get_udp_socket_mut(conn.local, WakerMode::None);
             unsafe {
                 Arc::get_mut_unchecked(conn).do_remote(poll, socket, event);
             }

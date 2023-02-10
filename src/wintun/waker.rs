@@ -98,3 +98,11 @@ struct DummyWaker;
 impl Wake for DummyWaker {
     fn wake(self: Arc<Self>) {}
 }
+
+pub enum WakerMode {
+    Recv,
+    Send,
+    Both,
+    None,
+    Dummy,
+}
