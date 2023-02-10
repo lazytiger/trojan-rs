@@ -173,7 +173,10 @@ fn get_error_message(err_code: u32) -> String {
 pub fn set_dns_server(name_server: String) -> bool {
     unsafe {
         get_adapters(|adapter| {
-            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET {
+            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET
+                && adapter.Type != ipifcons::IF_TYPE_IEEE80211
+                && adapter.Type != ipifcons::IF_TYPE_IEEE80212
+            {
                 return false;
             }
             let ip = get_string(&adapter.GatewayList.IpAddress.String);

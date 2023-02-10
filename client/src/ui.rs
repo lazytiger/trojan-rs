@@ -176,7 +176,9 @@ impl MainUi {
         if let Some(dns) = &mut self.dns {
             log::error!("dns is killed");
             dns.kill().unwrap();
-            set_dns_server("".into());
+            if !set_dns_server("".into()) {
+                log::error!("reset dns failed");
+            }
         }
         self.wintun.take();
         self.dns.take();
@@ -331,6 +333,7 @@ impl App for MainUi {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        println!("stop client now");
         self.stop();
     }
 }

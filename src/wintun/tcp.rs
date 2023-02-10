@@ -318,6 +318,11 @@ impl TcpServer {
         for (handle, event) in device.get_tcp_events().iter() {
             let handle = *handle;
             log::info!("new request, handle:{}, event:{:?}", handle, event);
+            let socket = device.get_tcp_socket_mut(handle, WakerMode::None);
+            if socket.is_listening() {
+                device.remove_socket(handle);
+                continue;
+            }
             let conn = self.handle2conns.entry(handle).or_insert_with(|| {
                 log::info!("found new tcp connection");
                 let token = next_token();
