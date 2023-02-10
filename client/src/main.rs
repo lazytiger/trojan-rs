@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{backtrace::Backtrace, fs::OpenOptions, io::Write};
+use backtrace::Backtrace;
+use std::{fs::OpenOptions, io::Write};
 
 use eframe::{
     egui::{Context, FontData, FontDefinitions, FontFamily, Vec2},
@@ -44,7 +45,7 @@ fn setup_custom_fonts(ctx: &Context, data: &'static [u8]) {
 
 fn main() {
     std::panic::set_hook(Box::new(|info| {
-        let trace = Backtrace::capture();
+        let trace = Backtrace::new();
         let message = info.to_string();
         set_dns_server("".into());
         if let Ok(mut file) = OpenOptions::new()

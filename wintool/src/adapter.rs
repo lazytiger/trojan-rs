@@ -109,7 +109,8 @@ where
     let mut buffer_length: u32 = 0;
     let result = iphlpapi::GetAdaptersInfo(std::ptr::null_mut(), &mut buffer_length as PULONG);
     if result != winerror::NOERROR as ULONG && result != winerror::ERROR_BUFFER_OVERFLOW {
-        panic!("{}", get_error_message(result));
+        log::error!("{}", get_error_message(result));
+        return false;
     }
     let mut buffer = vec![0u8; buffer_length as usize];
     let result = iphlpapi::GetAdaptersInfo(
@@ -117,7 +118,8 @@ where
         &mut buffer_length as PULONG,
     );
     if result != winerror::NOERROR as ULONG && result != winerror::ERROR_BUFFER_OVERFLOW {
-        panic!("{}", get_error_message(result));
+        log::error!("{}", get_error_message(result));
+        return false;
     }
     let mut info = buffer.as_ptr() as *const IP_ADAPTER_INFO;
     let mut ret = false;
