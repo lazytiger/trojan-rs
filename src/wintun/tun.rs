@@ -94,11 +94,11 @@ impl<'a> WintunDevice<'a> {
             .find(|(h, _)| *h == handle)
             .map(|(_, socket)| {
                 if let Socket::Udp(socket) = socket {
+                    let endpoint =
+                        IpEndpoint::new(socket.endpoint().addr.unwrap(), socket.endpoint().port);
                     socket.register_send_waker(self.udp_wakers.get_dummy_waker());
                     socket.register_recv_waker(self.udp_wakers.get_dummy_waker());
                     socket.close();
-                    let endpoint =
-                        IpEndpoint::new(socket.endpoint().addr.unwrap(), socket.endpoint().port);
                     self.udp_set.remove(&endpoint);
                 }
             })
