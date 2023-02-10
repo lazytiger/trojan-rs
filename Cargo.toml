@@ -27,7 +27,6 @@ derive_more = "0.99"
 libloading = "0.7"
 crossbeam = "0.8"
 trust-dns-proto = "0.22"
-winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons"] }
 widestring = "1.0"
 itertools = "0.10"
 smoltcp = { version = "0.9" }
@@ -45,6 +44,7 @@ env_logger = "0.10"
 [target.'cfg(windows)'.dependencies]
 wintun = "0.2"
 wintool = { path = "wintool" }
+winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons"] }
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.3"
