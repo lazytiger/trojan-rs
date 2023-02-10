@@ -104,6 +104,7 @@ impl MainUi {
     fn check_status(&mut self, ctx: &Context) {
         if self.dns.is_none() && self.config.enable_dns && self.wintun.is_some() {
             if self.wintun_start_time.elapsed().as_secs() > 10 {
+                let listen_addr = self.config.listen_dns.clone() + ":53";
                 let mut cmd = Command::new("bin\\trojan.exe");
                 cmd.arg("-l")
                     .arg("logs\\dns.log")
@@ -119,7 +120,9 @@ impl MainUi {
                     .arg("--blocked-domain-list")
                     .arg("config\\domain.txt")
                     .arg("--poisoned-dns")
-                    .arg(self.config.poison_dns.as_str());
+                    .arg(self.config.poison_dns.as_str())
+                    .arg("--dns-listen-address")
+                    .arg(listen_addr.as_str());
                 if !self.config.enable_ipset {
                     cmd.arg("--add-route");
                 }
@@ -323,6 +326,10 @@ impl App for MainUi {
                     ui.end_row();
 
                     if self.config.enable_dns {
+                        ui.label("DNS监听地址：");
+                        ui.text_edit_singleline(&mut self.config.listen_dns);
+                        ui.end_row();
+
                         ui.label("信任DNS服务器：");
                         ui.text_edit_singleline(&mut self.config.trust_dns);
                         ui.end_row();
