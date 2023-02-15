@@ -92,14 +92,22 @@ impl<'a> WintunDevice<'a> {
         if let None = sockets
             .iter_mut()
             .find(|(h, _)| *h == handle)
-            .map(|(_, socket)| {
-                if let Socket::Udp(socket) = socket {
+            .map(|(_, socket)| match socket {
+                Socket::Udp(socket) => {
                     let endpoint =
                         IpEndpoint::new(socket.endpoint().addr.unwrap(), socket.endpoint().port);
                     socket.register_send_waker(self.udp_wakers.get_dummy_waker());
                     socket.register_recv_waker(self.udp_wakers.get_dummy_waker());
                     socket.close();
                     self.udp_set.remove(&endpoint);
+                }
+                Socket::Tcp(socket) => {
+                    socket.register_send_waker(self.tcp_wakers.get_dummy_waker());
+                    socket.register_recv_waker(self.tcp_wakers.get_dummy_waker());
+                    socket.close();
+                }
+                _ => {
+                    log::error!("unexpected socket type:{:?}", socket);
                 }
             })
         {
@@ -173,8 +181,8 @@ impl<'a> WintunDevice<'a> {
 }
 
 impl<'b> Device for WintunDevice<'b> {
-    type RxToken<'a> = RxToken where Self:'a;
-    type TxToken<'a> = TxToken where Self:'a;
+    type RxToken<'a> = RxToken where Self: 'a;
+    type TxToken<'a> = TxToken where Self: 'a;
 
     fn receive(&mut self, _: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         self.session
