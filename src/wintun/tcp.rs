@@ -94,7 +94,6 @@ impl Connection {
     fn close_stream(&mut self, is_local: bool, device: &mut WintunDevice, poll: &Poll) {
         if is_local && !self.lclosed {
             let socket = device.get_tcp_socket_mut(self.local, WakerMode::Dummy);
-            //FIXME close should be polled again
             socket.close();
             self.lclosed = true;
         } else if !is_local && !self.rclosed {
@@ -320,7 +319,10 @@ impl TcpServer {
             log::info!("new request, handle:{}, event:{:?}", handle, event);
             let socket = device.get_tcp_socket_mut(handle, WakerMode::None);
             if socket.is_listening() {
-                device.remove_socket(handle);
+                if let Some(conn) = self.handle2conns.get_mut(&handle) {
+                    unsafe { Arc::get_mut_unchecked(conn) }.close(device, poll);
+                }
+                self.removed.insert(handle);
                 continue;
             }
             let conn = self.handle2conns.entry(handle).or_insert_with(|| {
