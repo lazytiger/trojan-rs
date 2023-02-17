@@ -361,11 +361,11 @@ impl TcpServer {
                 let conn = conn.clone();
                 self.handle2conns.remove(handle);
                 self.token2conns.remove(&conn.token);
-                device.remove_socket(*handle);
                 log::info!("handle:{} removed", handle);
             } else {
-                log::warn!("handle:{} not found", handle);
+                log::info!("handle:{} not found in tcp server", handle);
             }
+            device.remove_socket(*handle);
         }
         self.removed.clear();
     }

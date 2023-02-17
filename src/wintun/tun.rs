@@ -111,7 +111,7 @@ impl<'a> WintunDevice<'a> {
                 }
             })
         {
-            log::error!("udp socket:{} not found", handle);
+            log::error!("socket:{} not found", handle);
         }
 
         sockets.remove(handle);
