@@ -124,7 +124,11 @@ pub fn run() -> Result<()> {
     let mut tcp_server = TcpServer::new(tcp_listener);
     let mut udp_server = UdpServer::new(udp_listener);
 
-    start_check_server(OPTIONS.proxy_args().hostname.clone(), 150);
+    start_check_server(
+        OPTIONS.proxy_args().hostname.clone(),
+        150,
+        OPTIONS.proxy_args().bypass_timeout,
+    );
 
     let mut events = Events::with_capacity(1024);
 

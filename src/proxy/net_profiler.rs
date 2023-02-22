@@ -12,6 +12,7 @@ use dns_lookup::lookup_host;
 use itertools::Itertools;
 use mio::{event::Event, Poll, Token};
 use rand::random;
+use ringbuf::{HeapRb, Rb};
 use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
     runtime::{Builder, Runtime},
@@ -207,10 +208,12 @@ async fn do_check(
     }
 }
 
-async fn check_server(host: String, timeout: u64) {
+async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
     let config = ConfigBuilder::default().kind(ICMP::V4).build();
     let client = Client::new(&config).unwrap();
     let mut interval = tokio::time::interval(Duration::from_secs(timeout));
+    let size = (ip_timeout / timeout + 1) as usize;
+    let mut rb = HeapRb::new(size);
     loop {
         interval.tick().await;
         let ip = if let Ok(Some(ip)) =
@@ -238,19 +241,32 @@ async fn check_server(host: String, timeout: u64) {
             avg_cost,
             100 - received
         );
+        rb.push_overwrite(Condition {
+            lost: (100 - received) as u8,
+            ping: avg_cost as u16,
+        });
+        let mut total_ping = 0;
+        let mut total_lost = 0;
+        for cond in rb.iter() {
+            total_ping += cond.ping as usize;
+            total_lost += cond.lost as usize;
+        }
+        let avg_ping = total_ping / rb.len();
+        let avg_lost = total_lost / rb.len();
+
         if let Err(err) = CONDITION.write().map(|mut cond| {
-            cond.lost = (100 - received) as u8;
-            cond.ping = avg_cost as u16;
+            cond.lost = avg_lost as u8;
+            cond.ping = avg_ping as u16;
         }) {
             log::error!("write on condition failed:{}", err);
         }
     }
 }
 
-pub fn start_check_server(host: String, timeout: u64) {
+pub fn start_check_server(host: String, timeout: u64, ip_timeout: u64) {
     thread::spawn(move || {
         let runtime = Runtime::new().unwrap();
-        runtime.block_on(check_server(host, timeout));
+        runtime.block_on(check_server(host, timeout, ip_timeout));
     });
 }
 
