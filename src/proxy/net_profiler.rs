@@ -69,7 +69,7 @@ pub struct NetProfiler {
     send_buffer: BytesMut,
     recv_buffer: BytesMut,
     timeout: Duration,
-    local_threshold: u16,
+    ping_threshold: u16,
     next_check: Instant,
 }
 
@@ -310,7 +310,7 @@ impl NetProfiler {
             check_sender,
             resp_receiver,
             ipset_sender,
-            local_threshold,
+            ping_threshold: local_threshold,
             conn: None,
             send_buffer: BytesMut::new(),
             recv_buffer: BytesMut::new(),
@@ -482,8 +482,12 @@ impl NetProfiler {
             let proxy_ping = cond.ping + pr.remote_ping;
             let proxy_lost =
                 100 - ((100.0 - cond.lost as f32) * (100.0 - pr.remote_lost as f32) / 100.0) as u8;
-            if pr.local_ping < proxy_ping + 5 && pr.local_lost < proxy_lost + 2 {
-                if pr.local_ping > self.local_threshold {
+
+            // Blocked ip may be faked, so the ping value may be good. This is the case we should exclude first.
+            if pr.remote_ping < self.ping_threshold && pr.local_ping < self.ping_threshold {
+                bypass = false;
+            } else {
+                if pr.local_ping < proxy_ping + 5 && pr.local_lost < proxy_lost + 2 {
                     bypass = true;
                 }
             }
@@ -498,10 +502,12 @@ impl NetProfiler {
                 log::error!("send {} to ipset routine failed:{}", ip, err);
             } else {
                 log::error!(
-                    "ip:{:?}, local_ping:{}, local_lost:{}, proxy_ping:{}, proxy_lost:{}, bypass:{}",
+                    "ip:{:?}, local_ping:{}, local_lost:{}, remote_ping:{}, remote_lost:{}, proxy_ping:{}, proxy_lost:{}, bypass:{}",
                     ip,
                     pr.local_ping,
                     pr.local_lost,
+                    pr.remote_ping,
+                    pr.remote_lost,
                     proxy_ping,
                     proxy_lost,
                     bypass

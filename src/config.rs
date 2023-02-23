@@ -169,8 +169,9 @@ pub struct ProxyArgs {
     #[clap(short = 'i', long, default_value = "byplist")]
     pub bypass_ipset: String,
 
-    #[clap(long, default_value = "0")]
-    pub local_threshold: u16,
+    /// ping time below this should be considered in proxy side
+    #[clap(long, default_value = "70")]
+    pub ping_threshold: u16,
 }
 
 #[derive(Parser)]

@@ -145,7 +145,7 @@ pub fn run() -> Result<()> {
     let mut net_profiler = NetProfiler::new(
         OPTIONS.proxy_args().enable_bypass,
         OPTIONS.proxy_args().bypass_timeout,
-        OPTIONS.proxy_args().local_threshold,
+        OPTIONS.proxy_args().ping_threshold,
         OPTIONS.proxy_args().bypass_ipset.clone(),
         OPTIONS.proxy_args().no_bypass_ipset.clone(),
     );
