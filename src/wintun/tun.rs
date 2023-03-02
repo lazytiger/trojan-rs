@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Instant,
 };
 
 use smoltcp::{
@@ -11,7 +12,6 @@ use smoltcp::{
         udp::{PacketBuffer, PacketMetadata, Socket as UdpSocket},
         Socket,
     },
-    time::Instant,
     wire::{
         IpAddress, IpEndpoint, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
     },
@@ -26,6 +26,22 @@ use crate::{
     OPTIONS,
 };
 
+pub struct Traffic {
+    rx_bytes: usize,
+    tx_bytes: usize,
+    begin_traffic: Instant,
+}
+
+impl Traffic {
+    fn new() -> Traffic {
+        Self {
+            rx_bytes: 0,
+            tx_bytes: 0,
+            begin_traffic: Instant::now(),
+        }
+    }
+}
+
 pub struct WintunDevice<'a> {
     session: Arc<Session>,
     sockets: Arc<SocketSet<'a>>,
@@ -33,6 +49,7 @@ pub struct WintunDevice<'a> {
     udp_wakers: Wakers,
     udp_set: HashSet<IpEndpoint>,
     mtu: usize,
+    traffic: Traffic,
 }
 
 impl<'a> WintunDevice<'a> {
@@ -41,6 +58,7 @@ impl<'a> WintunDevice<'a> {
             session,
             mtu,
             sockets,
+            traffic: Traffic::new(),
             tcp_wakers: Wakers::new(),
             udp_wakers: Wakers::new(),
             udp_set: HashSet::new(),
@@ -178,22 +196,37 @@ impl<'a> WintunDevice<'a> {
         }
         unsafe { std::mem::transmute(socket) }
     }
+
+    pub fn calculate_speed(&mut self) -> (f64, f64) {
+        let time = self.traffic.begin_traffic.elapsed().as_secs_f64();
+        let rx_speed = self.traffic.rx_bytes as f64 / time / 1024.0 / 1024.0;
+        let tx_speed = self.traffic.tx_bytes as f64 / time / 1024.0 / 1024.0;
+        self.traffic.rx_bytes = 0;
+        self.traffic.tx_bytes = 0;
+        self.traffic.begin_traffic = Instant::now();
+        (rx_speed, tx_speed)
+    }
 }
 
 impl<'b> Device for WintunDevice<'b> {
     type RxToken<'a> = RxToken where Self: 'a;
-    type TxToken<'a> = TxToken where Self: 'a;
+    type TxToken<'a> = TxToken<'a> where Self: 'a;
 
-    fn receive(&mut self, _: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+    fn receive(
+        &mut self,
+        _: smoltcp::time::Instant,
+    ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         self.session
             .try_receive()
             .ok()
             .map(|packet| {
                 packet.map(|packet| {
+                    self.traffic.rx_bytes += packet.bytes().len();
                     preprocess_packet(&packet, self);
                     let rx = RxToken { packet };
                     let tx = TxToken {
                         session: self.session.clone(),
+                        traffic: &mut self.traffic,
                     };
                     (rx, tx)
                 })
@@ -201,9 +234,10 @@ impl<'b> Device for WintunDevice<'b> {
             .unwrap_or(None)
     }
 
-    fn transmit(&mut self, _: Instant) -> Option<Self::TxToken<'_>> {
+    fn transmit(&mut self, _: smoltcp::time::Instant) -> Option<Self::TxToken<'_>> {
         Some(TxToken {
             session: self.session.clone(),
+            traffic: &mut self.traffic,
         })
     }
 
@@ -264,8 +298,9 @@ fn preprocess_packet(packet: &Packet, device: &mut WintunDevice) {
     }
 }
 
-pub struct TxToken {
+pub struct TxToken<'a> {
     session: Arc<Session>,
+    traffic: &'a mut Traffic,
 }
 
 pub struct RxToken {
@@ -281,11 +316,12 @@ impl smoltcp::phy::RxToken for RxToken {
     }
 }
 
-impl smoltcp::phy::TxToken for TxToken {
+impl<'a> smoltcp::phy::TxToken for TxToken<'a> {
     fn consume<R, F>(self, len: usize, f: F) -> R
     where
         F: FnOnce(&mut [u8]) -> R,
     {
+        self.traffic.tx_bytes += len;
         self.session
             .allocate_send_packet(len as u16)
             .map(|mut packet| {

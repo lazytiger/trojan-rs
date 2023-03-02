@@ -155,6 +155,7 @@ pub fn run() -> Result<()> {
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
     let mut last_check_time = std::time::Instant::now();
+    let mut last_speed_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(60, 0);
     let mut now = Instant::now();
 
@@ -192,6 +193,12 @@ pub fn run() -> Result<()> {
 
         tcp_server.remove_closed(&mut device);
         udp_server.remove_closed();
+
+        if last_speed_time.elapsed().as_millis() > 1000 {
+            let (rx_speed, tx_speed) = device.calculate_speed();
+            log::warn!("current speed - rx:{}MB/s, tx:{}/MB/s", rx_speed, tx_speed);
+            last_speed_time = std::time::Instant::now();
+        }
 
         let now = std::time::Instant::now();
         if now - last_check_time > check_duration {
