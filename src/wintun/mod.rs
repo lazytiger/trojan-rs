@@ -196,7 +196,11 @@ pub fn run() -> Result<()> {
 
         if last_speed_time.elapsed().as_millis() > 1000 {
             let (rx_speed, tx_speed) = device.calculate_speed();
-            log::warn!("current speed - rx:{}MB/s, tx:{}/MB/s", rx_speed, tx_speed);
+            log::warn!(
+                "current speed - rx:{:.4}MB/s, tx:{:.4}/MB/s",
+                rx_speed,
+                tx_speed
+            );
             last_speed_time = std::time::Instant::now();
         }
 
