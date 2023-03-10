@@ -1,5 +1,7 @@
 use std::{
     convert::TryInto,
+    fs::OpenOptions,
+    io::Write,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     thread,
@@ -196,11 +198,17 @@ pub fn run() -> Result<()> {
 
         if last_speed_time.elapsed().as_millis() > 1000 {
             let (rx_speed, tx_speed) = device.calculate_speed();
-            log::warn!(
+            log::info!(
                 "current speed - rx:{:.4}MB/s, tx:{:.4}/MB/s",
                 rx_speed,
                 tx_speed
             );
+            let mut file = OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(OPTIONS.wintun_args().status_file.as_str())?;
+            write!(&mut file, "{:.4} {:.4}", rx_speed, tx_speed)?;
             last_speed_time = std::time::Instant::now();
         }
 

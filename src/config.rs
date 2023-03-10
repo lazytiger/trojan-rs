@@ -82,6 +82,10 @@ pub struct WintunArgs {
     #[clap(short, long)]
     pub name: String,
 
+    /// status file for speed
+    #[clap(short, long, default_value = "logs\\wintun.status")]
+    pub status_file: String,
+
     /// Max packet count in buffer for network
     #[clap(short, long, default_value = "1024000")]
     pub buffer_size: usize,
