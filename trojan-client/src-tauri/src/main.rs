@@ -3,19 +3,21 @@
     windows_subsystem = "windows"
 )]
 
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    fs::{File, OpenOptions},
+    io::{Read, Write},
+    path::Path,
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, SystemTime},
+};
 
 use backtrace::Backtrace;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
-use tauri::api::process::{Command, CommandChild, CommandEvent};
 use tauri::{
+    api::process::{Command, CommandChild, CommandEvent},
     CustomMenuItem, Icon, Manager, RunEvent, State, SystemTray, SystemTrayEvent, SystemTrayMenu,
     SystemTrayMenuItem, Window, WindowEvent, Wry,
 };
@@ -27,6 +29,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     StdIo(std::io::Error),
     SerdeJson(serde_json::Error),
+    SystemTime(std::time::SystemTimeError),
 }
 
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
@@ -63,6 +66,9 @@ pub struct TrojanProxy {
     dns: Option<CommandChild>,
     running_icon: Icon,
     stopped_icon: Icon,
+    rx_speed: f32,
+    tx_speed: f32,
+    last_update: SystemTime,
 }
 
 impl TrojanProxy {
@@ -73,7 +79,34 @@ impl TrojanProxy {
             dns: None,
             running_icon: Icon::Raw(include_bytes!("../icons/icon.ico").to_vec()),
             stopped_icon: Icon::Raw(include_bytes!("../icons/icon_gray.png").to_vec()),
+            rx_speed: 0.0,
+            tx_speed: 0.0,
+            last_update: SystemTime::UNIX_EPOCH,
         }
+    }
+
+    fn get_speed(&mut self) -> Result<(f32, f32)> {
+        let metadata = std::fs::metadata("logs\\wintun.status")?;
+        let mod_time = metadata.modified()?;
+        if mod_time > self.last_update {
+            let mut file = File::open("logs\\wintun.status")?;
+            let mut content = String::new();
+            let _ = file.read_to_string(&mut content)?;
+            let mut split = content.split(' ');
+            self.rx_speed = split
+                .next()
+                .map(|s| s.parse().unwrap_or_default())
+                .unwrap_or_default();
+            self.tx_speed = split
+                .next()
+                .map(|s| s.parse().unwrap_or_default())
+                .unwrap_or_default();
+            self.last_update = mod_time;
+        } else if self.last_update.elapsed()?.as_secs() > 1 {
+            self.rx_speed = 0.0;
+            self.tx_speed = 0.0;
+        }
+        Ok((self.rx_speed, self.tx_speed))
     }
 }
 
@@ -119,6 +152,8 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                 config.iface_name.as_str(),
                 "-H",
                 config.server_domain.as_str(),
+                "-s",
+                "logs\\wintun.status",
                 "--dns-server-addr",
                 default_dns.as_str(),
                 "-P",
@@ -271,6 +306,21 @@ fn init(state: State<TrojanState>) -> Config {
 }
 
 #[tauri::command]
+fn update_speed(state: State<TrojanState>, window: Window<Wry>) {
+    let mut state = state.lock().unwrap();
+    let (rx_speed, tx_speed) = state.get_speed().unwrap_or_default();
+    window
+        .set_title(
+            format!(
+                "Trojan客户端 - 上行:{:.4}MB/下行:{:.4}MB",
+                rx_speed, tx_speed
+            )
+            .as_str(),
+        )
+        .unwrap();
+}
+
+#[tauri::command]
 fn stop(state: State<TrojanState>, window: Window<Wry>) {
     log::info!("stop trojan now");
     let mut config = state.lock().unwrap();
@@ -343,7 +393,7 @@ fn main() {
     let state = Arc::new(Mutex::new(TrojanProxy::new()));
     tauri::Builder::default()
         .manage(state.clone())
-        .invoke_handler(tauri::generate_handler![start, init, stop])
+        .invoke_handler(tauri::generate_handler![start, init, stop, update_speed])
         .system_tray(tray)
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -405,14 +455,14 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app, event| {
-            if let RunEvent::WindowEvent {
+        .run(|app, event| match event {
+            RunEvent::WindowEvent {
                 event: WindowEvent::CloseRequested { api, .. },
                 ..
-            } = event
-            {
+            } => {
                 app.get_window("main").unwrap().hide().unwrap();
                 api.prevent_close();
             }
+            _ => {}
         });
 }

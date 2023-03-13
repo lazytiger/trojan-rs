@@ -6,6 +6,10 @@ import {appWindow} from "@tauri-apps/api/window";
 
 const detach = attachConsole();
 
+async function update_speed() {
+  await invoke("update_speed", {});
+}
+
 export default {
   data() {
     return {
@@ -30,6 +34,9 @@ export default {
   methods: {
     async init() {
       this.config = await invoke("init", {});
+      setInterval(() => {
+        update_speed();
+      }, 1000);
     },
     start() {
       info("start trojan now");
