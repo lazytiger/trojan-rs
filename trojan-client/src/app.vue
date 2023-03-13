@@ -15,12 +15,11 @@ export default {
     return {
       show: false,
       config: {
-        iface_name: "",
+        iface_name: "trojan",
         server_domain: "",
         server_auth: "",
-        default_dns: "",
-        log_level: "",
-        pool_size: 0,
+        log_level: "2",
+        pool_size: 20,
         enable_ipset: true,
         inverse_route: true,
         enable_dns: true,
@@ -43,8 +42,7 @@ export default {
       invoke("start", {"config": this.config});
     },
     is_config_ok() {
-      return this.check_ipv4(this.config.default_dns) === true &&
-          this.check_ipv4(this.config.dns_listen) === true &&
+      return this.check_ipv4(this.config.dns_listen) === true &&
           this.check_ipv4(this.config.trust_dns) === true;
     },
     stop() {
@@ -99,8 +97,6 @@ export default {
         <v-text-field v-model="config.server_auth" :append-icon="show ? 'mdi-eye' : 'mdi-eye-off'"
                       :readonly="running" :type="show ? 'text' : 'password'" label="服务器密码"
                       variant="outlined" @click:append="show = !show"></v-text-field>
-        <v-text-field v-model="config.default_dns" :readonly="running" :rules="[check_ipv4]"
-                      label="默认DNS" variant="outlined"></v-text-field>
         <v-combobox v-model="config.log_level"
                     :items="['Trace', 'Debug', 'Info', 'Warn', 'Error', 'Off']"
                     :readonly="running"

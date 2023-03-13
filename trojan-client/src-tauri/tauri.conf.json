@@ -84,7 +84,7 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 860,
+        "height": 780,
         "resizable": false,
         "title": "Trojan客户端",
         "width": 500

@@ -15,6 +15,7 @@ use std::{
 
 use backtrace::Backtrace;
 use derive_more::From;
+use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{
     api::process::{Command, CommandChild, CommandEvent},
@@ -22,6 +23,8 @@ use tauri::{
     SystemTrayMenuItem, Window, WindowEvent, Wry,
 };
 use tauri_plugin_log::LogTarget;
+
+use wintool::adapter::get_dns_server;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -37,7 +40,6 @@ pub struct Config {
     pub iface_name: String,
     pub server_domain: String,
     pub server_auth: String,
-    pub default_dns: String,
     pub log_level: String,
     pub pool_size: u32,
     pub enable_ipset: bool,
@@ -69,10 +71,19 @@ pub struct TrojanProxy {
     rx_speed: f32,
     tx_speed: f32,
     last_update: SystemTime,
+    default_dns: String,
+    explicit_dns: bool,
 }
 
 impl TrojanProxy {
     fn new() -> TrojanProxy {
+        let ret = get_dns_server();
+        if ret.is_none() {
+            log::error!("something wrong, dns server not found");
+            panic!();
+        }
+        let (dns, set) = ret.unwrap();
+        log::info!("dns server:{} explicit:{}", dns, set);
         TrojanProxy {
             config: init_config().unwrap_or_default(),
             wintun: None,
@@ -82,6 +93,8 @@ impl TrojanProxy {
             rx_speed: 0.0,
             tx_speed: 0.0,
             last_update: SystemTime::UNIX_EPOCH,
+            default_dns: dns,
+            explicit_dns: set,
         }
     }
 
@@ -126,7 +139,7 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
         let state = state.inner().clone();
         tauri::async_runtime::spawn(async move {
             let config = state.lock().unwrap().config.clone();
-            let default_dns = config.default_dns.clone() + ":53";
+            let default_dns = state.lock().unwrap().default_dns.clone() + ":53";
             let pool_size = config.pool_size.to_string();
             let config_ipset = window
                 .app_handle()
@@ -168,6 +181,7 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                     args.push("--inverse-route");
                 }
             }
+            log::info!("{:?}", args);
             let mut rxs = HashMap::new();
             match Command::new_sidecar("trojan").unwrap().args(args).spawn() {
                 Ok((rx, child)) => {
@@ -183,6 +197,7 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
             if state.lock().unwrap().config.enable_dns {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 let dns_listen = config.dns_listen.clone() + ":53";
+                let default_dns = state.lock().unwrap().default_dns.clone();
                 let config_domains = window
                     .app_handle()
                     .path_resolver()
@@ -203,13 +218,16 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                     "--blocked-domain-list",
                     config_domains.to_str().unwrap(),
                     "--poisoned-dns",
-                    config.default_dns.as_str(),
+                    default_dns.as_str(),
+                    "--trusted-dns",
+                    config.trust_dns.as_str(),
                     "--dns-listen-address",
                     dns_listen.as_str(),
                 ];
                 if !config.enable_ipset {
                     args.push("--add-route");
                 }
+                log::info!("{:?}", args);
                 match Command::new_sidecar("trojan").unwrap().args(args).spawn() {
                     Ok((rx, child)) => {
                         state.lock().unwrap().dns.replace(child);
@@ -259,7 +277,7 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                                     }
                                 }
                                 "dns" => {
-                                    wintool::adapter::set_dns_server("".to_string());
+                                    set_dns_server(&state);
                                     state.dns.take();
                                     if let Some(child) = state.wintun.take() {
                                         let _ = child.kill();
@@ -350,9 +368,25 @@ fn init_config() -> Result<Config> {
         let config: Config = serde_json::from_reader(file)?;
         config
     } else {
-        Config::default()
+        Config {
+            iface_name: "trojan".into(),
+            dns_listen: "127.0.0.1".into(),
+            pool_size: 20,
+            trust_dns: "8.8.8.8".into(),
+            log_level: "Info".into(),
+            enable_dns: true,
+            ..Config::default()
+        }
     };
     Ok(config)
+}
+
+fn set_dns_server(state: &TrojanProxy) {
+    if state.explicit_dns {
+        wintool::adapter::set_dns_server(state.default_dns.clone());
+    } else {
+        wintool::adapter::set_dns_server("".into());
+    }
 }
 
 fn main() {
@@ -408,6 +442,7 @@ fn main() {
                         args
                     ))
                 })
+                .level(LevelFilter::Info)
                 .build(),
         )
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -424,7 +459,7 @@ fn main() {
                     let state: State<TrojanState> = app.state();
                     let mut state = state.lock().unwrap();
                     if let Some(dns) = state.dns.take() {
-                        wintool::adapter::set_dns_server("".to_string());
+                        set_dns_server(&state);
                         let _ = dns.kill();
                         thread::sleep(Duration::from_millis(500));
                     }

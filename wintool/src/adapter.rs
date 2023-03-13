@@ -14,10 +14,15 @@ use winapi::{
         },
         ntdef::{CHAR, LANG_NEUTRAL, SUBLANG_DEFAULT},
         winerror,
-        winerror::{NO_ERROR, S_OK},
+        winerror::{ERROR_BUFFER_OVERFLOW, NO_ERROR, S_OK},
     },
     um::{
-        combaseapi::IIDFromString, iphlpapi, iptypes::IP_ADAPTER_INFO, winbase, winnt::MAKELANGID,
+        combaseapi::IIDFromString,
+        iphlpapi,
+        iphlpapi::GetNetworkParams,
+        iptypes::{FIXED_INFO, IP_ADAPTER_INFO},
+        winbase,
+        winnt::MAKELANGID,
     },
 };
 
@@ -221,5 +226,79 @@ pub fn set_dns_server(name_server: String) -> bool {
                 true
             }
         })
+    }
+}
+
+pub fn get_dns_server() -> Option<(String, bool)> {
+    unsafe {
+        let mut ret = None;
+        get_adapters(|adapter| {
+            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET
+                && adapter.Type != ipifcons::IF_TYPE_IEEE80211
+                && adapter.Type != ipifcons::IF_TYPE_IEEE80212
+            {
+                return false;
+            }
+            let ip = get_string(&adapter.GatewayList.IpAddress.String);
+            if ip.is_empty() || ip == "0.0.0.0" {
+                return false;
+            }
+            let mut guid = GUID::default();
+            let iid: Vec<u16> = adapter
+                .AdapterName
+                .as_slice()
+                .iter()
+                .map(|w| *w as u16)
+                .collect();
+            if S_OK != IIDFromString(iid.as_ptr(), &mut guid) {
+                log::warn!("IIDFromString failed");
+                return false;
+            }
+            let mut setting = DNS_INTERFACE_SETTINGS {
+                Version: DNS_INTERFACE_SETTINGS_VERSION1,
+                ..DNS_INTERFACE_SETTINGS::default()
+            };
+            let code = GetInterfaceDnsSettings(guid, &mut setting);
+            if code != NO_ERROR {
+                log::warn!("get interface dns failed:{}", get_error_message(code));
+                return false;
+            }
+            if !setting.NameServer.is_null() {
+                let str = widestring::U16CStr::from_ptr_str(setting.NameServer);
+                if !str.is_empty() {
+                    ret = Some(str.to_string_lossy());
+                }
+            }
+            true
+        });
+        if ret.is_some() {
+            return Some((ret.unwrap(), true));
+        }
+        let mut buf_len = 0;
+        let code = GetNetworkParams(std::ptr::null_mut(), &mut buf_len);
+        if code != ERROR_BUFFER_OVERFLOW {
+            log::warn!("get dns server failed:{}", get_error_message(code));
+            return None;
+        }
+        let mut buffer = Vec::with_capacity(buf_len as usize);
+        let code = GetNetworkParams(buffer.as_mut_ptr() as _, &mut buf_len);
+        if code != NO_ERROR {
+            log::warn!("get dns server failed:{}", get_error_message(code));
+            return None;
+        }
+        let fixed_info = &*(buffer.as_ptr() as *const FIXED_INFO);
+        if fixed_info.CurrentDnsServer.is_null() {
+            let dns = get_string(&fixed_info.DnsServerList.IpAddress.String);
+            if dns.is_empty() {
+                log::info!("next:{}", !fixed_info.DnsServerList.Next.is_null());
+                return None;
+            }
+            return Some((dns, false));
+        }
+        let dns = get_string(&(*fixed_info.CurrentDnsServer).IpAddress.String);
+        if dns.is_empty() {
+            return None;
+        }
+        Some((dns, false))
     }
 }
