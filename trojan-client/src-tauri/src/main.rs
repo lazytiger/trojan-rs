@@ -326,12 +326,24 @@ fn init(state: State<TrojanState>) -> Config {
 #[tauri::command]
 fn update_speed(state: State<TrojanState>, window: Window<Wry>) {
     let mut state = state.lock().unwrap();
-    let (rx_speed, tx_speed) = state.get_speed().unwrap_or_default();
+    let (mut rx_speed, mut tx_speed) = state.get_speed().unwrap_or_default();
+    let rx_unit = if rx_speed < 1.0 {
+        rx_speed *= 1024.0;
+        "KB"
+    } else {
+        "MB"
+    };
+    let tx_unit = if tx_speed < 1.0 {
+        tx_speed *= 1024.0;
+        "KB"
+    } else {
+        "MB"
+    };
     window
         .set_title(
             format!(
-                "Trojan客户端 - 上行:{:.4}MB/下行:{:.4}MB",
-                rx_speed, tx_speed
+                "Trojan客户端 - 上行:{:.3}{}/下行:{:.3}{}",
+                rx_speed, rx_unit, tx_speed, tx_unit
             )
             .as_str(),
         )

@@ -83,11 +83,30 @@ impl DnsServer {
         let mut domain_map = DomainMap::new();
         let file = File::open(OPTIONS.dns_args().blocked_domain_list.as_str()).unwrap();
         let reader = BufReader::new(file);
-        reader.lines().for_each(|line| {
-            if let Ok(line) = line {
-                domain_map.add_domain(line.as_str());
+        let lines: Vec<_> = reader
+            .lines()
+            .filter_map(|line| line.ok().map(|line| line.chars().rev().collect::<String>()))
+            .sorted()
+            .collect();
+        for i in 0..lines.len() - 1 {
+            let len = lines[i].chars().count();
+            let a: String = lines[i].chars().rev().collect();
+            let b: String = lines[i + 1].chars().rev().collect();
+            if lines[i + 1].starts_with(&lines[i]) {
+                let invalid = if let Some(c) = lines[i + 1].chars().nth(len) {
+                    c == '.'
+                } else {
+                    a == b
+                };
+                if invalid {
+                    log::error!("invalid config:{} {}", a, b)
+                }
             }
-        });
+        }
+        for line in lines {
+            let line: String = line.chars().rev().collect();
+            domain_map.add_domain(line.as_str())
+        }
         self.blocked_domains = domain_map;
     }
 
