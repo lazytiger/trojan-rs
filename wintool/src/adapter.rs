@@ -299,6 +299,11 @@ pub fn get_dns_server() -> Option<(String, bool)> {
         if dns.is_empty() {
             return None;
         }
+        if let Some(ip) = get_main_adapter_ip() {
+            if ip == dns {
+                return None;
+            }
+        }
         Some((dns, false))
     }
 }

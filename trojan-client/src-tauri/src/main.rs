@@ -33,6 +33,8 @@ pub enum Error {
     StdIo(std::io::Error),
     SerdeJson(serde_json::Error),
     SystemTime(std::time::SystemTimeError),
+    #[from(ignore)]
+    Custom(String),
 }
 
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
@@ -77,13 +79,6 @@ pub struct TrojanProxy {
 
 impl TrojanProxy {
     fn new() -> TrojanProxy {
-        let ret = get_dns_server();
-        if ret.is_none() {
-            log::error!("something wrong, dns server not found");
-            panic!();
-        }
-        let (dns, set) = ret.unwrap();
-        log::info!("dns server:{} explicit:{}", dns, set);
         TrojanProxy {
             config: init_config().unwrap_or_default(),
             wintun: None,
@@ -93,9 +88,21 @@ impl TrojanProxy {
             rx_speed: 0.0,
             tx_speed: 0.0,
             last_update: SystemTime::UNIX_EPOCH,
-            default_dns: dns,
-            explicit_dns: set,
+            default_dns: String::new(),
+            explicit_dns: false,
         }
+    }
+
+    fn update_dns(&mut self) -> Result<()> {
+        let ret = get_dns_server();
+        if ret.is_none() {
+            return Err(Error::Custom("dns server not found".to_string()));
+        }
+        let (dns, set) = ret.unwrap();
+        log::info!("dns server:{} explicit:{}", dns, set);
+        self.default_dns = dns;
+        self.explicit_dns = set;
+        Ok(())
     }
 
     fn get_speed(&mut self) -> Result<(f32, f32)> {
@@ -131,8 +138,14 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
     if let Err(err) = save_config(&config) {
         log::error!("save config failed:{:?}", err);
     } else {
-        emit_state_update_event(true, window.clone());
         state.lock().unwrap().config = config;
+        if let Err(err) = state.lock().unwrap().update_dns() {
+            log::error!("update_dns failed:{:?}", err);
+            return;
+        }
+
+        emit_state_update_event(true, window.clone());
+
         if state.lock().unwrap().wintun.is_some() {
             return;
         }
@@ -436,9 +449,7 @@ fn main() {
     let menu = menu.add_item(quit);
     let tray = SystemTray::new().with_menu(menu);
 
-    let state = Arc::new(Mutex::new(TrojanProxy::new()));
     tauri::Builder::default()
-        .manage(state.clone())
         .invoke_handler(tauri::generate_handler![start, init, stop, update_speed])
         .system_tray(tray)
         .plugin(
@@ -465,6 +476,7 @@ fn main() {
                 cwd
             );
         }))
+        .manage(Arc::new(Mutex::new(TrojanProxy::new())))
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                 "quit" => {
