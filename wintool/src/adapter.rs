@@ -301,6 +301,7 @@ pub fn get_dns_server() -> Option<(String, bool)> {
         }
         if let Some(ip) = get_main_adapter_ip() {
             if ip == dns {
+                set_dns_server("".to_string());
                 return None;
             }
         }
