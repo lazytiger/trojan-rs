@@ -66,6 +66,7 @@ pub fn send_all(writer: &mut impl Write, buffer: &mut BytesMut) -> Result<bool> 
     ret
 }
 
+/// This function reads data from a stream and stores it in a buffer.
 #[allow(dead_code)]
 pub fn read_once(reader: &mut impl Read, buffer: &mut BytesMut) -> Result<bool> {
     buffer.reserve(1500);
@@ -93,6 +94,7 @@ pub fn read_once(reader: &mut impl Read, buffer: &mut BytesMut) -> Result<bool> 
     ret
 }
 
+/// This function resolves a domain name to a list of IP addresses.
 pub fn resolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
     let dns_server_addr: SocketAddr = dns_server_addr.parse()?;
     let dns_server_addr: SockAddr = dns_server_addr.into();
