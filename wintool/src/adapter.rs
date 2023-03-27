@@ -1,11 +1,17 @@
 #![allow(dead_code)]
 
-use std::{mem::MaybeUninit, ptr};
+use std::{
+    ffi::CStr,
+    mem::MaybeUninit,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    ptr,
+};
 
-use widestring::{U16CString, U16Str};
+use widestring::{U16CStr, U16CString, U16Str};
 use winapi::{
     shared::{
         guiddef::GUID,
+        ifdef::IfOperStatusUp,
         ipifcons,
         minwindef::{PULONG, ULONG},
         netioapi::{
@@ -13,33 +19,156 @@ use winapi::{
             DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
         },
         ntdef::{CHAR, LANG_NEUTRAL, SUBLANG_DEFAULT},
-        winerror,
         winerror::{ERROR_BUFFER_OVERFLOW, NO_ERROR, S_OK},
+        ws2def::{AF_UNSPEC, LPSOCKADDR},
     },
     um::{
         combaseapi::IIDFromString,
         iphlpapi,
-        iphlpapi::GetNetworkParams,
-        iptypes::{FIXED_INFO, IP_ADAPTER_INFO},
+        iptypes::{
+            GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES,
+            IP_ADAPTER_INFO,
+        },
         winbase,
         winnt::MAKELANGID,
     },
 };
 
+pub struct AdapterAddresses<'a> {
+    info: &'a IP_ADAPTER_ADDRESSES,
+}
+
+unsafe fn win_sockaddr_to_rust(address: LPSOCKADDR) -> Option<IpAddr> {
+    address.as_ref().map(|addr| match addr.sa_family as i32 {
+        winapi::shared::ws2def::AF_INET => {
+            let addr = &*(address as *const _ as *const winapi::shared::ws2def::SOCKADDR_IN);
+            IpAddr::V4(Ipv4Addr::from(addr.sin_addr.S_un.S_addr().to_ne_bytes()))
+        }
+        winapi::shared::ws2def::AF_INET6 => {
+            let addr = &*(address as *const _ as *const winapi::shared::ws2ipdef::SOCKADDR_IN6);
+            IpAddr::V6(Ipv6Addr::from(*addr.sin6_addr.u.Byte()))
+        }
+        _ => panic!("Unknown address family"),
+    })
+}
+
+impl<'a> AdapterAddresses<'a> {
+    pub fn new(info: &'a IP_ADAPTER_ADDRESSES) -> Self {
+        Self { info }
+    }
+
+    pub fn if_index(&self) -> u32 {
+        unsafe { self.info.u.s().IfIndex as u32 }
+    }
+
+    pub fn name(&self) -> String {
+        unsafe {
+            let str = CStr::from_ptr(self.info.AdapterName);
+            str.to_string_lossy().to_string()
+        }
+    }
+
+    pub fn description(&self) -> String {
+        unsafe {
+            let str = U16CStr::from_ptr_str(self.info.Description);
+            str.to_string_lossy().to_string()
+        }
+    }
+
+    pub fn gateway(&self) -> Vec<IpAddr> {
+        unsafe {
+            let mut gateway = Vec::new();
+            let mut gateway_address = self.info.FirstGatewayAddress;
+            while !gateway_address.is_null() {
+                if let Some(addr) =
+                    win_sockaddr_to_rust(gateway_address.as_ref().unwrap().Address.lpSockaddr)
+                {
+                    gateway.push(addr);
+                }
+                gateway_address = (*gateway_address).Next;
+            }
+            gateway
+        }
+    }
+
+    pub fn dns(&self) -> Vec<IpAddr> {
+        unsafe {
+            let mut dns = Vec::new();
+            let mut dns_server = self.info.FirstDnsServerAddress;
+            while !dns_server.is_null() {
+                if let Some(addr) =
+                    win_sockaddr_to_rust(dns_server.as_ref().unwrap().Address.lpSockaddr)
+                {
+                    dns.push(addr);
+                }
+                dns_server = (*dns_server).Next;
+            }
+            dns
+        }
+    }
+    pub fn address(&self) -> Vec<IpAddr> {
+        unsafe {
+            let mut address = Vec::new();
+            let mut addr = self.info.FirstUnicastAddress;
+            while !addr.is_null() {
+                if let Some(addr) = win_sockaddr_to_rust(addr.as_ref().unwrap().Address.lpSockaddr)
+                {
+                    address.push(addr);
+                }
+                addr = (*addr).Next;
+            }
+            address
+        }
+    }
+
+    pub fn is_up(&self) -> bool {
+        self.info.OperStatus == IfOperStatusUp
+    }
+
+    pub fn is_ethernet(&self) -> bool {
+        self.info.IfType == ipifcons::IF_TYPE_ETHERNET_CSMACD
+            || self.info.IfType == ipifcons::IF_TYPE_IEEE80211
+            || self.info.IfType == ipifcons::IF_TYPE_IEEE80212
+    }
+
+    pub fn is_dns_auto(&self) -> bool {
+        self.info.DdnsEnabled() != 0
+    }
+
+    pub fn is_main_adapter_v4(&self) -> bool {
+        if !self.is_ethernet() || !self.is_up() {
+            return false;
+        }
+        let ips = self.gateway();
+        for ip in ips {
+            if ip.is_ipv4() {
+                let addr = self.address();
+                for ip in addr {
+                    if ip.is_ipv4() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
 pub fn get_adapter_ip(name: &str) -> Option<String> {
     let mut ret = None;
     unsafe {
-        get_adapters(|adapter| {
-            let adapter_name = get_string(&adapter.Description);
+        get_adapters_addresses(|adapter| {
+            let adapter_name = adapter.description();
             if adapter_name.contains(name) {
-                let ip = get_string(&adapter.IpAddressList.IpAddress.String);
-                if ip != "0.0.0.0" {
-                    ret = Some(ip);
+                let ips = adapter.address();
+                for ip in ips {
+                    if ip.is_ipv4() {
+                        ret = Some(ip.to_string());
+                        return true;
+                    }
                 }
-                true
-            } else {
-                false
             }
+            false
         });
     }
     ret
@@ -48,10 +177,10 @@ pub fn get_adapter_ip(name: &str) -> Option<String> {
 pub fn get_adapter_index(name: &str) -> Option<u32> {
     let mut index = None;
     unsafe {
-        get_adapters(|adapter| {
-            let adapter_name = get_string(&adapter.Description);
+        get_adapters_addresses(|adapter| {
+            let adapter_name = adapter.description();
             if adapter_name.contains(name) {
-                index.replace(adapter.Index);
+                index.replace(adapter.if_index());
                 true
             } else {
                 false
@@ -64,21 +193,17 @@ pub fn get_adapter_index(name: &str) -> Option<u32> {
 pub fn get_main_adapter_ip() -> Option<String> {
     let mut ret = None;
     unsafe {
-        get_adapters(|adapter| {
-            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80211
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80212
-            {
-                return false;
+        get_adapters_addresses(|adapter| {
+            if adapter.is_main_adapter_v4() {
+                let ips = adapter.address();
+                for ip in ips {
+                    if ip.is_ipv4() {
+                        ret = Some(ip.to_string());
+                        return true;
+                    }
+                }
             }
-            let ip = get_string(&adapter.GatewayList.IpAddress.String);
-            if ip.is_empty() || ip == "0.0.0.0" {
-                false
-            } else {
-                let ip = get_string(&adapter.IpAddressList.IpAddress.String);
-                ret = Some(ip);
-                true
-            }
+            false
         });
     }
     ret
@@ -87,22 +212,60 @@ pub fn get_main_adapter_ip() -> Option<String> {
 pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
     let mut ret = None;
     unsafe {
-        get_adapters(|adapter| {
-            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80211
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80212
-            {
-                false
-            } else {
-                let ip = get_string(&adapter.GatewayList.IpAddress.String);
-                if ip.is_empty() || ip == "0.0.0.0" {
-                    false
-                } else {
-                    ret = Some((ip.clone(), adapter.Index));
-                    true
+        get_adapters_addresses(|adapter| {
+            if adapter.is_main_adapter_v4() {
+                let ips = adapter.gateway();
+                for ip in ips {
+                    if ip.is_ipv4() {
+                        ret = Some((ip.to_string(), adapter.if_index()));
+                        return true;
+                    }
                 }
             }
+            false
         });
+    }
+    ret
+}
+
+pub unsafe fn get_adapters_addresses<F>(mut callback: F) -> bool
+where
+    F: FnMut(&AdapterAddresses) -> bool,
+{
+    let mut buffer_length: u32 = 0;
+    let status = iphlpapi::GetAdaptersAddresses(
+        AF_UNSPEC as u32,
+        GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        &mut buffer_length as PULONG,
+    );
+    if status != NO_ERROR && status != ERROR_BUFFER_OVERFLOW {
+        log::error!("{}", get_error_message(status));
+        return false;
+    }
+    let mut buffer = vec![0u8; buffer_length as usize];
+    let status = iphlpapi::GetAdaptersAddresses(
+        AF_UNSPEC as u32,
+        GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_INCLUDE_GATEWAYS,
+        std::ptr::null_mut(),
+        buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES,
+        &mut buffer_length as PULONG,
+    );
+    if status != NO_ERROR && status != ERROR_BUFFER_OVERFLOW {
+        log::error!("{}", get_error_message(status));
+        return false;
+    }
+    let mut info = buffer.as_ptr() as *const IP_ADAPTER_ADDRESSES;
+    let mut ret = false;
+    while !info.is_null() {
+        let adapter = &*info;
+        let aa = AdapterAddresses::new(adapter);
+        ret = callback(&aa);
+        if ret {
+            break;
+        }
+        info = adapter.Next;
     }
     ret
 }
@@ -113,7 +276,7 @@ where
 {
     let mut buffer_length: u32 = 0;
     let result = iphlpapi::GetAdaptersInfo(std::ptr::null_mut(), &mut buffer_length as PULONG);
-    if result != winerror::NOERROR as ULONG && result != winerror::ERROR_BUFFER_OVERFLOW {
+    if result != NO_ERROR as ULONG && result != ERROR_BUFFER_OVERFLOW {
         log::error!("{}", get_error_message(result));
         return false;
     }
@@ -122,7 +285,7 @@ where
         buffer.as_mut_ptr() as *mut IP_ADAPTER_INFO,
         &mut buffer_length as PULONG,
     );
-    if result != winerror::NOERROR as ULONG && result != winerror::ERROR_BUFFER_OVERFLOW {
+    if result != NO_ERROR as ULONG && result != ERROR_BUFFER_OVERFLOW {
         log::error!("{}", get_error_message(result));
         return false;
     }
@@ -179,52 +342,45 @@ fn get_error_message(err_code: u32) -> String {
 
 pub fn set_dns_server(name_server: String) -> bool {
     unsafe {
-        get_adapters(|adapter| {
-            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80211
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80212
-            {
-                return false;
+        get_adapters_addresses(|adapter| {
+            if adapter.is_main_adapter_v4() {
+                let mut guid = GUID::default();
+                let iid: Vec<u16> = adapter
+                    .name()
+                    .as_bytes()
+                    .iter()
+                    .map(|w| *w as u16)
+                    .collect();
+                if S_OK != IIDFromString(iid.as_ptr(), &mut guid) {
+                    log::warn!("IIDFromString failed");
+                    return false;
+                }
+                let mut setting = DNS_INTERFACE_SETTINGS {
+                    Version: DNS_INTERFACE_SETTINGS_VERSION1,
+                    ..DNS_INTERFACE_SETTINGS::default()
+                };
+                let code = GetInterfaceDnsSettings(guid, &mut setting);
+                if code != NO_ERROR {
+                    log::warn!("get interface dns failed:{}", get_error_message(code));
+                    return false;
+                }
+                let mut name_server = U16CString::from_str(name_server.clone()).unwrap();
+                setting.Flags = DNS_SETTING_NAMESERVER;
+                if name_server.is_empty() {
+                    setting.NameServer = ptr::null_mut();
+                } else {
+                    setting.NameServer = name_server.as_mut_ptr();
+                }
+                let code = SetInterfaceDnsSettings(guid, &setting);
+                if code != NO_ERROR {
+                    log::warn!("set failed:{}", get_error_message(code));
+                    return false;
+                } else {
+                    log::info!("set name server to:{}", name_server.to_string_lossy());
+                    return true;
+                }
             }
-            let ip = get_string(&adapter.GatewayList.IpAddress.String);
-            if ip.is_empty() || ip == "0.0.0.0" {
-                return false;
-            }
-            let mut guid = GUID::default();
-            let iid: Vec<u16> = adapter
-                .AdapterName
-                .as_slice()
-                .iter()
-                .map(|w| *w as u16)
-                .collect();
-            if S_OK != IIDFromString(iid.as_ptr(), &mut guid) {
-                log::warn!("IIDFromString failed");
-                return false;
-            }
-            let mut setting = DNS_INTERFACE_SETTINGS {
-                Version: DNS_INTERFACE_SETTINGS_VERSION1,
-                ..DNS_INTERFACE_SETTINGS::default()
-            };
-            let code = GetInterfaceDnsSettings(guid, &mut setting);
-            if code != NO_ERROR {
-                log::warn!("get interface dns failed:{}", get_error_message(code));
-                return false;
-            }
-            let mut name_server = U16CString::from_str(name_server.clone()).unwrap();
-            setting.Flags = DNS_SETTING_NAMESERVER;
-            if name_server.is_empty() {
-                setting.NameServer = ptr::null_mut();
-            } else {
-                setting.NameServer = name_server.as_mut_ptr();
-            }
-            let code = SetInterfaceDnsSettings(guid, &setting);
-            if code != NO_ERROR {
-                log::warn!("set failed:{}", get_error_message(code));
-                false
-            } else {
-                log::info!("set name server to:{}", name_server.to_string_lossy());
-                true
-            }
+            false
         })
     }
 }
@@ -232,79 +388,18 @@ pub fn set_dns_server(name_server: String) -> bool {
 pub fn get_dns_server() -> Option<(String, bool)> {
     unsafe {
         let mut ret = None;
-        get_adapters(|adapter| {
-            if adapter.Type != ipifcons::MIB_IF_TYPE_ETHERNET
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80211
-                && adapter.Type != ipifcons::IF_TYPE_IEEE80212
-            {
-                return false;
-            }
-            let ip = get_string(&adapter.GatewayList.IpAddress.String);
-            if ip.is_empty() || ip == "0.0.0.0" {
-                return false;
-            }
-            let mut guid = GUID::default();
-            let iid: Vec<u16> = adapter
-                .AdapterName
-                .as_slice()
-                .iter()
-                .map(|w| *w as u16)
-                .collect();
-            if S_OK != IIDFromString(iid.as_ptr(), &mut guid) {
-                log::warn!("IIDFromString failed");
-                return false;
-            }
-            let mut setting = DNS_INTERFACE_SETTINGS {
-                Version: DNS_INTERFACE_SETTINGS_VERSION1,
-                ..DNS_INTERFACE_SETTINGS::default()
-            };
-            let code = GetInterfaceDnsSettings(guid, &mut setting);
-            if code != NO_ERROR {
-                log::warn!("get interface dns failed:{}", get_error_message(code));
-                return false;
-            }
-            if !setting.NameServer.is_null() {
-                let str = widestring::U16CStr::from_ptr_str(setting.NameServer);
-                if !str.is_empty() {
-                    ret = Some(str.to_string_lossy());
+        get_adapters_addresses(|adapter| {
+            if adapter.is_main_adapter_v4() {
+                let ips = adapter.dns();
+                for ip in ips {
+                    if ip.is_ipv4() {
+                        ret = Some((ip.to_string(), !adapter.is_dns_auto()));
+                        return true;
+                    }
                 }
             }
-            true
+            false
         });
-        if ret.is_some() {
-            return Some((ret.unwrap(), true));
-        }
-        let mut buf_len = 0;
-        let code = GetNetworkParams(std::ptr::null_mut(), &mut buf_len);
-        if code != ERROR_BUFFER_OVERFLOW {
-            log::warn!("get dns server failed:{}", get_error_message(code));
-            return None;
-        }
-        let mut buffer = Vec::with_capacity(buf_len as usize);
-        let code = GetNetworkParams(buffer.as_mut_ptr() as _, &mut buf_len);
-        if code != NO_ERROR {
-            log::warn!("get dns server failed:{}", get_error_message(code));
-            return None;
-        }
-        let fixed_info = &*(buffer.as_ptr() as *const FIXED_INFO);
-        if fixed_info.CurrentDnsServer.is_null() {
-            let dns = get_string(&fixed_info.DnsServerList.IpAddress.String);
-            if dns.is_empty() {
-                log::info!("next:{}", !fixed_info.DnsServerList.Next.is_null());
-                return None;
-            }
-            return Some((dns, false));
-        }
-        let dns = get_string(&(*fixed_info.CurrentDnsServer).IpAddress.String);
-        if dns.is_empty() {
-            return None;
-        }
-        if let Some(ip) = get_main_adapter_ip() {
-            if ip == dns {
-                set_dns_server("".to_string());
-                return None;
-            }
-        }
-        Some((dns, false))
+        ret
     }
 }

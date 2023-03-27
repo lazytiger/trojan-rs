@@ -24,7 +24,7 @@ use tauri::{
 };
 use tauri_plugin_log::LogTarget;
 
-use wintool::adapter::get_dns_server;
+use wintool::adapter::{get_dns_server, get_main_adapter_ip};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -99,6 +99,15 @@ impl TrojanProxy {
             return Err(Error::Custom("dns server not found".to_string()));
         }
         let (dns, set) = ret.unwrap();
+        let addr = get_main_adapter_ip();
+        if addr.is_none() {
+            return Err(Error::Custom("main adapter ip not found".to_string()));
+        }
+        let addr = addr.unwrap();
+        if addr == dns || dns == "127.0.0.1" {
+            wintool::adapter::set_dns_server("".to_string());
+            return Err(Error::Custom("invalid dns, auto dns enable".to_string()));
+        }
         log::info!("dns server:{} explicit:{}", dns, set);
         self.default_dns = dns;
         self.explicit_dns = set;
