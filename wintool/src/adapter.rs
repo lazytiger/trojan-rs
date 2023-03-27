@@ -132,7 +132,18 @@ impl<'a> AdapterAddresses<'a> {
     }
 
     pub fn is_dns_auto(&self) -> bool {
-        self.info.DdnsEnabled() != 0
+        let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+        let subkey = format!(
+            "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\{}",
+            self.name()
+        );
+        if let Ok(key) = hklm.open_subkey_with_flags(subkey.as_str(), winreg::enums::KEY_READ) {
+            let value: String = key.get_value("NameServer").unwrap();
+            println!("{}", value);
+            value == ""
+        } else {
+            true
+        }
     }
 
     pub fn is_main_adapter_v4(&self) -> bool {
