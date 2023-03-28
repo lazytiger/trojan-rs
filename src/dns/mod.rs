@@ -9,11 +9,11 @@ use winapi::{
 };
 
 use server::DnsServer;
-
-use crate::{types::Result, OPTIONS};
 pub use wintool::adapter::{
     get_adapter_index, get_adapter_ip, get_main_adapter_gwif, set_dns_server,
 };
+
+use crate::{types::Result, OPTIONS};
 
 mod domain;
 mod server;
@@ -82,7 +82,8 @@ pub fn run() -> Result<()> {
     let mut dns_server = DnsServer::new(index);
     dns_server.setup(&poll);
     if !set_dns_server(dns_server.name_server()) {
-        log::warn!("set dns server failed");
+        log::error!("set dns server failed");
+        return Ok(());
     }
 
     log::warn!("dns server is ready");

@@ -7,28 +7,19 @@ use std::{
     ptr,
 };
 
-use widestring::{U16CStr, U16CString, U16Str};
+use widestring::{U16CStr, U16Str};
 use winapi::{
     shared::{
-        guiddef::GUID,
         ifdef::IfOperStatusUp,
         ipifcons,
-        minwindef::{PULONG, ULONG},
-        netioapi::{
-            GetInterfaceDnsSettings, SetInterfaceDnsSettings, DNS_INTERFACE_SETTINGS,
-            DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
-        },
-        ntdef::{CHAR, LANG_NEUTRAL, SUBLANG_DEFAULT},
-        winerror::{ERROR_BUFFER_OVERFLOW, NO_ERROR, S_OK},
+        minwindef::PULONG,
+        ntdef::{LANG_NEUTRAL, SUBLANG_DEFAULT},
+        winerror::{ERROR_BUFFER_OVERFLOW, NO_ERROR},
         ws2def::{AF_UNSPEC, LPSOCKADDR},
     },
     um::{
-        combaseapi::IIDFromString,
         iphlpapi,
-        iptypes::{
-            GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES,
-            IP_ADAPTER_INFO,
-        },
+        iptypes::{GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES},
         winbase,
         winnt::MAKELANGID,
     },
@@ -139,10 +130,31 @@ impl<'a> AdapterAddresses<'a> {
         );
         if let Ok(key) = hklm.open_subkey_with_flags(subkey.as_str(), winreg::enums::KEY_READ) {
             let value: String = key.get_value("NameServer").unwrap();
-            println!("{}", value);
             value == ""
         } else {
             true
+        }
+    }
+
+    pub fn set_dns_server(&self, name_server: String) -> bool {
+        let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+        let subkey = format!(
+            "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\{}",
+            self.name()
+        );
+        if let Ok(key) = hklm.open_subkey_with_flags(
+            subkey.as_str(),
+            winreg::enums::KEY_READ | winreg::enums::KEY_WRITE,
+        ) {
+            if let Err(err) = key.set_value("NameServer", &name_server) {
+                log::error!("set key:{} error:{}", subkey, err);
+                false
+            } else {
+                true
+            }
+        } else {
+            log::error!("registry key:{} not found", subkey);
+            false
         }
     }
 
@@ -281,47 +293,6 @@ where
     ret
 }
 
-unsafe fn get_adapters<F>(mut callback: F) -> bool
-where
-    F: FnMut(&IP_ADAPTER_INFO) -> bool,
-{
-    let mut buffer_length: u32 = 0;
-    let result = iphlpapi::GetAdaptersInfo(std::ptr::null_mut(), &mut buffer_length as PULONG);
-    if result != NO_ERROR as ULONG && result != ERROR_BUFFER_OVERFLOW {
-        log::error!("{}", get_error_message(result));
-        return false;
-    }
-    let mut buffer = vec![0u8; buffer_length as usize];
-    let result = iphlpapi::GetAdaptersInfo(
-        buffer.as_mut_ptr() as *mut IP_ADAPTER_INFO,
-        &mut buffer_length as PULONG,
-    );
-    if result != NO_ERROR as ULONG && result != ERROR_BUFFER_OVERFLOW {
-        log::error!("{}", get_error_message(result));
-        return false;
-    }
-    let mut info = buffer.as_ptr() as *const IP_ADAPTER_INFO;
-    let mut ret = false;
-    while !info.is_null() {
-        let adapter = &*info;
-        ret = callback(adapter);
-        if ret {
-            break;
-        }
-        info = adapter.Next;
-    }
-    ret
-}
-
-fn get_string(s: &[CHAR]) -> String {
-    String::from_utf8(
-        s.iter()
-            .map_while(|c| if *c == 0 { None } else { Some(*c as u8) })
-            .collect(),
-    )
-    .unwrap()
-}
-
 fn get_error_message(err_code: u32) -> String {
     const LEN: usize = 256;
     let mut buf = MaybeUninit::<[u16; LEN]>::uninit();
@@ -355,43 +326,10 @@ pub fn set_dns_server(name_server: String) -> bool {
     unsafe {
         get_adapters_addresses(|adapter| {
             if adapter.is_main_adapter_v4() {
-                let mut guid = GUID::default();
-                let iid: Vec<u16> = adapter
-                    .name()
-                    .as_bytes()
-                    .iter()
-                    .map(|w| *w as u16)
-                    .collect();
-                if S_OK != IIDFromString(iid.as_ptr(), &mut guid) {
-                    log::warn!("IIDFromString failed");
-                    return false;
-                }
-                let mut setting = DNS_INTERFACE_SETTINGS {
-                    Version: DNS_INTERFACE_SETTINGS_VERSION1,
-                    ..DNS_INTERFACE_SETTINGS::default()
-                };
-                let code = GetInterfaceDnsSettings(guid, &mut setting);
-                if code != NO_ERROR {
-                    log::warn!("get interface dns failed:{}", get_error_message(code));
-                    return false;
-                }
-                let mut name_server = U16CString::from_str(name_server.clone()).unwrap();
-                setting.Flags = DNS_SETTING_NAMESERVER;
-                if name_server.is_empty() {
-                    setting.NameServer = ptr::null_mut();
-                } else {
-                    setting.NameServer = name_server.as_mut_ptr();
-                }
-                let code = SetInterfaceDnsSettings(guid, &setting);
-                if code != NO_ERROR {
-                    log::warn!("set failed:{}", get_error_message(code));
-                    return false;
-                } else {
-                    log::info!("set name server to:{}", name_server.to_string_lossy());
-                    return true;
-                }
+                adapter.set_dns_server(name_server.clone())
+            } else {
+                false
             }
-            false
         })
     }
 }
