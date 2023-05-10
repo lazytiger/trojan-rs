@@ -27,7 +27,7 @@ fn main() {
                 {
                     Ok((IcmpPacket::V4(packet), duration)) => {
                         println!(
-                            "No.{}:{} bytes from {}: icmp_seq={} ttl={} time={:0.2?}",
+                            "No.{}:{} bytes from {}: icmp_seq={} ttl={:?} time={:0.2?}",
                             i,
                             packet.get_size(),
                             packet.get_source(),

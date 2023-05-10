@@ -232,7 +232,7 @@ impl Connection {
             self.sock5_addr = request.address;
             *buffer = request.payload;
         } else {
-            log::warn!(
+            log::error!(
                 "connection:{:?} does not get a trojan request, pass through",
                 self.proxy.source()
             );
