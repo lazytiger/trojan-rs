@@ -232,9 +232,9 @@ impl Connection {
             self.sock5_addr = request.address;
             *buffer = request.payload;
         } else {
-            log::debug!(
-                "connection:{} does not get a trojan request, pass through",
-                self.index
+            log::warn!(
+                "connection:{:?} does not get a trojan request, pass through",
+                self.proxy.source()
             );
             self.command = CONNECT;
             self.sock5_addr = Sock5Address::None;

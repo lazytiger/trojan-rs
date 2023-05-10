@@ -70,9 +70,9 @@ fn init_config() -> Result<Arc<ServerConfig>> {
         for root in roots {
             client_auth_roots.add(&root)?;
         }
-        AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots)
+        AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots).boxed()
     } else {
-        NoClientAuth::new()
+        NoClientAuth::boxed()
     };
 
     let suits = rustls::ALL_CIPHER_SUITES.to_vec();
