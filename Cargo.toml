@@ -15,7 +15,7 @@ libc = "0.2"
 rustls = "0.21"
 sha2 = "0.10"
 bytes = "1.2"
-dns-lookup = "1.0"
+dns-lookup = "2.0"
 cfg-if = "1.0"
 webpki-roots = "0.23"
 webpki = "0.22"
@@ -36,8 +36,9 @@ surge-ping = "0.8"
 tokio = { version = "1.21.2", features = ["full"] }
 rand = "0.8"
 test-log = "0.2"
-notify = "5.0"
+notify = "6.0"
 ringbuf = "0.3"
+httparse = "1.8"
 
 [dev-dependencies]
 env_logger = "0.10"
@@ -49,7 +50,7 @@ winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default"
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.3"
-ipset = { version = "0.3" }
+ipset = { version = "0.4" }
 
 [dependencies.fern]
 version = "0.6"

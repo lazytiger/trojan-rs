@@ -299,7 +299,32 @@ impl Connection {
                     match self.command {
                         CONNECT => {
                             //if dns query is not done, cache data now
-                            if let Err(err) = self.data.write(buffer) {
+                            let client_ip = self.proxy.source();
+                            if let Err(err) =
+                                if self.target_addr == OPTIONS.back_addr && client_ip.is_some() {
+                                    let mut headers = [httparse::EMPTY_HEADER; 10];
+                                    let mut request = httparse::Request::new(&mut headers);
+                                    match request.parse(buffer) {
+                                        Ok(httparse::Status::Complete(offset)) => {
+                                            let mut data = Vec::new();
+                                            data.extend_from_slice(&buffer[..offset - 2]);
+                                            data.extend_from_slice(b"X-Forwarded-For: ");
+                                            data.extend_from_slice(
+                                                client_ip.unwrap().to_string().as_bytes(),
+                                            );
+                                            data.extend_from_slice(b"\r\n\r\n");
+                                            data.extend_from_slice(&buffer[offset..]);
+                                            self.data.write(&data)
+                                        }
+                                        _ => {
+                                            log::warn!("http request not completed, ignore now");
+                                            self.data.write(buffer)
+                                        }
+                                    }
+                                } else {
+                                    self.data.write(buffer)
+                                }
+                            {
                                 log::warn!("connection:{} cache data failed {}", self.index, err);
                                 self.proxy.shutdown();
                             } else if self.target_addr.is_none() {
