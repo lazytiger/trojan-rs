@@ -232,7 +232,7 @@ impl Connection {
             self.sock5_addr = request.address;
             *buffer = request.payload;
         } else {
-            log::error!(
+            log::info!(
                 "connection:{:?} does not get a trojan request, pass through",
                 self.proxy.source()
             );
@@ -301,28 +301,32 @@ impl Connection {
                             //if dns query is not done, cache data now
                             let client_ip = self.proxy.source();
                             if let Err(err) =
-                                if self.target_addr == OPTIONS.back_addr && client_ip.is_some() {
-                                    let mut headers = [httparse::EMPTY_HEADER; 10];
-                                    let mut request = httparse::Request::new(&mut headers);
-                                    match request.parse(buffer) {
-                                        Ok(httparse::Status::Complete(offset)) => {
-                                            let mut data = Vec::new();
-                                            data.extend_from_slice(&buffer[..offset - 2]);
-                                            data.extend_from_slice(b"X-Forwarded-For: ");
-                                            data.extend_from_slice(
-                                                client_ip.unwrap().to_string().as_bytes(),
-                                            );
-                                            data.extend_from_slice(b"\r\n\r\n");
-                                            data.extend_from_slice(&buffer[offset..]);
-                                            self.data.write(&data)
-                                        }
-                                        _ => {
-                                            log::warn!("http request not completed, ignore now");
-                                            self.data.write(buffer)
+                                match (client_ip, self.target_addr == OPTIONS.back_addr) {
+                                    (Some(client_ip), true) => {
+                                        let mut headers = [httparse::EMPTY_HEADER; 100];
+                                        let mut request = httparse::Request::new(&mut headers);
+                                        match request.parse(buffer) {
+                                            Ok(httparse::Status::Complete(offset)) => {
+                                                log::error!("X-Forwarded-For: {}", client_ip);
+                                                let mut data = Vec::new();
+                                                data.extend_from_slice(&buffer[..offset - 2]);
+                                                data.extend_from_slice(b"X-Forwarded-For: ");
+                                                data.extend_from_slice(
+                                                    client_ip.to_string().as_bytes(),
+                                                );
+                                                data.extend_from_slice(b"\r\n\r\n");
+                                                data.extend_from_slice(&buffer[offset..]);
+                                                self.data.write(&data)
+                                            }
+                                            _ => {
+                                                log::error!(
+                                                    "http request not completed, ignore now"
+                                                );
+                                                self.data.write(buffer)
+                                            }
                                         }
                                     }
-                                } else {
-                                    self.data.write(buffer)
+                                    _ => self.data.write(buffer),
                                 }
                             {
                                 log::warn!("connection:{} cache data failed {}", self.index, err);
