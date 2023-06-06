@@ -23,3 +23,14 @@
 -keep class com.bmshi.proxy.mobile.TauriActivity {
   public app.tauri.plugin.PluginManager getPluginManager();
 }
+
+-keep class com.bmshi.proxy.mobile.MainActivity {
+  public saveData(java.lang.String, java.lang.String);
+  public java.lang.String loadData(java.lang.String);
+  public startVpn(int);
+  public stopVpn();
+  public boolean shouldShowRequestPermissionRationaleNative(java.lang.String);
+  public requestPermission(java.lang.String);
+  public boolean checkSelfPermission(java.lang.String);
+  public updateNotification(java.lang.String);
+}
