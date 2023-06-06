@@ -1,0 +1,49 @@
+[package]
+name = "gfw-proxy"
+version = "0.0.0"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+
+[lib]
+name = "gfw_proxy_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "2.0.0-alpha", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0-alpha", features = [] }
+tauri-plugin-window = "2.0.0-alpha"
+tauri-plugin-shell = "2.0.0-alpha"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+lazy_static = "1.4"
+derive_more = "0.99"
+mio = "0.8"
+smoltcp = "0.9"
+rustls = "0.21"
+itertools = "0.10"
+bytes = "1.4"
+crossbeam = "0.8"
+dns-lookup = "2.0"
+rayon = "1.7"
+webpki-roots = "0.23"
+trust-dns-proto = "0.22"
+socket2 = "0.5"
+sha2 = "0.10"
+hex = "0.4"
+
+[target.'cfg(target_os="android")'.dependencies]
+jni = { version = "0.21", features = [] }
+android_logger = "0.13"
+
+[features]
+# this feature is used for production builds or when `devPath` points to the filesystem
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
