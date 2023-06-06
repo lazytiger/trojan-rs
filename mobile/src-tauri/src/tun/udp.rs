@@ -1,7 +1,7 @@
-use std::net::{SocketAddr, SocketAddrV4};
 use std::{
     collections::{HashMap, HashSet},
     io::{ErrorKind, Write},
+    net::{SocketAddr, SocketAddrV4},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -46,6 +46,12 @@ impl<'a, 'b> std::io::Read for UdpSocketRef<'a, 'b> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self.socket.recv_slice(buf) {
             Ok((n, endpoint)) => {
+                log::info!(
+                    "udp {:?} - {:?} read {} bytes",
+                    endpoint,
+                    self.socket.endpoint(),
+                    n
+                );
                 self.endpoint.replace(endpoint);
                 Ok(n)
             }
@@ -58,7 +64,15 @@ impl<'a, 'b> std::io::Write for UdpSocketRef<'a, 'b> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let endpoint = self.endpoint.unwrap();
         match self.socket.send_slice(buf, endpoint) {
-            Ok(()) => Ok(buf.len()),
+            Ok(()) => {
+                log::info!(
+                    "udp {:?} - {:?} write {} bytes",
+                    endpoint,
+                    self.socket.endpoint(),
+                    buf.len()
+                );
+                Ok(buf.len())
+            }
             Err(SendError::BufferFull) => Err(ErrorKind::WouldBlock.into()),
             Err(SendError::Unaddressable) => Err(std::io::Error::new(
                 ErrorKind::AddrNotAvailable,

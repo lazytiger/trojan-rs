@@ -1,7 +1,6 @@
 extern crate core;
 
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, RwLock};
+use std::sync::{atomic::AtomicBool, Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, Window, Wry};
@@ -22,14 +21,18 @@ pub struct Options {
     pub port: u16,
     pub mtu: usize,
     pub pool_size: usize,
+    pub log_level: String,
 }
 
 pub type VpnState = RwLock<Options>;
 
 #[tauri::command]
-fn init_window(window: Window<Wry>) {
+fn init_window(log_level: String, window: Window<Wry>) {
     if let Err(err) = WINDOW.write().map(|mut context| context.replace(window)) {
         log::error!("write lock windows failed:{}", err);
+    } else {
+        platform::init_log(&log_level);
+        log::info!("init log with log_level:{}", log_level);
     }
 }
 
@@ -114,7 +117,6 @@ lazy_static::lazy_static! {
 pub fn run() {
     std::env::set_var("RUST_BACKTRACE", "full");
     let option = RwLock::new(Options::default());
-    platform::init_log();
     tauri::Builder::default()
         .plugin(tauri_plugin_window::init())
         .plugin(tauri_plugin_shell::init())

@@ -10,18 +10,17 @@ use mio::{event::Event, Poll, Token};
 use smoltcp::{iface::SocketHandle, socket::tcp::Socket};
 
 use crate::{
-    tun::utils::copy_stream,
     tun::{
+        device::VpnDevice,
         idle_pool::IdlePool,
         proto::{TrojanRequest, CONNECT},
         resolver::DnsResolver,
         tls_conn::TlsConn,
+        utils::copy_stream,
+        waker::WakerMode,
+        CHANNEL_CNT, CHANNEL_TCP, MAX_INDEX, MIN_INDEX,
     },
     types::{CopyResult, VpnError},
-    {
-        tun::device::VpnDevice, tun::waker::WakerMode, tun::CHANNEL_CNT, tun::CHANNEL_TCP,
-        tun::MAX_INDEX, tun::MIN_INDEX,
-    },
 };
 
 pub struct TcpStreamRef<'a, 'b> {
@@ -30,11 +29,18 @@ pub struct TcpStreamRef<'a, 'b> {
 
 impl<'a, 'b> std::io::Read for TcpStreamRef<'a, 'b> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        log::info!("reading {} bytes", buf.len());
         if self.socket.may_recv() {
             match self.socket.recv_slice(buf) {
                 Ok(0) => Err(ErrorKind::WouldBlock.into()),
-                Ok(n) => Ok(n),
+                Ok(n) => {
+                    log::info!(
+                        "tcp {:?} - {:?} reading {} bytes",
+                        self.socket.local_endpoint(),
+                        self.socket.remote_endpoint(),
+                        n
+                    );
+                    Ok(n)
+                }
                 Err(_) => Err(Error::new(
                     ErrorKind::UnexpectedEof,
                     std::io::Error::last_os_error(),
@@ -50,11 +56,18 @@ impl<'a, 'b> std::io::Read for TcpStreamRef<'a, 'b> {
 
 impl<'a, 'b> std::io::Write for TcpStreamRef<'a, 'b> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        log::info!("sending {} bytes", buf.len());
         if self.socket.may_send() {
             match self.socket.send_slice(buf) {
                 Ok(0) => Err(ErrorKind::WouldBlock.into()),
-                Ok(n) => Ok(n),
+                Ok(n) => {
+                    log::info!(
+                        "tcp {:?} - {:?} sending {} bytes",
+                        self.socket.local_endpoint(),
+                        self.socket.remote_endpoint(),
+                        n,
+                    );
+                    Ok(n)
+                }
                 Err(_) => Err(Error::new(ErrorKind::UnexpectedEof, Error::last_os_error())),
             }
         } else if self.socket.is_active() {
@@ -333,6 +346,7 @@ impl TcpServer {
             log::info!("new request, handle:{}, event:{:?}", handle, event);
             let socket = device.get_tcp_socket_mut(handle, WakerMode::None);
             if socket.is_listening() {
+                log::warn!("socket:{:?} still listening", socket.local_endpoint());
                 if let Some(conn) = self.handle2conns.get_mut(&handle) {
                     unsafe { crate::get_mut_unchecked(conn) }.close(device, poll);
                 }

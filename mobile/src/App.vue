@@ -2,10 +2,6 @@
 import {invoke} from "@tauri-apps/api";
 import {appWindow} from "@tauri-apps/plugin-window";
 
-async function update_speed() {
-  await invoke("update_speed", {});
-}
-
 const VPN_PERMISSION = "android.permission.BIND_VPN_SERVICE";
 
 export default {
@@ -18,6 +14,7 @@ export default {
         pool_size: 20,
         mtu: 1500,
         port: 443,
+        log_level: "Info",
       },
       label: "开始",
       running: false,
@@ -66,12 +63,12 @@ export default {
     }
   },
   async mounted() {
-    await invoke("init_window", {});
-    await this.init_listener();
     let data = await invoke("load_data", {key:"config"});
     if(data !== "") {
       this.config = JSON.parse(data.toString());
     }
+    await invoke("init_window", {logLevel:this.config.log_level});
+    await this.init_listener();
   }
 }
 </script>
@@ -85,6 +82,11 @@ export default {
         <v-text-field v-model="config.password" :append-icon="show ? 'mdi-eye' : 'mdi-eye-off'"
                       :readonly="running" :type="show ? 'text' : 'password'" label="服务器密码"
                       variant="outlined" @click:append="show = !show"></v-text-field>
+        <v-combobox v-model="config.log_level"
+                    :items="['Trace', 'Debug', 'Info', 'Warn', 'Error', 'Off']"
+                    :readonly="running"
+                    label="日志级别" variant="solo"
+        ></v-combobox>
         <v-slider v-model="config.pool_size" :readonly="running" label="连接池大小" max="20" min="0" step="1">
           <template v-slot:append>
             <v-text-field

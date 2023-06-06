@@ -14,6 +14,10 @@ use jni::{
     sys::{jboolean, jint},
     JNIEnv, JavaVM,
 };
+use smoltcp::{
+    phy::Medium::Ip,
+    wire::{IpAddress, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket},
+};
 
 use crate::{emit_event, types, types::VpnError};
 
@@ -154,22 +158,27 @@ fn on_vpn_stop() -> Result<(), types::VpnError> {
     emit_event("on_status_changed", 3)
 }
 
-pub fn init_log() {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Debug)
-            .with_tag("VPN")
-            .format(|f, record| {
-                write!(
-                    f,
-                    "[{}:{}][{}]{}",
-                    record.file().unwrap_or("unknown"),
-                    record.line().unwrap_or(0),
-                    record.level(),
-                    record.args()
-                )
-            }),
-    )
+pub fn init_log(log_level: &String) {
+    let config = android_logger::Config::default();
+    let config = match log_level.as_str() {
+        "Trace" | "0" => config.with_max_level(log::LevelFilter::Trace),
+        "Debug" | "1" => config.with_max_level(log::LevelFilter::Debug),
+        "Info" | "2" => config.with_max_level(log::LevelFilter::Info),
+        "Warn" | "3" => config.with_max_level(log::LevelFilter::Warn),
+        "Error" | "4" => config.with_max_level(log::LevelFilter::Error),
+        _ => config.with_max_level(log::LevelFilter::Debug),
+    };
+    let config = config.with_tag("VPN").format(|f, record| {
+        write!(
+            f,
+            "[{}:{}][{}]{}",
+            record.file().unwrap_or("unknown"),
+            record.line().unwrap_or(0),
+            record.level(),
+            record.args()
+        )
+    });
+    android_logger::init_once(config);
 }
 
 pub fn start_vpn(mtu: i32) -> Result<(), types::VpnError> {
@@ -295,6 +304,7 @@ pub fn load_data(key: impl AsRef<str>) -> Result<String, types::VpnError> {
 pub struct Session {
     file: Mutex<ManuallyDrop<File>>,
     mtu: usize,
+    show_info: bool,
 }
 
 pub struct Packet {
@@ -302,13 +312,14 @@ pub struct Packet {
 }
 
 impl Session {
-    pub fn new(fd: i32, mtu: usize) -> Self {
+    pub fn new(fd: i32, mtu: usize, show_info: bool) -> Self {
         unsafe {
             let fd = OwnedFd::from_raw_fd(fd);
             let file = fd.into();
             Self {
                 file: Mutex::new(ManuallyDrop::new(file)),
                 mtu,
+                show_info,
             }
         }
     }
@@ -342,10 +353,12 @@ impl Session {
 
     pub fn send_packet(&self, packet: Packet) {
         if let Ok(mut file) = self.file.lock() {
-            if let Err(err) = file.write_all(packet.data.as_slice()) {
+            if let Err(err) = file.write_all(packet.bytes()) {
                 log::error!("send packet failed:{}", err);
-            } else {
-                log::info!("send {} bytes to app", packet.data.len());
+            } else if self.show_info {
+                if let Err(err) = packet.info() {
+                    log::error!("parse return packet failed:{:?}", err);
+                }
             }
         } else {
             log::error!("lock file for send packet failed");
@@ -371,6 +384,54 @@ impl Packet {
         unsafe {
             self.data.set_len(len);
         }
+    }
+
+    pub fn info(&self) -> types::Result<()> {
+        let (dst_addr, src_addr, payload, protocol) = match IpVersion::of_packet(self.bytes())? {
+            IpVersion::Ipv4 => {
+                let packet = Ipv4Packet::new_checked(self.bytes())?;
+                let dst_addr = packet.dst_addr();
+                let src_addr = packet.src_addr();
+                (
+                    IpAddress::Ipv4(dst_addr),
+                    IpAddress::Ipv4(src_addr),
+                    packet.payload(),
+                    packet.next_header(),
+                )
+            }
+            IpVersion::Ipv6 => {
+                let packet = Ipv6Packet::new_checked(self.bytes())?;
+                let dst_addr = packet.dst_addr();
+                let src_addr = packet.src_addr();
+                (
+                    IpAddress::Ipv6(dst_addr),
+                    IpAddress::Ipv6(src_addr),
+                    packet.payload(),
+                    packet.next_header(),
+                )
+            }
+        };
+        let (dst_port, src_port, payload) = match protocol {
+            IpProtocol::Udp => {
+                let packet = UdpPacket::new_checked(payload)?;
+                (packet.dst_port(), packet.src_port(), packet.payload())
+            }
+            IpProtocol::Tcp => {
+                let packet = TcpPacket::new_checked(payload)?;
+                (packet.dst_port(), packet.src_port(), packet.payload())
+            }
+            _ => return Ok(()),
+        };
+        log::info!(
+            "send packet {} {}:{} - {}:{} {} bytes",
+            protocol,
+            src_addr,
+            src_port,
+            dst_addr,
+            dst_port,
+            payload.len()
+        );
+        Ok(())
     }
 }
 

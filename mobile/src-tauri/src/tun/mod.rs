@@ -1,5 +1,12 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{convert::TryInto, net::SocketAddr, sync::Arc, time::SystemTime};
+use std::{
+    convert::TryInto,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::SystemTime,
+};
 
 use mio::{Events, Poll, Token, Waker};
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
@@ -11,12 +18,13 @@ use smoltcp::{
     wire::{IpAddress, IpCidr, Ipv4Address},
 };
 
-use crate::tun::resolver::DnsResolver;
-use crate::types::VpnError;
 use crate::{
     emit_event, platform,
-    tun::{device::VpnDevice, idle_pool::IdlePool, tcp::TcpServer, udp::UdpServer},
-    types::Result,
+    tun::{
+        device::VpnDevice, idle_pool::IdlePool, resolver::DnsResolver, tcp::TcpServer,
+        udp::UdpServer,
+    },
+    types::{Result, VpnError},
     Options,
 };
 
@@ -108,8 +116,16 @@ fn digest_pass(pass: &String) -> String {
     hex::encode(result.as_slice())
 }
 
+fn show_info(level: &String) -> bool {
+    level == "Debug" || level == "Info" || level == "Trace"
+}
+
 pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
-    let session = Arc::new(platform::Session::new(fd, options.mtu));
+    let session = Arc::new(platform::Session::new(
+        fd,
+        options.mtu,
+        show_info(&options.log_level),
+    ));
 
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);

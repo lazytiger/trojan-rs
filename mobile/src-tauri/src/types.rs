@@ -21,6 +21,7 @@ pub enum VpnError {
     RxBreak(Option<std::io::Error>),
     Resolve,
     InvalidDnsName(rustls::client::InvalidDnsNameError),
+    Smoltcp(smoltcp::wire::Error),
 }
 
 #[allow(dead_code)]
