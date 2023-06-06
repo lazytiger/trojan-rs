@@ -6,10 +6,10 @@ plugins {
 
 android {
     compileSdk = 33
-    namespace = "com.tauri.gfw.gfw_proxy"
+    namespace = "com.bmshi.proxy.mobile"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.tauri.gfw.gfw_proxy"
+        applicationId = "com.bmshi.proxy.mobile"
         minSdk = 24
         targetSdk = 33
         versionCode = 1

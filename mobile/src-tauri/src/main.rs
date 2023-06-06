@@ -3,5 +3,5 @@
 
 fn main() {
     #[cfg(desktop)]
-    gfw_proxy_lib::run();
+    mobile::run();
 }

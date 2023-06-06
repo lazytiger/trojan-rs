@@ -1,4 +1,4 @@
-/src/main/java/com/tauri/gfw/gfw_proxy/generated
+/src/main/java/com/bmshi/proxy/mobile/generated
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json
 /tauri.build.gradle.kts

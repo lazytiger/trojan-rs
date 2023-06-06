@@ -1,16 +1,21 @@
-use std::fs::File;
-use std::io::{ErrorKind, Read, Write};
-use std::mem::ManuallyDrop;
-use std::os::fd::{FromRawFd, OwnedFd};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{
+    fs::File,
+    io::{ErrorKind, Read, Write},
+    mem::ManuallyDrop,
+    os::fd::{FromRawFd, OwnedFd},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
+    },
+};
 
-use jni::objects::{JClass, JObject, JString};
-use jni::sys::{jboolean, jint};
-use jni::{JNIEnv, JavaVM};
+use jni::{
+    objects::{JClass, JObject, JString},
+    sys::{jboolean, jint},
+    JNIEnv, JavaVM,
+};
 
-use crate::types::VpnError;
-use crate::{emit_event, types};
+use crate::{emit_event, types, types::VpnError};
 
 struct AndroidContext {
     jvm: JavaVM,
@@ -67,9 +72,7 @@ fn get_mut_context<'a>() -> Result<
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tauri_gfw_gfw_1proxy_MainActivity_00024Companion_initRust<
-    'local,
->(
+pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_00024Companion_initRust<'local>(
     env: JNIEnv<'local>,
     _: JClass<'local>,
 ) {
@@ -92,7 +95,7 @@ fn init_rust<'local>(env: JNIEnv<'local>) -> Result<(), types::VpnError> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tauri_gfw_gfw_1proxy_MainActivity_onPermissionResult<'local>(
+pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onPermissionResult<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
     granted: jboolean,
@@ -104,7 +107,7 @@ pub extern "system" fn Java_com_tauri_gfw_gfw_1proxy_MainActivity_onPermissionRe
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tauri_gfw_gfw_1proxy_TrojanProxy_onStart<'local>(
+pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStart<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
     fd: jint,
@@ -134,7 +137,7 @@ fn on_vpn_start(fd: i32) -> Result<(), types::VpnError> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tauri_gfw_gfw_1proxy_TrojanProxy_onStop<'local>(
+pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStop<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
 ) {
@@ -175,7 +178,7 @@ pub fn start_vpn(mtu: i32) -> Result<(), types::VpnError> {
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
     env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
+        "com/bmshi/proxy/mobile/MainActivity",
         "startVpn",
         "(I)V",
         &[mtu.into()],
@@ -188,12 +191,7 @@ pub fn stop_vpn() -> Result<(), types::VpnError> {
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
-    env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
-        "stopVpn",
-        "()V",
-        &[],
-    )?;
+    env.call_static_method("com/bmshi/proxy/mobile/MainActivity", "stopVpn", "()V", &[])?;
     Ok(())
 }
 
@@ -204,7 +202,7 @@ pub fn check_self_permission(permission: impl AsRef<str>) -> Result<bool, types:
     drop(lock);
     let permission = env.new_string(permission)?;
     let ret = env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
+        "com/bmshi/proxy/mobile/MainActivity",
         "checkSelfPermission",
         "(Ljava/lang/String;)Z",
         &[(&permission).into()],
@@ -219,7 +217,7 @@ pub fn request_permission(permission: impl AsRef<str>) -> Result<(), types::VpnE
     drop(lock);
     let permission = env.new_string(permission)?;
     env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
+        "com/bmshi/proxy/mobile/MainActivity",
         "requestPermission",
         "(Ljava/lang/String;)V",
         &[(&permission).into()],
@@ -236,7 +234,7 @@ pub fn should_show_permission_rationale(
     drop(lock);
     let permission = env.new_string(permission)?;
     let ret = env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
+        "com/bmshi/proxy/mobile/MainActivity",
         "shouldShowRequestPermissionRationaleNative",
         "(Ljava/lang/String;)Z",
         &[(&permission).into()],
@@ -251,7 +249,7 @@ pub fn update_notification(content: impl AsRef<str>) -> Result<(), types::VpnErr
     drop(lock);
     let content = env.new_string(content)?;
     env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
+        "com/bmshi/proxy/mobile/MainActivity",
         "updateNotification",
         "(Ljava/lang/String;)V",
         &[(&content).into()],
@@ -267,7 +265,7 @@ pub fn save_data(key: impl AsRef<str>, content: impl AsRef<str>) -> Result<(), t
     let content = env.new_string(content)?;
     let key = env.new_string(key)?;
     env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
+        "com/bmshi/proxy/mobile/MainActivity",
         "saveData",
         "(Ljava/lang/String;Ljava/lang/String;)V",
         &[(&key).into(), (&content).into()],
@@ -282,7 +280,7 @@ pub fn load_data(key: impl AsRef<str>) -> Result<String, types::VpnError> {
     drop(lock);
     let key = env.new_string(key)?;
     let ret = env.call_static_method(
-        "com/tauri/gfw/gfw_proxy/MainActivity",
+        "com/bmshi/proxy/mobile/MainActivity",
         "loadData",
         "(Ljava/lang/String;)Ljava/lang/String;",
         &[(&key).into()],

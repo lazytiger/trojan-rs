@@ -1,5 +1,5 @@
 [package]
-name = "gfw-proxy"
+name = "mobile"
 version = "0.0.0"
 description = "A Tauri App"
 authors = ["you"]
@@ -8,7 +8,7 @@ repository = ""
 edition = "2021"
 
 [lib]
-name = "gfw_proxy_lib"
+name = "mobile"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

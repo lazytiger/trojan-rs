@@ -7,14 +7,14 @@
     "withGlobalTauri": false
   },
   "package": {
-    "productName": "gfw-proxy",
+    "productName": "mobile",
     "version": "0.0.0"
   },
   "tauri": {
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.tauri.gfw.proxy",
+      "identifier": "com.bmshi.proxy.mobile",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -30,7 +30,7 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "gfw-proxy",
+        "title": "mobile proxy",
         "width": 750,
         "height": 1334
       }

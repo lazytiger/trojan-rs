@@ -1,4 +1,4 @@
-package com.tauri.gfw.gfw_proxy
+package com.bmshi.proxy.mobile
 
 import android.Manifest
 import android.content.Intent

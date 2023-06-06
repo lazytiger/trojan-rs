@@ -1045,36 +1045,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gfw-proxy"
-version = "0.0.0"
-dependencies = [
- "android_logger",
- "bytes",
- "crossbeam",
- "derive_more",
- "dns-lookup",
- "hex",
- "itertools",
- "jni 0.21.1",
- "lazy_static",
- "log",
- "mio",
- "rayon",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "smoltcp",
- "socket2 0.5.3",
- "tauri",
- "tauri-build",
- "tauri-plugin-shell",
- "tauri-plugin-window",
- "trust-dns-proto",
- "webpki-roots",
-]
-
-[[package]]
 name = "gio"
 version = "0.16.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1778,6 +1748,36 @@ dependencies = [
  "log",
  "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "mobile"
+version = "0.0.0"
+dependencies = [
+ "android_logger",
+ "bytes",
+ "crossbeam",
+ "derive_more",
+ "dns-lookup",
+ "hex",
+ "itertools",
+ "jni 0.21.1",
+ "lazy_static",
+ "log",
+ "mio",
+ "rayon",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smoltcp",
+ "socket2 0.5.3",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-shell",
+ "tauri-plugin-window",
+ "trust-dns-proto",
+ "webpki-roots",
 ]
 
 [[package]]
