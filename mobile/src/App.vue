@@ -24,7 +24,8 @@ export default {
     async start() {
       await invoke("save_data", {key:"config", value:JSON.stringify(this.config)});
       if (!this.running) {
-        await invoke("start_vpn", {option: this.config});
+        invoke("start_vpn", {option: this.config});
+        this.label = "启动中";
       }
     },
     stop() {
@@ -52,6 +53,9 @@ export default {
       })
     },
     do_action() {
+      if(this.label === '启动中') {
+        return;
+      }
       if (!this.running) {
         this.start();
       } else {
