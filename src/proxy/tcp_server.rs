@@ -248,6 +248,7 @@ impl Connection {
                             self.index
                         )
                     }
+                    self.server_conn.do_send();
                 }
 
                 if event.is_writable() {

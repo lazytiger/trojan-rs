@@ -251,6 +251,9 @@ impl Connection {
         self.last_active = Instant::now();
         if event.is_readable() {
             self.try_read_server(udp_cache);
+            //It is necessary when establishing connection
+            //In the case, user data will be sent only after handshake is done.
+            self.server_conn.do_send();
         }
         if event.is_writable() {
             self.server_conn.established();
