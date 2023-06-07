@@ -15,7 +15,7 @@ use smoltcp::{
     iface::{Config, Interface, SocketSet},
     socket::Socket,
     time::{Duration, Instant},
-    wire::{IpAddress, IpCidr, Ipv4Address},
+    wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address},
 };
 
 use crate::{
@@ -143,7 +143,12 @@ pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
     let mut tcp_server = TcpServer::new(pass);
 
     let mut sockets = Arc::new(SocketSet::new([]));
-    let mut device = VpnDevice::new(session.clone(), options.mtu, sockets.clone());
+    let mut device = VpnDevice::new(
+        session.clone(),
+        options.mtu,
+        IpEndpoint::from(server_addr),
+        sockets.clone(),
+    );
     let mut interface = prepare_device(&mut device);
 
     let mut events = Events::with_capacity(1024);

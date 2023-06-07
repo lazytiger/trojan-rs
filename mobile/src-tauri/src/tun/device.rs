@@ -62,15 +62,22 @@ pub struct VpnDevice<'a> {
     udp_wakers: Wakers,
     udp_set: HashSet<IpEndpoint>,
     mtu: usize,
+    server_addr: IpEndpoint,
     traffic: Traffic,
 }
 
 impl<'a> VpnDevice<'a> {
-    pub fn new(session: Arc<Session>, mtu: usize, sockets: Arc<SocketSet<'a>>) -> Self {
+    pub fn new(
+        session: Arc<Session>,
+        mtu: usize,
+        server_addr: IpEndpoint,
+        sockets: Arc<SocketSet<'a>>,
+    ) -> Self {
         Self {
             session,
             mtu,
             sockets,
+            server_addr,
             traffic: Traffic::new(),
             tcp_wakers: Wakers::new(),
             udp_wakers: Wakers::new(),
@@ -213,6 +220,10 @@ impl<'a> VpnDevice<'a> {
         self.traffic.begin_traffic = Instant::now();
         (rx_speed, tx_speed)
     }
+
+    pub fn is_server(&self, ip: IpEndpoint) -> bool {
+        self.server_addr.addr == ip.addr
+    }
 }
 
 impl<'b> Device for VpnDevice<'b> {
@@ -290,7 +301,7 @@ fn preprocess_packet(packet: &Packet, device: &mut VpnDevice) {
     };
 
     let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
-    if is_private(dst_endpoint) {
+    if is_private(dst_endpoint) || device.is_server(dst_endpoint) {
         log::info!("ignore private packets:{}", dst_endpoint);
         return;
     }
