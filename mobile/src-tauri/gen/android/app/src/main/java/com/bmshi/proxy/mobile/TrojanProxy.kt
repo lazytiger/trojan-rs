@@ -59,29 +59,31 @@ class TrojanProxy : VpnService() {
     MainActivity.notifyBuilder = notifyBuilder
     val filter = IntentFilter("stop")
     registerReceiver(stopReceiver, filter)
-    val builder = Builder()
-    val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-    val network = manager.activeNetwork;
-    if (network != null) {
-      builder.setUnderlyingNetworks(arrayOf(network)); 
-    }
-    for (route in resources.getStringArray(R.array.bypass_china_24)) {
-      val parts = route.split("/")
-      builder.addRoute(parts[0], parts[1].toInt())
-    }
-    builder.addAddress("10.10.10.1", 30).addDnsServer("8.8.8.8")
-      .addDisallowedApplication(packageName).setSession("gfw").setMtu(MainActivity.mtu)
-      .setBlocking(false)
-    var vpn = builder.establish()
-    if (vpn != null) {
-      vpnFd = vpn
-      onStart(vpn.fd)
-      startForeground(830224, notifyBuilder.build())
-      return START_STICKY
-    } else {
-      Logger.warn("establish vpn failed")
-      return START_NOT_STICKY
-    }
+    Thread(Runnable {
+      val builder = Builder()
+      val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+      val network = manager.activeNetwork;
+      if (network != null) {
+        builder.setUnderlyingNetworks(arrayOf(network));
+      }
+      for (route in resources.getStringArray(R.array.bypass_china_24)) {
+        val parts = route.split("/")
+        builder.addRoute(parts[0], parts[1].toInt())
+      }
+      builder.addAddress("10.10.10.1", 30).addDnsServer("8.8.8.8")
+        .addDisallowedApplication(packageName).setSession("gfw").setMtu(MainActivity.mtu)
+        .setBlocking(false)
+      var vpn = builder.establish()
+      if (vpn != null) {
+        vpnFd = vpn
+        onStart(vpn.fd)
+        startForeground(830224, notifyBuilder.build())
+      } else {
+        Logger.warn("establish vpn failed")
+        close()
+      }
+    }).start()
+    return super.onStartCommand(intent, flags, startId)
   }
 
   fun close() {

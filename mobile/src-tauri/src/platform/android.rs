@@ -123,13 +123,20 @@ fn on_vpn_start(fd: i32) -> Result<(), VpnError> {
     let running = context.running.clone();
     drop(lock);
     std::thread::spawn(move || {
-        if let Err(err) = crate::process_vpn(fd, running) {
-            log::error!("found error:{:?} while process vpn", err);
+        if let Err(err) = std::panic::catch_unwind(|| {
+            if let Err(err) = crate::process_vpn(fd, running) {
+                log::error!("found error:{:?} while process vpn", err);
+                if let Err(err) = emit_event("on_status_changed", 2) {
+                    log::error!("emit status changed failed:{:?}", err);
+                }
+            } else {
+                log::warn!("vpn process exits");
+            }
+        }) {
+            log::error!("uncaught exception:{:?}", err);
             if let Err(err) = emit_event("on_status_changed", 2) {
                 log::error!("emit status changed failed:{:?}", err);
             }
-        } else {
-            log::warn!("vpn process exits");
         }
     });
     emit_event("on_status_changed", 1)

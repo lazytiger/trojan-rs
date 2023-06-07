@@ -24,13 +24,13 @@ export default {
     async start() {
       await invoke("save_data", {key:"config", value:JSON.stringify(this.config)});
       if (!this.running) {
-        invoke("start_vpn", {option: this.config});
+        await invoke("start_vpn", {option: this.config});
         this.label = "启动中";
       }
     },
-    stop() {
+    async stop() {
       if (this.running) {
-        invoke("stop_vpn", {});
+        await invoke("stop_vpn", {});
       }
     },
     async init_listener() {
@@ -53,7 +53,7 @@ export default {
       })
     },
     do_action() {
-      if(this.label === '启动中') {
+      if(this.label === '启动中' || this.label === '关闭中') {
         return;
       }
       if (!this.running) {

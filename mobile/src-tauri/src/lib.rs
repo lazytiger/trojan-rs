@@ -115,7 +115,7 @@ lazy_static::lazy_static! {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    std::env::set_var("RUST_BACKTRACE", "full");
+    //std::env::set_var("RUST_BACKTRACE", "full");
     let option = RwLock::new(Options::default());
     tauri::Builder::default()
         .plugin(tauri_plugin_window::init())
