@@ -193,17 +193,21 @@ impl Connection {
                     return;
                 } else {
                     let mut request = BytesMut::new();
-                    let endpoint = device
+                    if let Some(endpoint) = device
                         .get_tcp_socket_mut(self.local, WakerMode::None)
                         .local_endpoint()
-                        .unwrap();
-                    TrojanRequest::generate_endpoint(&mut request, CONNECT, &endpoint);
-                    log::info!("send trojan request {} bytes", request.len());
-                    if self.remote.write(request.as_ref()).is_ok() {
-                        self.established = true;
-                        log::info!("connection is ready now");
+                    {
+                        TrojanRequest::generate_endpoint(&mut request, CONNECT, &endpoint);
+                        log::info!("send trojan request {} bytes", request.len());
+                        if self.remote.write(request.as_ref()).is_ok() {
+                            self.established = true;
+                            log::info!("connection is ready now");
+                        } else {
+                            log::warn!("send trojan request failed");
+                            self.close(device, poll);
+                            return;
+                        }
                     } else {
-                        log::warn!("send trojan request failed");
                         self.close(device, poll);
                         return;
                     }
