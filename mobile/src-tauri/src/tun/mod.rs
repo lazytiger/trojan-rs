@@ -133,8 +133,9 @@ pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
     if server_ip.is_empty() {
         return Err(VpnError::Resolve);
     }
+    log::info!("server ip are {:?}", server_ip);
     let server_addr = SocketAddr::new(server_ip[0], options.port);
-    let mut resolver = DnsResolver::new(waker, Token(RESOLVER), None);
+    let mut resolver = DnsResolver::new(waker, Token(RESOLVER), Some("114.114.114.114:53".into()));
     let mut pool = prepare_idle_pool(&poll, &resolver, &options, server_addr)?;
 
     let pass = digest_pass(&options.password);
@@ -150,16 +151,17 @@ pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
     let mut last_check_time = std::time::Instant::now();
     let mut last_speed_time = std::time::Instant::now();
     let check_duration = std::time::Duration::new(60, 0);
-    let mut now = Instant::now();
 
     while running.load(Ordering::Relaxed) {
+        let frame_start = std::time::Instant::now();
+        let now = Instant::now();
         let sockets = unsafe { crate::get_mut_unchecked(&mut sockets) };
         if interface.poll(now, &mut device, sockets) {
             udp_server.do_local(&mut pool, &poll, &resolver, &mut device);
             tcp_server.do_local(&mut pool, &poll, &resolver, &mut device);
+            //session.sync();
         }
 
-        now = Instant::now();
         let timeout = interface.poll_delay(now, sockets).or(timeout);
         poll.poll(
             &mut events,
@@ -234,6 +236,7 @@ pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
             pool.check_timeout(&poll);
             last_check_time = now;
         }
+        log::info!("tick cost:{}ms", frame_start.elapsed().as_millis());
     }
     Ok(())
 }

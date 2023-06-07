@@ -124,6 +124,7 @@ impl Connection {
         }
         if event.is_readable() {
             self.remote_to_local(socket, poll);
+            self.flush_remote(poll);
         }
     }
 

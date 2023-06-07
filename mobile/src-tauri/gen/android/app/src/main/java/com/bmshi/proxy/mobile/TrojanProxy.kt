@@ -5,17 +5,24 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.IpPrefix
 import android.net.VpnService
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import java.io.BufferedInputStream
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.Reader
+import java.net.InetAddress
 
 
 class TrojanProxy : VpnService() {
   private external fun onStart(fd: Int)
   private external fun onStop()
-  private lateinit var vpnFd: ParcelFileDescriptor
 
   private val stopReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -53,11 +60,16 @@ class TrojanProxy : VpnService() {
     val filter = IntentFilter("stop")
     registerReceiver(stopReceiver, filter)
     val builder = Builder()
-    for (route in resources.getStringArray(R.array.bypass_private_route)) {
+    val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+    val network = manager.activeNetwork;
+    if (network != null) {
+      builder.setUnderlyingNetworks(arrayOf(network)); 
+    }
+    for (route in resources.getStringArray(R.array.bypass_china_24)) {
       val parts = route.split("/")
       builder.addRoute(parts[0], parts[1].toInt())
     }
-    builder.addAddress("10.10.10.1", 24).addDnsServer("8.8.8.8")
+    builder.addAddress("10.10.10.1", 30).addDnsServer("8.8.8.8")
       .addDisallowedApplication(packageName).setSession("gfw").setMtu(MainActivity.mtu)
       .setBlocking(false)
     var vpn = builder.establish()
@@ -84,5 +96,15 @@ class TrojanProxy : VpnService() {
   override fun onRevoke() {
     Logger.info("revoke vpn service now")
     close()
+  }
+  
+  companion object {
+    private lateinit var vpnFd: ParcelFileDescriptor
+    @JvmStatic
+    fun syncData() {
+      if(vpnFd.fileDescriptor.valid()) {
+        vpnFd.fileDescriptor.sync()
+      }
+    }
   }
 }

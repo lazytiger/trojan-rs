@@ -162,6 +162,6 @@ pub fn process_vpn(fd: i32, running: Arc<AtomicBool>) -> Result<(), types::VpnEr
 }
 
 #[allow(mutable_transmutes)]
-pub fn get_mut_unchecked<T>(t: &mut Arc<T>) -> &mut T {
-    unsafe { std::mem::transmute(t.as_ref()) }
+pub unsafe fn get_mut_unchecked<T>(t: &mut Arc<T>) -> &mut T {
+    std::mem::transmute(t.as_ref())
 }

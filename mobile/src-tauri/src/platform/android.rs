@@ -2,21 +2,22 @@ use std::{
     fs::File,
     io::{ErrorKind, Read, Write},
     mem::ManuallyDrop,
+    ops::Deref,
     os::fd::{FromRawFd, OwnedFd},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
+};
+
+use smoltcp::wire::{
+    IpAddress, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
 };
 
 use jni::{
     objects::{JClass, JObject, JString},
     sys::{jboolean, jint},
     JNIEnv, JavaVM,
-};
-use smoltcp::{
-    phy::Medium::Ip,
-    wire::{IpAddress, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket},
 };
 
 use crate::{emit_event, types, types::VpnError};
@@ -40,16 +41,14 @@ fn get_context<'a>() -> Result<
         &'a AndroidContext,
         LockResult<RwLockReadGuard<'a, Option<AndroidContext>>>,
     ),
-    types::VpnError,
+    VpnError,
 > {
     let lock = CONTEXT.read();
     let context = lock
         .as_ref()
-        .map_err(|e| types::VpnError::RLock(e.to_string()))
-        .map(|context| -> Result<&'a AndroidContext, types::VpnError> {
-            unsafe {
-                std::mem::transmute(context.as_ref().ok_or(types::VpnError::NoPlatformContext))
-            }
+        .map_err(|e| VpnError::RLock(e.to_string()))
+        .map(|context| -> Result<&'a AndroidContext, VpnError> {
+            unsafe { std::mem::transmute(context.as_ref().ok_or(VpnError::NoPlatformContext)) }
         })??;
     Ok((context, lock))
 }
@@ -59,19 +58,15 @@ fn get_mut_context<'a>() -> Result<
         &'a mut AndroidContext,
         LockResult<RwLockWriteGuard<'a, Option<AndroidContext>>>,
     ),
-    types::VpnError,
+    VpnError,
 > {
     let mut lock = CONTEXT.write();
     let context = lock
         .as_mut()
-        .map_err(|e| types::VpnError::WLock(e.to_string()))
-        .map(
-            |context| -> Result<&'a mut AndroidContext, types::VpnError> {
-                unsafe {
-                    std::mem::transmute(context.as_mut().ok_or(types::VpnError::NoPlatformContext))
-                }
-            },
-        )??;
+        .map_err(|e| VpnError::WLock(e.to_string()))
+        .map(|context| -> Result<&'a mut AndroidContext, VpnError> {
+            unsafe { std::mem::transmute(context.as_mut().ok_or(VpnError::NoPlatformContext)) }
+        })??;
     Ok((context, lock))
 }
 
@@ -85,11 +80,11 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_00024Companion_i
     }
 }
 
-fn init_rust<'local>(env: JNIEnv<'local>) -> Result<(), types::VpnError> {
+fn init_rust<'local>(env: JNIEnv<'local>) -> Result<(), VpnError> {
     let jvm = env.get_java_vm()?;
     let mut result = CONTEXT
         .write()
-        .map_err(|e| types::VpnError::WLock(e.to_string()))?;
+        .map_err(|e| VpnError::WLock(e.to_string()))?;
     result.replace(AndroidContext {
         jvm,
         running: Arc::new(AtomicBool::new(false)),
@@ -121,7 +116,7 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStart<'local>(
     }
 }
 
-fn on_vpn_start(fd: i32) -> Result<(), types::VpnError> {
+fn on_vpn_start(fd: i32) -> Result<(), VpnError> {
     let (context, lock) = get_mut_context()?;
     context.fd = fd;
     context.running = Arc::new(AtomicBool::new(true));
@@ -150,7 +145,7 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStop<'local>(
     }
 }
 
-fn on_vpn_stop() -> Result<(), types::VpnError> {
+fn on_vpn_stop() -> Result<(), VpnError> {
     let (context, lock) = get_mut_context()?;
     context.fd = -1;
     context.running.store(false, Ordering::Relaxed);
@@ -181,7 +176,7 @@ pub fn init_log(log_level: &String) {
     android_logger::init_once(config);
 }
 
-pub fn start_vpn(mtu: i32) -> Result<(), types::VpnError> {
+pub fn start_vpn(mtu: i32) -> Result<(), VpnError> {
     log::info!("start vpn proxy");
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -195,7 +190,7 @@ pub fn start_vpn(mtu: i32) -> Result<(), types::VpnError> {
     Ok(())
 }
 
-pub fn stop_vpn() -> Result<(), types::VpnError> {
+pub fn stop_vpn() -> Result<(), VpnError> {
     log::info!("stop vpn proxy");
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -204,7 +199,7 @@ pub fn stop_vpn() -> Result<(), types::VpnError> {
     Ok(())
 }
 
-pub fn check_self_permission(permission: impl AsRef<str>) -> Result<bool, types::VpnError> {
+pub fn check_self_permission(permission: impl AsRef<str>) -> Result<bool, VpnError> {
     log::info!("check self permission:{}", permission.as_ref());
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -219,7 +214,7 @@ pub fn check_self_permission(permission: impl AsRef<str>) -> Result<bool, types:
     Ok(ret.z()?)
 }
 
-pub fn request_permission(permission: impl AsRef<str>) -> Result<(), types::VpnError> {
+pub fn request_permission(permission: impl AsRef<str>) -> Result<(), VpnError> {
     log::info!("request permission:{}", permission.as_ref());
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -234,9 +229,7 @@ pub fn request_permission(permission: impl AsRef<str>) -> Result<(), types::VpnE
     Ok(())
 }
 
-pub fn should_show_permission_rationale(
-    permission: impl AsRef<str>,
-) -> Result<bool, types::VpnError> {
+pub fn should_show_permission_rationale(permission: impl AsRef<str>) -> Result<bool, VpnError> {
     log::info!("should show permission rationale:{}", permission.as_ref());
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -251,7 +244,7 @@ pub fn should_show_permission_rationale(
     Ok(ret.z()?)
 }
 
-pub fn update_notification(content: impl AsRef<str>) -> Result<(), types::VpnError> {
+pub fn update_notification(content: impl AsRef<str>) -> Result<(), VpnError> {
     log::info!("update notification:{}", content.as_ref());
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -266,7 +259,7 @@ pub fn update_notification(content: impl AsRef<str>) -> Result<(), types::VpnErr
     Ok(())
 }
 
-pub fn save_data(key: impl AsRef<str>, content: impl AsRef<str>) -> Result<(), types::VpnError> {
+pub fn save_data(key: impl AsRef<str>, content: impl AsRef<str>) -> Result<(), VpnError> {
     log::info!("save data:{} - {}", key.as_ref(), content.as_ref());
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -282,7 +275,7 @@ pub fn save_data(key: impl AsRef<str>, content: impl AsRef<str>) -> Result<(), t
     Ok(())
 }
 
-pub fn load_data(key: impl AsRef<str>) -> Result<String, types::VpnError> {
+pub fn load_data(key: impl AsRef<str>) -> Result<String, VpnError> {
     log::info!("load data:{}", key.as_ref());
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
@@ -301,8 +294,18 @@ pub fn load_data(key: impl AsRef<str>) -> Result<String, types::VpnError> {
     Ok(value)
 }
 
+#[allow(unused)]
+pub fn sync_data() -> Result<(), VpnError> {
+    log::info!("sync data");
+    let (context, lock) = get_context()?;
+    let mut env = context.jvm.attach_current_thread()?;
+    drop(lock);
+    env.call_static_method("com/bmshi/proxy/mobile/TrojanProxy", "syncData", "()V", &[])?;
+    Ok(())
+}
+
 pub struct Session {
-    file: Mutex<ManuallyDrop<File>>,
+    file: ManuallyDrop<File>,
     mtu: usize,
     show_info: bool,
 }
@@ -317,7 +320,7 @@ impl Session {
             let fd = OwnedFd::from_raw_fd(fd);
             let file = fd.into();
             Self {
-                file: Mutex::new(ManuallyDrop::new(file)),
+                file: ManuallyDrop::new(file),
                 mtu,
                 show_info,
             }
@@ -326,24 +329,21 @@ impl Session {
 
     pub fn try_receive(&self) -> Result<Option<Packet>, ()> {
         let mut packet = Packet::new(self.mtu as u16);
-        if let Ok(mut file) = self.file.lock() {
-            match file.read(packet.bytes_mut()) {
-                Ok(0) => {
-                    log::error!("end of file");
-                    Err(())
-                }
-                Ok(n) => {
-                    packet.set_len(n);
-                    Ok(Some(packet))
-                }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
-                Err(err) => {
-                    log::error!("read file failed:{:?}", err);
-                    Err(())
-                }
+        let mut file = self.file.deref();
+        match file.read(packet.bytes_mut()) {
+            Ok(0) => {
+                log::error!("end of file");
+                Err(())
             }
-        } else {
-            Err(())
+            Ok(n) => {
+                packet.set_len(n);
+                Ok(Some(packet))
+            }
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
+            Err(err) => {
+                log::error!("read file failed:{:?}", err);
+                Err(())
+            }
         }
     }
 
@@ -352,23 +352,27 @@ impl Session {
     }
 
     pub fn send_packet(&self, packet: Packet) {
-        if let Ok(mut file) = self.file.lock() {
-            if let Err(err) = file.write_all(packet.bytes()) {
-                log::error!("send packet failed:{}", err);
-            } else if self.show_info {
-                if let Err(err) = packet.info() {
-                    log::error!("parse return packet failed:{:?}", err);
-                }
+        let mut file = self.file.deref();
+        if let Err(err) = file.write_all(packet.bytes()) {
+            log::error!("send packet failed:{}", err);
+        } else if self.show_info {
+            if let Err(err) = packet.info() {
+                log::error!("parse return packet failed:{:?}", err);
             }
-        } else {
-            log::error!("lock file for send packet failed");
+        }
+    }
+
+    #[allow(unused)]
+    pub fn sync(&self) {
+        if let Err(err) = sync_data() {
+            log::error!("sync data failed:{:?}", err);
         }
     }
 }
 
 impl Packet {
     pub fn new(size: u16) -> Self {
-        let mut data = vec![0u8; size as usize];
+        let data = vec![0u8; size as usize];
         Self { data }
     }
 

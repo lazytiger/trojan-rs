@@ -14,7 +14,7 @@ export default {
         pool_size: 20,
         mtu: 1500,
         port: 443,
-        log_level: "Info",
+        log_level: "Error",
       },
       label: "开始",
       running: false,

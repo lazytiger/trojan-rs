@@ -215,6 +215,7 @@ impl Connection {
         if event.is_readable() {
             log::info!("remote readable");
             self.remote_to_local(device, poll);
+            self.flush_remote(device, poll);
         }
 
         self.check_half_close(device, poll);

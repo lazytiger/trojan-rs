@@ -198,9 +198,38 @@ fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
 #[allow(dead_code)]
 #[allow(unused_imports)]
 mod tests {
-    use std::{fs::File, io::Write, net::Ipv4Addr};
+    use std::{fs::File, io::Write, net::Ipv4Addr, sync::Mutex, time::Instant};
 
     use crate::wintun::ipset::{range_to_cidr, IPSet};
+
+    #[test]
+    fn test_mutex() {
+        let mutex = Mutex::new(File::create("test.log").unwrap());
+        let now = Instant::now();
+        for _ in 0..10000 {
+            if let Ok(mut lock) = mutex.lock() {
+                lock.write(b"hello, world").unwrap();
+            }
+        }
+        println!("{}", now.elapsed().as_micros());
+
+        let now = Instant::now();
+        let mut file = File::create("test.log").unwrap();
+        for _ in 0..10000 {
+            file.write(b"hello, world").unwrap();
+        }
+        println!("{}", now.elapsed().as_micros());
+    }
+
+    #[test]
+    fn test_ipset_reverse() {
+        let ipset = IPSet::with_file("ipset/ipset24.txt", true).unwrap();
+        let mut file = File::create("test24.txt").unwrap();
+        for (i, item) in ipset.data.iter().enumerate() {
+            let ip: Ipv4Addr = item.ip.into();
+            write!(&mut file, "<item>{}/{}</item>\r\n", ip, item.prefix).unwrap();
+        }
+    }
 
     #[test]
     fn test_ipset_create() {

@@ -6,7 +6,9 @@ use std::{
 use surge_ping::{Client, ConfigBuilder, IcmpPacket, PingIdentifier, PingSequence};
 use tokio::runtime::{Builder, Runtime};
 
-fn main() {
+fn main() {}
+
+fn test() {
     let handle = std::thread::spawn(move || {
         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         runtime.block_on(async {

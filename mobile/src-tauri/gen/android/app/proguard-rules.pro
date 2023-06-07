@@ -34,3 +34,7 @@
   public boolean checkSelfPermission(java.lang.String);
   public updateNotification(java.lang.String);
 }
+
+-keep class com.bmshi.proxy.mobile.TrojanProxy {
+  public syncData();
+}

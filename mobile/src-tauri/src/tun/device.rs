@@ -325,7 +325,7 @@ impl smoltcp::phy::RxToken for RxToken {
 }
 
 impl<'a> smoltcp::phy::TxToken for TxToken<'a> {
-    fn consume<R, F>(mut self, len: usize, f: F) -> R
+    fn consume<R, F>(self, len: usize, f: F) -> R
     where
         F: FnOnce(&mut [u8]) -> R,
     {

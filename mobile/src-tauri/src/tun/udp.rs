@@ -130,10 +130,15 @@ impl Connection {
                     self.pass.as_bytes(),
                     &self.empty_addr,
                 );
-                log::info!("sending {} bytes handshake data", buffer.len());
+                log::info!(
+                    "{:?} {:?} sending {} bytes handshake data",
+                    self.endpoint,
+                    self.remote.destination(),
+                    buffer.len()
+                );
                 if self.remote.write(buffer.as_ref()).is_ok() {
                     self.established = true;
-                    log::info!("connection is ready now");
+                    log::info!("{:?} connection is ready now", self.endpoint);
                 } else {
                     self.close_remote(poll);
                     return;
@@ -143,6 +148,7 @@ impl Connection {
         }
         if event.is_readable() {
             self.remote_to_local(socket, poll);
+            self.flush_remote(poll);
         }
     }
 
@@ -165,7 +171,11 @@ impl Connection {
 
     fn local_to_remote(&mut self, poll: &Poll, header: &[u8], body: &[u8]) {
         if !self.rbuffer.is_empty() {
-            log::info!("send cached {} raw bytes to remote tls", self.rbuffer.len());
+            log::info!(
+                "{} send cached {:?} raw bytes to remote tls",
+                self.endpoint,
+                self.rbuffer.len()
+            );
             match send_all(&mut self.remote, &mut self.rbuffer) {
                 Ok(true) => {
                     log::info!("send all completed");
@@ -185,7 +195,11 @@ impl Connection {
         let mut data = header;
         let mut offset = 0;
         while !data.is_empty() {
-            log::info!("send {} bytes raw data to remote now", data.len());
+            log::info!(
+                "{:?} send {} bytes raw data to remote now",
+                self.endpoint,
+                data.len()
+            );
             match self.remote.write(data) {
                 Ok(0) => {
                     log::info!("remote connection break with 0 bytes");
@@ -213,7 +227,11 @@ impl Connection {
         }
         let remaining = header.len() + body.len() - offset;
         if remaining != 0 {
-            log::info!("sending data {} bytes left, cache now", remaining);
+            log::info!(
+                "{:?} sending data {} bytes left, cache now",
+                self.endpoint,
+                remaining
+            );
             self.rbuffer.extend_from_slice(data);
             if data.len() < header.len() {
                 self.rbuffer.extend_from_slice(body);

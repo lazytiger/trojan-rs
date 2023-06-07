@@ -1,6 +1,6 @@
 use std::{
     io::{Error, ErrorKind, Read, Write},
-    net::{IpAddr, Shutdown},
+    net::{IpAddr, Shutdown, SocketAddr},
 };
 
 use mio::{net::TcpStream, Interest, Poll, Token};
@@ -33,16 +33,20 @@ impl Read for TlsConn {
         let ret = self.session.reader().read(buf);
         log::info!("reader.read return {:?}", ret);
         match ret {
+            //session is empty, trying to read from socket
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
                 let ret = self.session.read_tls(&mut self.stream);
                 log::info!("session.read_tls return {:?}", ret);
                 match ret {
+                    //some data has been read from socket
                     Ok(n) if n > 0 => {
                         log::info!("read {} byte tls data from stream", n);
+                        //decode the tls data into plain txt
                         if let Err(err) = self.session.process_new_packets() {
                             Err(Error::new(ErrorKind::InvalidData, err))
                         } else {
                             log::info!("process new packets success");
+                            //there is new data, read again
                             self.read(buf)
                         }
                     }
@@ -63,6 +67,7 @@ impl Write for TlsConn {
         let ret = self.session.writer().write(buf);
         log::info!("writer.write return {:?}", ret);
         match ret {
+            //session is full, trying to flush data to socket.
             Ok(0) => {
                 let ret = self.session.write_tls(&mut self.stream);
                 log::info!("session.write_tls return {:?}", ret);
@@ -70,7 +75,7 @@ impl Write for TlsConn {
                     Err(err) if err.kind() == ErrorKind::NotConnected => {
                         Err(ErrorKind::WouldBlock.into())
                     }
-                    Ok(m) if m > 0 => self.write(buf),
+                    Ok(m) if m > 0 => self.write(buf), //some data is flushed, try again
                     ret => ret,
                 }
             }
@@ -82,7 +87,13 @@ impl Write for TlsConn {
         self.session
             .write_tls(&mut self.stream)
             .map(|n| {
-                log::info!("flush {} bytes tls data to stream", n);
+                if n > 0 {
+                    log::info!("flush {} bytes tls data to stream", n);
+                    let _ = self.stream.flush();
+                    self.flush()
+                } else {
+                    Err(ErrorKind::WouldBlock.into())
+                }
             })
             .map_err(|err| {
                 if err.kind() == ErrorKind::NotConnected {
@@ -90,7 +101,7 @@ impl Write for TlsConn {
                 } else {
                     err
                 }
-            })
+            })?
     }
 }
 
@@ -107,10 +118,16 @@ impl TlsConn {
         }
     }
 
+    #[allow(unused)]
     pub fn source(&self) -> Option<IpAddr> {
         self.stream.peer_addr().map(|addr| addr.ip()).ok()
     }
 
+    pub fn destination(&self) -> Option<SocketAddr> {
+        self.stream.local_addr().ok()
+    }
+
+    #[allow(unused)]
     pub fn reset_index(&mut self, index: usize, token: Token, poll: &Poll) -> bool {
         self.index = index;
         self.token = token;
