@@ -87,8 +87,15 @@ class TrojanProxy : VpnService() {
         builder.addRoute(parts[0], parts[1].toInt())
       }
       builder.addRoute("10.10.11.1", 32)
-      builder.addAddress("10.10.10.1", 30).addDnsServer("10.10.11.1")
-        .addDisallowedApplication(packageName).setSession("gfw").setMtu(MainActivity.mtu)
+        .addAddress("10.10.10.1", 30)
+        .addDnsServer("10.10.11.1")
+        .addDnsServer("8.8.8.8")
+        .addDnsServer("8.8.4.4")
+        .addDnsServer("1.1.1.1")
+        .addDnsServer("1.0.0.1")
+        .addDisallowedApplication(packageName)
+        .setSession("gfw")
+        .setMtu(MainActivity.mtu)
         .setBlocking(false)
       var vpn = builder.establish()
       if (vpn != null) {
