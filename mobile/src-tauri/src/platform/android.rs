@@ -107,16 +107,19 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onPermissionResu
 
 #[no_mangle]
 pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStart<'local>(
-    _: JNIEnv<'local>,
+    mut env: JNIEnv<'local>,
     _: JObject<'local>,
     fd: jint,
+    gateway: JObject<'local>,
 ) {
-    if let Err(err) = on_vpn_start(fd) {
+    let gateway: JString<'local> = gateway.into();
+    let gateway = env.get_string(&gateway).unwrap();
+    if let Err(err) = on_vpn_start(fd, gateway.to_string_lossy().to_string()) {
         log::error!("onStart failed:{:?}", err);
     }
 }
 
-fn on_vpn_start(fd: i32) -> Result<(), VpnError> {
+fn on_vpn_start(fd: i32, gateway: String) -> Result<(), VpnError> {
     let (context, lock) = get_mut_context()?;
     context.fd = fd;
     context.running = Arc::new(AtomicBool::new(true));
@@ -124,7 +127,7 @@ fn on_vpn_start(fd: i32) -> Result<(), VpnError> {
     drop(lock);
     std::thread::spawn(move || {
         if let Err(err) = std::panic::catch_unwind(|| {
-            if let Err(err) = crate::process_vpn(fd, running) {
+            if let Err(err) = crate::process_vpn(fd, gateway, running) {
                 log::error!("found error:{:?} while process vpn", err);
                 if let Err(err) = emit_event("on_status_changed", 2) {
                     log::error!("emit status changed failed:{:?}", err);

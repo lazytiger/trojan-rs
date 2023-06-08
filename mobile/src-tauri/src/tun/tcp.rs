@@ -349,7 +349,6 @@ impl TcpServer {
             log::info!("new request, handle:{}, event:{:?}", handle, event);
             let socket = device.get_tcp_socket_mut(handle, WakerMode::None);
             if socket.is_listening() {
-                log::warn!("socket:{:?} still listening", socket.local_endpoint());
                 if let Some(conn) = self.handle2conns.get_mut(&handle) {
                     unsafe { crate::get_mut_unchecked(conn) }.close(device, poll);
                 }

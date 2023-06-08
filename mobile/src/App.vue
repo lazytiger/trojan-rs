@@ -14,6 +14,9 @@ export default {
         pool_size: 20,
         mtu: 1500,
         port: 443,
+        trust_dns: "8.8.8.8",
+        untrusted_dns: "114.114.114.114",
+        dns_cache_time: 600,
         log_level: "Error",
       },
       label: "开始",
@@ -22,7 +25,7 @@ export default {
   },
   methods: {
     async start() {
-      await invoke("save_data", {key:"config", value:JSON.stringify(this.config)});
+      await invoke("save_data", {key: "config", value: JSON.stringify(this.config)});
       if (!this.running) {
         await invoke("start_vpn", {option: this.config});
         this.label = "启动中";
@@ -53,7 +56,7 @@ export default {
       })
     },
     do_action() {
-      if(this.label === '启动中' || this.label === '关闭中') {
+      if (this.label === '启动中' || this.label === '关闭中') {
         return;
       }
       if (!this.running) {
@@ -67,11 +70,11 @@ export default {
     }
   },
   async mounted() {
-    let data = await invoke("load_data", {key:"config"});
-    if(data !== "") {
+    let data = await invoke("load_data", {key: "config"});
+    if (data !== "") {
       this.config = JSON.parse(data.toString());
     }
-    await invoke("init_window", {logLevel:this.config.log_level});
+    await invoke("init_window", {logLevel: this.config.log_level});
     await this.init_listener();
   }
 }
@@ -86,6 +89,10 @@ export default {
         <v-text-field v-model="config.password" :append-icon="show ? 'mdi-eye' : 'mdi-eye-off'"
                       :readonly="running" :type="show ? 'text' : 'password'" label="服务器密码"
                       variant="outlined" @click:append="show = !show"></v-text-field>
+        <v-text-field v-model="config.trust_dns" :readonly="running" label="可信DNS"
+                      variant="outlined"></v-text-field>
+        <v-text-field v-model="config.untrusted_dns" :readonly="running" label="不可信DNS"
+                      variant="outlined"></v-text-field>
         <v-combobox v-model="config.log_level"
                     :items="['Trace', 'Debug', 'Info', 'Warn', 'Error', 'Off']"
                     :readonly="running"

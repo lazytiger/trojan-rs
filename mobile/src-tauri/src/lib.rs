@@ -22,6 +22,9 @@ pub struct Options {
     pub mtu: usize,
     pub pool_size: usize,
     pub log_level: String,
+    pub dns_cache_time: u64,
+    pub trusted_dns: String,
+    pub untrusted_dns: String,
 }
 
 pub type VpnState = RwLock<Options>;
@@ -151,14 +154,18 @@ pub fn emit_event<T: Serialize + Clone>(event: &str, data: T) -> Result<(), type
     Ok(())
 }
 
-pub fn process_vpn(fd: i32, running: Arc<AtomicBool>) -> Result<(), types::VpnError> {
+pub fn process_vpn(
+    fd: i32,
+    gateway: String,
+    running: Arc<AtomicBool>,
+) -> Result<(), types::VpnError> {
     let options = window!()
         .state::<RwLock<Options>>()
         .inner()
         .read()
         .map_err(|e| VpnError::RLock(e.to_string()))?
         .clone();
-    tun::run(fd, options, running)
+    tun::run(fd, gateway, options, running)
 }
 
 #[allow(mutable_transmutes)]

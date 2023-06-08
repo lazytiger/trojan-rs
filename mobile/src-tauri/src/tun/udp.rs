@@ -38,8 +38,8 @@ fn next_token() -> Token {
 }
 
 pub struct UdpSocketRef<'a, 'b> {
-    socket: &'a mut Socket<'b>,
-    endpoint: Option<IpEndpoint>,
+    pub(crate) socket: &'a mut Socket<'b>,
+    pub(crate) endpoint: Option<IpEndpoint>,
 }
 
 impl<'a, 'b> std::io::Read for UdpSocketRef<'a, 'b> {

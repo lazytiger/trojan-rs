@@ -21,7 +21,7 @@ import java.net.InetAddress
 
 
 class TrojanProxy : VpnService() {
-  private external fun onStart(fd: Int)
+  private external fun onStart(fd: Int, gateway:String)
   private external fun onStop()
 
   private val stopReceiver = object : BroadcastReceiver() {
@@ -76,7 +76,7 @@ class TrojanProxy : VpnService() {
       var vpn = builder.establish()
       if (vpn != null) {
         vpnFd = vpn
-        onStart(vpn.fd)
+        onStart(vpn.fd, "10.10.10.1")
         startForeground(830224, notifyBuilder.build())
       } else {
         Logger.warn("establish vpn failed")

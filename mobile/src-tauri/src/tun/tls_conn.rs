@@ -10,7 +10,7 @@ use crate::tun::status::{ConnStatus, StatusProvider};
 
 pub struct TlsConn {
     session: Connection,
-    stream: TcpStream,
+    pub(crate) stream: TcpStream,
     index: usize,
     token: Token,
     status: ConnStatus,

@@ -9,7 +9,7 @@ use std::{
 };
 
 use mio::{Events, Poll, Token, Waker};
-use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
+use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
 use sha2::{Digest, Sha224};
 use smoltcp::{
     iface::{Config, Interface, SocketSet},
@@ -21,14 +21,15 @@ use smoltcp::{
 use crate::{
     emit_event, platform,
     tun::{
-        device::VpnDevice, idle_pool::IdlePool, resolver::DnsResolver, tcp::TcpServer,
-        udp::UdpServer,
+        device::VpnDevice, dns::DnsServer, idle_pool::IdlePool, resolver::DnsResolver,
+        tcp::TcpServer, udp::UdpServer,
     },
     types::{Result, VpnError},
     Options,
 };
 
 mod device;
+mod dns;
 mod idle_pool;
 mod proto;
 mod resolver;
@@ -59,8 +60,8 @@ fn prepare_idle_pool(
     resolver: &DnsResolver,
     options: &Options,
     addr: SocketAddr,
-) -> Result<IdlePool> {
-    let hostname = options.hostname.as_str().try_into()?;
+) -> Result<(IdlePool, Arc<ClientConfig>, ServerName)> {
+    let hostname: ServerName = options.hostname.as_str().try_into()?;
     let mut root_store = RootCertStore::empty();
     root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
         OwnedTrustAnchor::from_subject_spki_name_constraints(
@@ -78,8 +79,8 @@ fn prepare_idle_pool(
         .with_no_client_auth();
     let config = Arc::new(config);
     let mut pool = IdlePool::new(
-        config,
-        hostname,
+        config.clone(),
+        hostname.clone(),
         options.pool_size + 1,
         options.port,
         options.hostname.clone(),
@@ -87,7 +88,7 @@ fn prepare_idle_pool(
     );
     pool.init_index(CHANNEL_CNT, CHANNEL_IDLE, MIN_INDEX, MAX_INDEX);
     pool.init(poll, resolver);
-    Ok(pool)
+    Ok((pool, config, hostname))
 }
 
 fn prepare_device(device: &mut VpnDevice) -> Interface {
@@ -120,27 +121,37 @@ fn show_info(level: &String) -> bool {
     level == "Debug" || level == "Info" || level == "Trace"
 }
 
-pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
+pub fn run(fd: i32, gateway: String, options: Options, running: Arc<AtomicBool>) -> Result<()> {
     let session = Arc::new(platform::Session::new(
         fd,
         options.mtu,
         show_info(&options.log_level),
     ));
 
+    let trusted_addr = (options.trusted_dns.clone() + ":53").parse()?;
+    let untrusted_addr = (options.untrusted_dns.clone() + ":53").parse()?;
+
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
-    let server_ip = utils::resolve(options.hostname.as_str(), "114.114.114.114:53")?;
+    let server_ip = utils::resolve(
+        options.hostname.as_str(),
+        (options.untrusted_dns.clone() + ":53").as_str(),
+    )?;
     if server_ip.is_empty() {
         return Err(VpnError::Resolve);
     }
     log::info!("server ip are {:?}", server_ip);
     let server_addr = SocketAddr::new(server_ip[0], options.port);
-    let mut resolver = DnsResolver::new(waker, Token(RESOLVER), Some("114.114.114.114:53".into()));
-    let mut pool = prepare_idle_pool(&poll, &resolver, &options, server_addr)?;
+    let mut resolver = DnsResolver::new(
+        waker,
+        Token(RESOLVER),
+        Some((options.untrusted_dns.clone() + ":53").into()),
+    );
+    let (mut pool, config, hostname) = prepare_idle_pool(&poll, &resolver, &options, server_addr)?;
 
     let pass = digest_pass(&options.password);
     let mut udp_server = UdpServer::new(pass.clone());
-    let mut tcp_server = TcpServer::new(pass);
+    let mut tcp_server = TcpServer::new(pass.clone());
 
     let mut sockets = Arc::new(SocketSet::new([]));
     let mut device = VpnDevice::new(
@@ -149,7 +160,22 @@ pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
         IpEndpoint::from(server_addr),
         sockets.clone(),
     );
+    let listener_addr = gateway + ":53";
+    let listener_addr: SocketAddr = listener_addr.parse().unwrap();
+    let listener = device.ensure_udp_socket(listener_addr.into()).unwrap();
     let mut interface = prepare_device(&mut device);
+
+    let mut dns_server = DnsServer::new(
+        server_addr,
+        config,
+        hostname,
+        listener,
+        trusted_addr,
+        untrusted_addr,
+        options.dns_cache_time,
+        options.mtu,
+        pass,
+    )?;
 
     let mut events = Events::with_capacity(1024);
     let timeout = Some(Duration::from_millis(1));
@@ -160,6 +186,7 @@ pub fn run(fd: i32, options: Options, running: Arc<AtomicBool>) -> Result<()> {
     while running.load(Ordering::Relaxed) {
         let frame_start = std::time::Instant::now();
         let now = Instant::now();
+        dns_server.ready(&mut device);
         let sockets = unsafe { crate::get_mut_unchecked(&mut sockets) };
         if interface.poll(now, &mut device, sockets) {
             udp_server.do_local(&mut pool, &poll, &resolver, &mut device);

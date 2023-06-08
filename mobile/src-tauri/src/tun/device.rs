@@ -100,9 +100,9 @@ impl<'a> VpnDevice<'a> {
         socket.set_ack_delay(None);
     }
 
-    pub fn ensure_udp_socket(&mut self, endpoint: IpEndpoint) {
+    pub fn ensure_udp_socket(&mut self, endpoint: IpEndpoint) -> Option<SocketHandle> {
         if self.udp_set.contains(&endpoint) {
-            return;
+            return None;
         }
         let mut socket = UdpSocket::new(
             PacketBuffer::new(vec![PacketMetadata::EMPTY; 200], vec![0; 10240]),
@@ -117,6 +117,7 @@ impl<'a> VpnDevice<'a> {
         socket.register_recv_waker(rx);
         socket.register_send_waker(tx);
         self.udp_set.insert(endpoint);
+        Some(handle)
     }
 
     pub fn remove_socket(&mut self, handle: SocketHandle) {
