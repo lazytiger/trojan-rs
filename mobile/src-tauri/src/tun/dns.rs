@@ -208,6 +208,7 @@ impl DnsServer {
                     UdpParseResultEndpoint::Packet(packet) => {
                         let payload = &packet.payload[..packet.length];
                         if let Ok(message) = Message::from_bytes(payload) {
+                            log::info!("get response from trusted");
                             self.dispatch_message(message, socket.socket);
                         }
                         buffer = &packet.payload[packet.length..];
@@ -227,6 +228,7 @@ impl DnsServer {
         while let Ok((len, from)) = self.untrusted.recv_from(self.buffer.as_mut_slice()) {
             let data = &self.buffer.as_slice()[..len];
             if let Ok(mut message) = Message::from_bytes(data) {
+                log::info!("get response from untrusted");
                 self.dispatch_message(
                     message,
                     device.get_udp_socket_mut(self.listener, WakerMode::None),
@@ -280,7 +282,7 @@ impl DnsServer {
 
     fn query_trusted(&mut self, body: &[u8]) -> bool {
         let mut header = BytesMut::new();
-        UdpAssociate::generate(&mut header, &self.untrusted_addr, body.len() as u16);
+        UdpAssociate::generate(&mut header, &self.trusted_addr, body.len() as u16);
         if !self.trusted_lbuffer.is_empty() {
             match send_all(&mut self.trusted, &mut self.trusted_lbuffer) {
                 Ok(true) => {
@@ -376,6 +378,7 @@ impl DnsServer {
         };
         for i in 0..(len - 1) {
             let name = split.as_slice()[i..len].join(".");
+            log::info!("test domain:{}", name);
             if self.blocked_domains.contains(name.as_str()) {
                 return true;
             }

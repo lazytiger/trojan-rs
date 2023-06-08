@@ -224,13 +224,13 @@ pub fn run(fd: i32, gateway: String, options: Options, running: Arc<AtomicBool>)
         if last_speed_time.elapsed().as_millis() > 1000 {
             let (rx_speed, tx_speed) = device.calculate_speed();
             log::info!(
-                "current speed - rx:{:.4}MB/s, tx:{:.4}/MB/s",
+                "current speed - rx:{:.3}MB/s, tx:{:.3}/MB/s",
                 rx_speed,
                 tx_speed
             );
             emit_event(
                 "update_speed",
-                format!("rx:{:.4}MB/s, tx:{:.4}MB/s", rx_speed, tx_speed),
+                format!("rx:{:.3}MB/s, tx:{:.3}MB/s", rx_speed, tx_speed),
             )?;
             last_speed_time = std::time::Instant::now();
         }

@@ -203,6 +203,21 @@ mod tests {
     use crate::wintun::ipset::{range_to_cidr, IPSet};
 
     #[test]
+    fn test_names() {
+        let name = "www.reddit.com.";
+        let split: Vec<_> = name.split(".").collect();
+        let len = if name.ends_with(".") {
+            split.len() - 1
+        } else {
+            split.len()
+        };
+        for i in 0..len - 1 {
+            let name = split.as_slice()[i..len].join(".");
+            println!("name:{}", name);
+        }
+    }
+
+    #[test]
     fn test_mutex() {
         let mutex = Mutex::new(File::create("test.log").unwrap());
         let now = Instant::now();
