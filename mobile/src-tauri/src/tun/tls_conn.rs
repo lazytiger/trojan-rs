@@ -31,12 +31,12 @@ impl Read for TlsConn {
         //1. read from session
         //1.1 session return WouldBlock,
         let ret = self.session.reader().read(buf);
-        log::info!("reader.read return {:?}", ret);
+        log::trace!("reader.read return {:?}", ret);
         match ret {
             //session is empty, trying to read from socket
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
                 let ret = self.session.read_tls(&mut self.stream);
-                log::info!("session.read_tls return {:?}", ret);
+                log::trace!("session.read_tls return {:?}", ret);
                 match ret {
                     //some data has been read from socket
                     Ok(n) if n > 0 => {

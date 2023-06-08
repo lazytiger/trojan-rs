@@ -153,16 +153,17 @@ pub fn run(fd: i32, gateway: String, options: Options, running: Arc<AtomicBool>)
     let mut udp_server = UdpServer::new(pass.clone());
     let mut tcp_server = TcpServer::new(pass.clone());
 
+    let listener_addr = gateway + ":53";
+    let listener_addr: SocketAddr = listener_addr.parse().unwrap();
     let mut sockets = Arc::new(SocketSet::new([]));
     let mut device = VpnDevice::new(
         session.clone(),
         options.mtu,
         IpEndpoint::from(server_addr),
+        IpEndpoint::from(listener_addr),
         sockets.clone(),
     );
-    let listener_addr = gateway + ":53";
-    let listener_addr: SocketAddr = listener_addr.parse().unwrap();
-    let listener = device.ensure_udp_socket(listener_addr.into()).unwrap();
+    let listener = device.create_udp_socket(listener_addr.into());
     let mut interface = prepare_device(&mut device);
 
     let mut dns_server = DnsServer::new(
@@ -184,7 +185,6 @@ pub fn run(fd: i32, gateway: String, options: Options, running: Arc<AtomicBool>)
     let check_duration = std::time::Duration::new(60, 0);
 
     while running.load(Ordering::Relaxed) {
-        let frame_start = std::time::Instant::now();
         let now = Instant::now();
         dns_server.ready(&mut device);
         let sockets = unsafe { crate::get_mut_unchecked(&mut sockets) };
@@ -268,7 +268,6 @@ pub fn run(fd: i32, gateway: String, options: Options, running: Arc<AtomicBool>)
             pool.check_timeout(&poll);
             last_check_time = now;
         }
-        log::info!("tick cost:{}ms", frame_start.elapsed().as_millis());
     }
     Ok(())
 }

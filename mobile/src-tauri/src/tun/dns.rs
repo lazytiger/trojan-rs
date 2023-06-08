@@ -106,6 +106,7 @@ impl DnsServer {
         let mut buffer = self.buffer.clone();
         let listener = device.get_udp_socket_mut(self.listener, WakerMode::None);
         while let Ok((len, endpoint)) = listener.recv_slice(buffer.as_mut_slice()) {
+            log::info!("got dns request {} bytes", len);
             let data = &buffer.as_slice()[..len];
             if let Ok(message) = Message::from_bytes(data) {
                 if message.query_count() == 1 {
@@ -155,6 +156,8 @@ impl DnsServer {
                         message
                     );
                 }
+            } else {
+                log::warn!("not a dns message found");
             }
         }
     }
@@ -335,8 +338,11 @@ impl DnsServer {
 
     fn flush_trusted(&mut self) -> bool {
         if let Err(err) = self.trusted.flush() {
-            log::error!("flush trusted failed:{:?}", err);
-            false
+            let ret = err.kind() == ErrorKind::WouldBlock;
+            if !ret {
+                log::error!("flush trusted failed:{:?}", err);
+            }
+            ret
         } else {
             true
         }
@@ -362,12 +368,14 @@ impl DnsServer {
     }
 
     fn is_blocked(&self, name: &str) -> bool {
-        if self.blocked_domains.contains(name) {
-            return true;
-        }
         let split: Vec<_> = name.split(".").collect();
-        for i in 0..split.len() - 1 {
-            let name = split.as_slice()[i..].join(".");
+        let len = if name.ends_with(".") {
+            split.len() - 1
+        } else {
+            split.len()
+        };
+        for i in 0..(len - 1) {
+            let name = split.as_slice()[i..len].join(".");
             if self.blocked_domains.contains(name.as_str()) {
                 return true;
             }

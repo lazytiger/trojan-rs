@@ -63,6 +63,7 @@ pub struct VpnDevice<'a> {
     udp_set: HashSet<IpEndpoint>,
     mtu: usize,
     server_addr: IpEndpoint,
+    dns_addr: IpEndpoint,
     traffic: Traffic,
 }
 
@@ -71,6 +72,7 @@ impl<'a> VpnDevice<'a> {
         session: Arc<Session>,
         mtu: usize,
         server_addr: IpEndpoint,
+        dns_addr: IpEndpoint,
         sockets: Arc<SocketSet<'a>>,
     ) -> Self {
         Self {
@@ -78,6 +80,7 @@ impl<'a> VpnDevice<'a> {
             mtu,
             sockets,
             server_addr,
+            dns_addr,
             traffic: Traffic::new(),
             tcp_wakers: Wakers::new(),
             udp_wakers: Wakers::new(),
@@ -100,24 +103,28 @@ impl<'a> VpnDevice<'a> {
         socket.set_ack_delay(None);
     }
 
-    pub fn ensure_udp_socket(&mut self, endpoint: IpEndpoint) -> Option<SocketHandle> {
+    pub fn ensure_udp_socket(&mut self, endpoint: IpEndpoint) {
         if self.udp_set.contains(&endpoint) {
-            return None;
+            return;
         }
+        let handle = self.create_udp_socket(endpoint);
+        log::info!("udp handle:{} is {}", handle, endpoint);
+        let sockets = unsafe { crate::get_mut_unchecked(&mut self.sockets) };
+        let socket = sockets.get_mut::<UdpSocket>(handle);
+        let (rx, tx) = self.udp_wakers.get_wakers(handle);
+        socket.register_recv_waker(rx);
+        socket.register_send_waker(tx);
+        self.udp_set.insert(endpoint);
+    }
+
+    pub fn create_udp_socket(&mut self, endpoint: IpEndpoint) -> SocketHandle {
         let mut socket = UdpSocket::new(
             PacketBuffer::new(vec![PacketMetadata::EMPTY; 200], vec![0; 10240]),
             PacketBuffer::new(vec![PacketMetadata::EMPTY; 10000], vec![0; 1024000]),
         );
         socket.bind(endpoint).unwrap();
         let sockets = unsafe { crate::get_mut_unchecked(&mut self.sockets) };
-        let handle = sockets.add(socket);
-        log::info!("udp handle:{} is {}", handle, endpoint);
-        let socket = sockets.get_mut::<UdpSocket>(handle);
-        let (rx, tx) = self.udp_wakers.get_wakers(handle);
-        socket.register_recv_waker(rx);
-        socket.register_send_waker(tx);
-        self.udp_set.insert(endpoint);
-        Some(handle)
+        sockets.add(socket)
     }
 
     pub fn remove_socket(&mut self, handle: SocketHandle) {
@@ -224,6 +231,10 @@ impl<'a> VpnDevice<'a> {
 
     pub fn is_server(&self, ip: IpEndpoint) -> bool {
         self.server_addr.addr == ip.addr
+    }
+
+    pub fn is_dns(&self, ip: IpEndpoint) -> bool {
+        self.dns_addr.addr == ip.addr
     }
 }
 

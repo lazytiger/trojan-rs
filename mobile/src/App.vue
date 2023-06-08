@@ -14,7 +14,7 @@ export default {
         pool_size: 20,
         mtu: 1500,
         port: 443,
-        trust_dns: "8.8.8.8",
+        trusted_dns: "8.8.8.8",
         untrusted_dns: "114.114.114.114",
         dns_cache_time: 600,
         log_level: "Error",
@@ -89,7 +89,7 @@ export default {
         <v-text-field v-model="config.password" :append-icon="show ? 'mdi-eye' : 'mdi-eye-off'"
                       :readonly="running" :type="show ? 'text' : 'password'" label="服务器密码"
                       variant="outlined" @click:append="show = !show"></v-text-field>
-        <v-text-field v-model="config.trust_dns" :readonly="running" label="可信DNS"
+        <v-text-field v-model="config.trusted_dns" :readonly="running" label="可信DNS"
                       variant="outlined"></v-text-field>
         <v-text-field v-model="config.untrusted_dns" :readonly="running" label="不可信DNS"
                       variant="outlined"></v-text-field>

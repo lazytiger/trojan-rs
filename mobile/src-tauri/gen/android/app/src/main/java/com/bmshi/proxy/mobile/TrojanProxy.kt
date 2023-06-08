@@ -70,13 +70,14 @@ class TrojanProxy : VpnService() {
         val parts = route.split("/")
         builder.addRoute(parts[0], parts[1].toInt())
       }
-      builder.addAddress("10.10.10.1", 30).addDnsServer("8.8.8.8")
+      builder.addRoute("10.10.11.1", 32)
+      builder.addAddress("10.10.10.1", 30).addDnsServer("10.10.11.1")
         .addDisallowedApplication(packageName).setSession("gfw").setMtu(MainActivity.mtu)
         .setBlocking(false)
       var vpn = builder.establish()
       if (vpn != null) {
         vpnFd = vpn
-        onStart(vpn.fd, "10.10.10.1")
+        onStart(vpn.fd, "10.10.11.1")
         startForeground(830224, notifyBuilder.build())
       } else {
         Logger.warn("establish vpn failed")
