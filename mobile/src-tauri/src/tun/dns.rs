@@ -66,7 +66,7 @@ impl DnsServer {
     ) -> types::Result<DnsServer> {
         let trusted = new_tls_conn(server_addr, config.clone(), hostname.clone(), &pass)?;
         let untrusted = UdpSocket::bind("0.0.0.0:0".parse().unwrap())?;
-        let domains = include_bytes!("../../../../ipset/domain.txt");
+        let domains = include_bytes!("../../../../trojan-client/src-tauri/config/domain.txt");
         let reader = BufReader::new(Cursor::new(domains));
         let mut blocked_domains = HashSet::new();
         reader.lines().for_each(|line| {
