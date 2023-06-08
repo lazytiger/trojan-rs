@@ -34,63 +34,99 @@ class MainActivity : TauriActivity() {
 
     @JvmStatic
     fun startVpn(mtu: Int) {
-      Logger.info("start vpn in MainActivity")
-      MainActivity.mtu = mtu
-      instance.startService()
+      try {
+        Logger.info("start vpn in MainActivity")
+        MainActivity.mtu = mtu
+        instance.startService()
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
+      }
     }
 
     @JvmStatic
     fun shouldShowRequestPermissionRationaleNative(permission: String): Boolean {
-      return instance.shouldShowRequestPermissionRationale(permission)
+      return try {
+        instance.shouldShowRequestPermissionRationale(permission)
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
+        false
+      }
     }
 
     @JvmStatic
     fun requestPermission(permission: String) {
-      instance.requestPermissionLauncher.launch(permission)
+      try {
+        instance.requestPermissionLauncher.launch(permission)
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
+      }
     }
 
     @JvmStatic
     fun checkSelfPermission(permission: String): Boolean {
-      return ContextCompat.checkSelfPermission(
-        instance,
-        permission
-      ) == PackageManager.PERMISSION_GRANTED
+      return try {
+        ContextCompat.checkSelfPermission(
+          instance,
+          permission
+        ) == PackageManager.PERMISSION_GRANTED
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
+        false
+      }
     }
 
     @JvmStatic
     fun stopVpn() {
-      Logger.info("stopVpn called in MainActivity")
-      val intent = Intent("stop")
-      intent.setPackage(instance.packageName)
-      instance.sendBroadcast(intent)
+      try {
+        Logger.info("stopVpn called in MainActivity")
+        val intent = Intent(TrojanProxy.STOP_ACTION)
+        intent.setPackage(instance.packageName)
+        instance.sendBroadcast(intent)
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
+      }
     }
 
     @JvmStatic
     fun updateNotification(content: String) {
-      notifyBuilder.setContentText(content)
-      if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)) {
-        NotificationManagerCompat.from(instance).notify(830224, notifyBuilder.build())
-      } else {
-        Logger.info("notification disabled")
+      try {
+        notifyBuilder.setContentText(content)
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+          NotificationManagerCompat.from(instance)
+            .notify(TrojanProxy.NOTIFICATION_ID, notifyBuilder.build())
+        } else {
+          Logger.warn("notification disabled")
+        }
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
       }
     }
 
     @JvmStatic
     fun saveData(name: String, data: String) {
-      val prefs = instance.getPreferences(MODE_PRIVATE)
-      val editor = prefs.edit()
-      editor.putString(name, data)
-      if (editor.commit()) {
-        Logger.info("saveData $name - $data")
+      try {
+        val prefs = instance.getPreferences(MODE_PRIVATE)
+        val editor = prefs.edit()
+        editor.putString(name, data)
+        if (editor.commit()) {
+          Logger.info("saveData $name - $data")
+        }
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
       }
     }
 
     @JvmStatic
     fun loadData(name: String): String {
-      val prefs = instance.getPreferences(MODE_PRIVATE)
-      val value = prefs.getString(name, "").toString()
-      Logger.info("loadData $name - $value")
-      return value
+      try {
+        val prefs = instance.getPreferences(MODE_PRIVATE)
+        val value = prefs.getString(name, "").toString()
+        Logger.info("loadData $name - $value")
+        return value
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
+        return ""
+      }
     }
   }
 
