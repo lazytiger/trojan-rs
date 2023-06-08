@@ -62,6 +62,11 @@ class TrojanProxy : VpnService() {
       .setWhen(0L)
   }
 
+  override fun onCreate() {
+    val filter = IntentFilter(STOP_ACTION)
+    registerReceiver(stopReceiver, filter)
+  }
+
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Logger.info("start vpn service now")
     val notifyChannel =
@@ -70,8 +75,6 @@ class TrojanProxy : VpnService() {
     NotificationManagerCompat.from(this).createNotificationChannel(notifyChannel)
     val notifyBuilder = createNotificationBuilder()
     MainActivity.notifyBuilder = notifyBuilder
-    val filter = IntentFilter("stop")
-    registerReceiver(stopReceiver, filter)
     Thread(Runnable {
       val builder = Builder()
       val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -101,13 +104,18 @@ class TrojanProxy : VpnService() {
     return super.onStartCommand(intent, flags, startId)
   }
 
+  override fun onDestroy() {
+    super.onDestroy()
+    unregisterReceiver(stopReceiver)
+    close()
+  }
+
   fun close() {
     Logger.info("stop vpn now in TrojanProxy")
     onStop()
     stopNetworkMonitor()
     stopForeground(STOP_FOREGROUND_REMOVE)
     NotificationManagerCompat.from(this).deleteNotificationChannel("vpn")
-    unregisterReceiver(stopReceiver)
     try {
       vpnFd.close()
     } catch (e: Exception) {
