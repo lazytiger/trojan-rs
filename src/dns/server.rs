@@ -275,19 +275,20 @@ impl DnsServer {
                 Ok((length, from)) => {
                     let data = &buffer[..length];
                     if let Ok(mut message) = Message::from_bytes(data) {
-                        log::debug!("response:{:?}", message);
                         let name = Self::get_message_key(&message);
                         if message.header().truncated() {
-                            message.take_additionals();
-                            message.take_name_servers();
-
-                            let mut header = message.header().clone();
-                            header.set_truncated(false);
-                            header.set_name_server_count(0);
-                            header.set_additional_count(0);
-                            message.set_header(header);
                             log::error!("{} message truncated", name);
                         }
+                        message.take_additionals();
+                        message.take_name_servers();
+
+                        let mut header = message.header().clone();
+                        header.set_truncated(false);
+                        header.set_name_server_count(0);
+                        header.set_additional_count(0);
+                        message.set_header(header);
+
+                        log::debug!("response:{:?}", message);
                         if let Some(result) = store.get_mut(&name) {
                             for (address, id) in &result.addresses {
                                 message.set_id(*id);
