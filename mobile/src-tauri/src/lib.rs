@@ -1,9 +1,13 @@
 extern crate core;
 
-use std::sync::{atomic::AtomicBool, Arc, RwLock};
+use std::{
+    collections::HashSet,
+    io::{BufRead, BufReader, Cursor},
+    sync::{atomic::AtomicBool, Arc, RwLock},
+};
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, Window, Wry};
+use tauri::{Manager, State, Window, Wry};
 
 use crate::types::VpnError;
 
@@ -27,23 +31,107 @@ pub struct Options {
     pub untrusted_dns: String,
 }
 
-pub type VpnState = RwLock<Options>;
+#[derive(Clone)]
+pub struct Context {
+    pub options: Options,
+    pub blocked_domains: HashSet<String>,
+}
+
+impl Context {
+    pub fn merge_domains(&mut self) -> Result<(), VpnError> {
+        let added = self.load_data("added_domains")?;
+        for domain in added {
+            self.blocked_domains.insert(domain);
+        }
+
+        let removed = self.load_data("removed_domains")?;
+        for domain in &removed {
+            self.blocked_domains.remove(domain);
+        }
+
+        Ok(())
+    }
+
+    pub fn search_domain(&self, domain: String) -> Vec<String> {
+        self.blocked_domains
+            .iter()
+            .filter_map(|key| {
+                if key.contains(&domain) {
+                    Some(key.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn load_data(&self, key: impl AsRef<str>) -> Result<Vec<String>, VpnError> {
+        let added = platform::load_data(key)?;
+        if added.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Ok(serde_json::from_str(added.as_str())?)
+        }
+    }
+
+    fn save_data(&self, key: impl AsRef<str>, data: Vec<String>) -> Result<(), VpnError> {
+        let data = serde_json::to_string(&data)?;
+        platform::save_data(key, data)
+    }
+
+    pub fn add_domain(&mut self, domain: String) -> Result<(), VpnError> {
+        if self.blocked_domains.insert(domain.clone()) {
+            let mut added = self.load_data("added_domains")?;
+            let mut removed = self.load_data("removed_domains")?;
+            if let Some((index, _)) = removed.iter().enumerate().find(|(_, key)| **key == domain) {
+                removed.remove(index);
+                self.save_data("removed_domains", removed)?;
+            }
+
+            added.push(domain);
+            self.save_data("added_domains", added)?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_domain(&mut self, domain: String) -> Result<(), VpnError> {
+        if self.blocked_domains.remove(&domain) {
+            let mut added = self.load_data("added_domains")?;
+            let mut removed = self.load_data("removed_domains")?;
+            if let Some((index, _)) = added.iter().enumerate().find(|(_, key)| **key == domain) {
+                added.remove(index);
+                self.save_data("added_domains", removed)?;
+            }
+
+            added.push(domain);
+            self.save_data("removed_domains", added)?;
+        }
+        Ok(())
+    }
+}
+
+pub type VpnState = RwLock<Context>;
 
 #[tauri::command]
-fn init_window(log_level: String, window: Window<Wry>) {
+fn init_window(log_level: String, window: Window<Wry>, state: State<VpnState>) {
     if let Err(err) = WINDOW.write().map(|mut context| context.replace(window)) {
         log::error!("write lock windows failed:{}", err);
     } else {
         platform::init_log(&log_level);
         log::info!("init log with log_level:{}", log_level);
+        if let Ok(mut state) = state.write() {
+            if let Err(err) = state.merge_domains() {
+                log::error!("merge domains failed:{:?}", err);
+            }
+        }
     }
 }
 
 #[tauri::command]
-fn start_vpn(option: Options, window: Window<Wry>) {
+fn start_vpn(options: Options, window: Window<Wry>) {
     if let Ok(mut state) = window.state::<VpnState>().inner().write() {
-        *state = option;
-        if let Err(err) = platform::start_vpn(state.mtu as i32) {
+        state.options = options;
+        if let Err(err) = platform::start_vpn(state.options.mtu as i32) {
             log::error!("start_vpn failed:{:?}", err);
         }
     } else {
@@ -112,6 +200,33 @@ fn load_data(key: String) -> String {
     }
 }
 
+#[tauri::command]
+fn search_domain(key: String, state: State<VpnState>) -> Vec<String> {
+    if let Ok(state) = state.read() {
+        state.search_domain(key)
+    } else {
+        Vec::new()
+    }
+}
+
+#[tauri::command]
+fn add_domain(key: String, state: State<VpnState>) {
+    if let Ok(mut state) = state.write() {
+        if let Err(err) = state.add_domain(key) {
+            log::error!("add domain failed:{:?}", err);
+        }
+    }
+}
+
+#[tauri::command]
+fn remove_domain(key: String, state: State<VpnState>) {
+    if let Ok(mut state) = state.write() {
+        if let Err(err) = state.remove_domain(key) {
+            log::error!("remove domain failed:{:?}", err);
+        }
+    }
+}
+
 lazy_static::lazy_static! {
    static ref WINDOW:RwLock<Option<Window>> =RwLock::new(None);
 }
@@ -119,11 +234,22 @@ lazy_static::lazy_static! {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     //std::env::set_var("RUST_BACKTRACE", "full");
-    let option = RwLock::new(Options::default());
+    let domains = include_bytes!("../../../trojan-client/src-tauri/config/domain.txt");
+    let reader = BufReader::new(Cursor::new(domains));
+    let mut blocked_domains = HashSet::new();
+    reader.lines().for_each(|line| {
+        let _ = line.map(|line| {
+            blocked_domains.insert(line);
+        });
+    });
+    let state = RwLock::new(Context {
+        options: Options::default(),
+        blocked_domains,
+    });
     tauri::Builder::default()
         .plugin(tauri_plugin_window::init())
         .plugin(tauri_plugin_shell::init())
-        .manage(option)
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             init_window,
             start_vpn,
@@ -134,6 +260,9 @@ pub fn run() {
             update_notification,
             save_data,
             load_data,
+            search_domain,
+            add_domain,
+            remove_domain
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -154,18 +283,14 @@ pub fn emit_event<T: Serialize + Clone>(event: &str, data: T) -> Result<(), type
     Ok(())
 }
 
-pub fn process_vpn(
-    fd: i32,
-    gateway: String,
-    running: Arc<AtomicBool>,
-) -> Result<(), types::VpnError> {
-    let options = window!()
-        .state::<RwLock<Options>>()
+pub fn process_vpn(fd: i32, dns: String, running: Arc<AtomicBool>) -> Result<(), types::VpnError> {
+    let context = window!()
+        .state::<VpnState>()
         .inner()
         .read()
         .map_err(|e| VpnError::RLock(e.to_string()))?
         .clone();
-    tun::run(fd, gateway, options, running)
+    tun::run(fd, dns, context, running)
 }
 
 #[allow(mutable_transmutes)]

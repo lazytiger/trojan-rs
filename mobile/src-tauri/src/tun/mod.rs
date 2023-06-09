@@ -25,7 +25,7 @@ use crate::{
         tcp::TcpServer, udp::UdpServer,
     },
     types::{Result, VpnError},
-    Options,
+    Context, Options,
 };
 
 mod device;
@@ -121,44 +121,45 @@ fn show_info(level: &String) -> bool {
     level == "Debug" || level == "Info" || level == "Trace"
 }
 
-pub fn run(fd: i32, gateway: String, options: Options, running: Arc<AtomicBool>) -> Result<()> {
+pub fn run(fd: i32, dns: String, context: Context, running: Arc<AtomicBool>) -> Result<()> {
     let session = Arc::new(platform::Session::new(
         fd,
-        options.mtu,
-        show_info(&options.log_level),
+        context.options.mtu,
+        show_info(&context.options.log_level),
     ));
 
-    let trusted_addr = (options.trusted_dns.clone() + ":53").parse()?;
-    let untrusted_addr = (options.untrusted_dns.clone() + ":53").parse()?;
+    let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;
+    let untrusted_addr = (context.options.untrusted_dns.clone() + ":53").parse()?;
 
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
     let server_ip = utils::resolve(
-        options.hostname.as_str(),
-        (options.untrusted_dns.clone() + ":53").as_str(),
+        context.options.hostname.as_str(),
+        (context.options.untrusted_dns.clone() + ":53").as_str(),
     )?;
     if server_ip.is_empty() {
         return Err(VpnError::Resolve);
     }
     log::info!("server ip are {:?}", server_ip);
-    let server_addr = SocketAddr::new(server_ip[0], options.port);
+    let server_addr = SocketAddr::new(server_ip[0], context.options.port);
     let mut resolver = DnsResolver::new(
         waker,
         Token(RESOLVER),
-        Some((options.untrusted_dns.clone() + ":53").into()),
+        Some((context.options.untrusted_dns.clone() + ":53").into()),
     );
-    let (mut pool, config, hostname) = prepare_idle_pool(&poll, &resolver, &options, server_addr)?;
+    let (mut pool, config, hostname) =
+        prepare_idle_pool(&poll, &resolver, &context.options, server_addr)?;
 
-    let pass = digest_pass(&options.password);
+    let pass = digest_pass(&context.options.password);
     let mut udp_server = UdpServer::new(pass.clone());
     let mut tcp_server = TcpServer::new(pass.clone());
 
-    let listener_addr = gateway + ":53";
+    let listener_addr = dns + ":53";
     let listener_addr: SocketAddr = listener_addr.parse().unwrap();
     let mut sockets = Arc::new(SocketSet::new([]));
     let mut device = VpnDevice::new(
         session.clone(),
-        options.mtu,
+        context.options.mtu,
         IpEndpoint::from(server_addr),
         IpEndpoint::from(listener_addr),
         sockets.clone(),
@@ -173,9 +174,10 @@ pub fn run(fd: i32, gateway: String, options: Options, running: Arc<AtomicBool>)
         listener,
         trusted_addr,
         untrusted_addr,
-        options.dns_cache_time,
-        options.mtu,
+        context.options.dns_cache_time,
+        context.options.mtu,
         pass,
+        context.blocked_domains,
     )?;
 
     let mut events = Events::with_capacity(1024);

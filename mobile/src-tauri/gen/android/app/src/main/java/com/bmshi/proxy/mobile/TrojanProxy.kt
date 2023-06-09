@@ -18,7 +18,7 @@ import androidx.core.app.NotificationManagerCompat
 
 
 class TrojanProxy : VpnService() {
-  private external fun onStart(fd: Int, gateway: String)
+  private external fun onStart(fd: Int, dns: String)
   private external fun onStop()
 
   private val networkMonitorCallback = object : ConnectivityManager.NetworkCallback() {
@@ -82,7 +82,7 @@ class TrojanProxy : VpnService() {
       if (network != null) {
         builder.setUnderlyingNetworks(arrayOf(network))
       }
-      for (route in resources.getStringArray(R.array.bypass_china_24)) {
+      for (route in resources.getStringArray(R.array.bypass_china_16)) {
         val parts = route.split("/")
         builder.addRoute(parts[0], parts[1].toInt())
       }

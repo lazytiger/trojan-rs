@@ -22,6 +22,7 @@ pub enum VpnError {
     Resolve,
     InvalidDnsName(rustls::client::InvalidDnsNameError),
     Smoltcp(smoltcp::wire::Error),
+    Json(serde_json::Error),
 }
 
 #[allow(dead_code)]
