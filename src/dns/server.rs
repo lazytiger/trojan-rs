@@ -278,6 +278,9 @@ impl DnsServer {
                         log::debug!("response:{:?}", message);
                         let name = Self::get_message_key(&message);
                         if message.header().truncated() {
+                            message.take_additionals();
+                            message.take_name_servers();
+
                             let mut header = message.header().clone();
                             header.set_truncated(false);
                             header.set_name_server_count(0);
