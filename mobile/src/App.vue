@@ -23,7 +23,7 @@ export default {
       running: false,
       homeVisible: true,
       ladderVisible: false,
-      domains: [{title: "www.baidu.com", value: 1}, {title: "www.google.com", value: 2}],
+      domains: [],
       query: "",
     }
   },
@@ -31,7 +31,7 @@ export default {
     async start() {
       await invoke("save_data", {key: "config", value: JSON.stringify(this.config)});
       if (!this.running) {
-        await invoke("start_vpn", {option: this.config});
+        await invoke("start_vpn", {options: this.config});
         this.label = "启动中";
       }
     },
@@ -92,6 +92,7 @@ export default {
           }
         }
       }
+      await this.doQuery();
     },
     async doQuery() {
       let domains = await invoke("search_domain", {key:this.query});
