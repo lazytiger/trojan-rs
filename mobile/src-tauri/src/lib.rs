@@ -38,16 +38,28 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn merge_domains(&mut self) -> Result<(), VpnError> {
-        let added = self.load_data("added_domains")?;
-        for domain in added {
-            self.blocked_domains.insert(domain);
-        }
+    const ADDED_DOMAIN_KEY: &str = "added_domains";
 
-        let removed = self.load_data("removed_domains")?;
-        for domain in &removed {
-            self.blocked_domains.remove(domain);
+    const REMED_DOMAIN_KEY: &str = "remed_domains";
+
+    pub fn merge_domains(&mut self) -> Result<(), VpnError> {
+        let added = self.load_data(Self::ADDED_DOMAIN_KEY)?;
+        let mut new_added = Vec::new();
+        for domain in added {
+            if self.blocked_domains.insert(domain.clone()) {
+                new_added.push(domain);
+            }
         }
+        self.save_data(Self::ADDED_DOMAIN_KEY, new_added)?;
+
+        let removed = self.load_data(Self::REMED_DOMAIN_KEY)?;
+        let mut new_removed = Vec::new();
+        for domain in removed {
+            if self.blocked_domains.remove(&domain) {
+                new_removed.push(domain);
+            }
+        }
+        self.save_data(Self::REMED_DOMAIN_KEY, new_removed)?;
 
         Ok(())
     }
@@ -62,6 +74,7 @@ impl Context {
                     None
                 }
             })
+            .take(10)
             .collect()
     }
 
@@ -81,30 +94,30 @@ impl Context {
 
     pub fn add_domain(&mut self, domain: String) -> Result<(), VpnError> {
         if self.blocked_domains.insert(domain.clone()) {
-            let mut added = self.load_data("added_domains")?;
-            let mut removed = self.load_data("removed_domains")?;
+            let mut added = self.load_data(Self::ADDED_DOMAIN_KEY)?;
+            let mut removed = self.load_data(Self::REMED_DOMAIN_KEY)?;
             if let Some((index, _)) = removed.iter().enumerate().find(|(_, key)| **key == domain) {
                 removed.remove(index);
-                self.save_data("removed_domains", removed)?;
+                self.save_data(Self::REMED_DOMAIN_KEY, removed)?;
+            } else {
+                added.push(domain);
+                self.save_data(Self::ADDED_DOMAIN_KEY, added)?;
             }
-
-            added.push(domain);
-            self.save_data("added_domains", added)?;
         }
         Ok(())
     }
 
     pub fn remove_domain(&mut self, domain: String) -> Result<(), VpnError> {
         if self.blocked_domains.remove(&domain) {
-            let mut added = self.load_data("added_domains")?;
-            let mut removed = self.load_data("removed_domains")?;
+            let mut added = self.load_data(Self::ADDED_DOMAIN_KEY)?;
+            let mut removed = self.load_data(Self::REMED_DOMAIN_KEY)?;
             if let Some((index, _)) = added.iter().enumerate().find(|(_, key)| **key == domain) {
                 added.remove(index);
-                self.save_data("added_domains", removed)?;
+                self.save_data(Self::ADDED_DOMAIN_KEY, added)?;
+            } else {
+                removed.push(domain);
+                self.save_data(Self::REMED_DOMAIN_KEY, removed)?;
             }
-
-            added.push(domain);
-            self.save_data("removed_domains", added)?;
         }
         Ok(())
     }

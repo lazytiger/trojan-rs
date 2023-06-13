@@ -23,6 +23,7 @@ export default {
       running: false,
       homeVisible: true,
       ladderVisible: false,
+      showResult: false,
       domains: [],
       query: "",
     }
@@ -95,15 +96,16 @@ export default {
       await this.doQuery();
     },
     async doQuery() {
-      let domains = await invoke("search_domain", {key:this.query});
+      let domains = await invoke("search_domain", {key: this.query});
       this.domains = [];
-      for(let i = 0; i<domains.length;i++) {
-        let domain=domains[i];
-        this.domains.push({title:domain, value:i});
+      for (let i = 0; i < domains.length; i++) {
+        let domain = domains[i];
+        this.domains.push({title: domain, value: i});
       }
-      if(this.domains.length === 0) {
-        this.domains.push({title:"未找到该域名，点击添加", value:-1});
+      if (this.domains.length === 0) {
+        this.domains.push({title: "未找到该域名，点击添加", value: -1});
       }
+      this.showResult = this.domains.length > 0;
     }
   },
   async mounted() {
@@ -178,15 +180,21 @@ export default {
               </v-btn>
             </v-col>
           </v-row>
-          <v-card
-              class="mx-auto"
-              max-width="460"
-          >
-            <v-list :items="domains" @click:select="handleDomain"></v-list>
-          </v-card>
+          <div v-if="showResult">
+            <v-list :items="domains" @click:select="handleDomain" class="my-list">
+            </v-list>
+          </div>
         </v-container>
       </div>
     </v-main>
   </v-app>
 </template>
+
+<style>
+.my-list {
+  background-color: #f5f5f5;
+  padding: 10px;
+  border: 1px solid #ccc;
+}
+</style>
 
