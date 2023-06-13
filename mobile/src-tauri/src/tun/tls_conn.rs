@@ -107,7 +107,6 @@ impl Write for TlsConn {
 
 impl TlsConn {
     pub fn new(index: usize, token: Token, mut session: Connection, stream: TcpStream) -> TlsConn {
-        session.set_buffer_limit(None);
         TlsConn {
             index,
             token,
