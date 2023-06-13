@@ -112,7 +112,7 @@ impl DnsServer {
                         ..
                     }) = self.store.get_mut(&key)
                     {
-                        log::info!("query:{} found in cache", key);
+                        log::error!("query:{} found in cache", key);
                         response.set_id(message.id());
                         if let Err(err) =
                             listener.send_slice(response.to_vec().unwrap().as_slice(), endpoint)
@@ -235,6 +235,7 @@ impl DnsServer {
     fn dispatch_message(&mut self, mut message: Message, listener: &mut Socket) {
         let now = Instant::now();
         let name = Self::get_message_key(&message);
+        log::error!("query {} found in dns server", name);
         if message.header().truncated() {
             log::error!("{} message truncated", name);
         }
