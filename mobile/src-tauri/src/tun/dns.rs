@@ -105,6 +105,7 @@ impl DnsServer {
                 if message.query_count() == 1 {
                     let query = &message.queries()[0];
                     let name = query.name().to_utf8();
+                    log::error!("found dns query:{}", name);
                     let key = Self::get_message_key(&message);
                     let (renew, respond) = if let Some(QueryResult {
                         response: Some(response),
