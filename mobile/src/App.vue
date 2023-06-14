@@ -18,6 +18,7 @@ export default {
         untrusted_dns: "114.114.114.114",
         dns_cache_time: 600,
         log_level: "Error",
+        speed_update_ms: 2000,
       },
       label: "开始",
       running: false,
@@ -47,11 +48,16 @@ export default {
           this.running = true;
           this.label = "停止";
         } else if (event.payload === 2) {
-          await invoke("stop_vpn", {})
-          this.label = "关闭中";
+          await invoke("stop_process", {})
+          this.label = "重启中";
         } else if (event.payload === 3) {
           this.running = false;
           this.label = "开始";
+        } else if(event.payload === 4) {
+          await invoke("stop_process", {})
+          this.label = "网络重启中";
+        } else if(event.payload === 5) {
+          this.label = "网络连接断开";
         }
       });
       await appWindow.listen("update_speed", async (event) => {
@@ -61,7 +67,7 @@ export default {
       })
     },
     do_action() {
-      if (this.label === '启动中' || this.label === '关闭中') {
+      if (this.label !== '启动' && this.label !== '关闭') {
         return;
       }
       if (!this.running) {

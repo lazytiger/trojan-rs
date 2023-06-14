@@ -9,7 +9,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, Window, Wry};
 
-use crate::types::VpnError;
+use crate::types::{EventType, VpnError};
 
 mod types;
 
@@ -25,6 +25,7 @@ pub struct Options {
     pub port: u16,
     pub mtu: usize,
     pub pool_size: usize,
+    pub speed_update_ms: u128,
     pub log_level: String,
     pub dns_cache_time: u64,
     pub trusted_dns: String,
@@ -240,6 +241,13 @@ fn remove_domain(key: String, state: State<VpnState>) {
     }
 }
 
+#[tauri::command]
+fn start_process() {
+    if let Err(err) = platform::start_vpn_process() {
+        log::error!("start vpn process failed:{:?}", err);
+    }
+}
+
 lazy_static::lazy_static! {
    static ref WINDOW:RwLock<Option<Window>> =RwLock::new(None);
 }
@@ -275,7 +283,8 @@ pub fn run() {
             load_data,
             search_domain,
             add_domain,
-            remove_domain
+            remove_domain,
+            start_process,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -290,9 +299,9 @@ macro_rules! window {
     };
 }
 
-pub fn emit_event<T: Serialize + Clone>(event: &str, data: T) -> Result<(), types::VpnError> {
+pub fn emit_event<T: Serialize + Clone>(event: EventType, data: T) -> Result<(), types::VpnError> {
     let window = window!();
-    window.emit(event, data)?;
+    window.emit(event.to_str(), data)?;
     Ok(())
 }
 

@@ -221,8 +221,8 @@ impl<'a> VpnDevice<'a> {
 
     pub fn calculate_speed(&mut self) -> (f64, f64) {
         let time = self.traffic.begin_traffic.elapsed().as_secs_f64();
-        let rx_speed = self.traffic.rx_bytes as f64 / time / 1024.0 / 1024.0;
-        let tx_speed = self.traffic.tx_bytes as f64 / time / 1024.0 / 1024.0;
+        let rx_speed = self.traffic.rx_bytes as f64 / time / 1024.0;
+        let tx_speed = self.traffic.tx_bytes as f64 / time / 1024.0;
         self.traffic.rx_bytes = 0;
         self.traffic.tx_bytes = 0;
         self.traffic.begin_traffic = Instant::now();

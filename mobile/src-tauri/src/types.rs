@@ -31,4 +31,29 @@ pub enum CopyResult {
     TxBlock,
 }
 
+#[repr(u32)]
+pub enum VpnStatus {
+    VpnStart = 1,
+    ProcessExit = 2,
+    VpnStop = 3,
+    NetworkAvailable = 4,
+    NetworkLost = 5,
+}
+
+pub enum EventType {
+    StatusChanged,
+    PermissionResult,
+    UpdateSpeed,
+}
+
+impl EventType {
+    pub fn to_str(self) -> &'static str {
+        match self {
+            EventType::StatusChanged => "on_status_changed",
+            EventType::PermissionResult => "on_permission_result",
+            EventType::UpdateSpeed => "update_speed",
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, VpnError>;

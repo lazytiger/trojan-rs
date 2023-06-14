@@ -21,13 +21,19 @@ class TrojanProxy : VpnService() {
   private external fun onStart(fd: Int, dns: String)
   private external fun onStop()
 
+  private external fun onNetworkChanged(available: Boolean)
+
   private val networkMonitorCallback = object : ConnectivityManager.NetworkCallback() {
     override fun onAvailable(network: Network) {
       setUnderlyingNetworks(arrayOf(network))
+      onNetworkChanged(true)
+      Logger.warn("$network is available now")
     }
 
     override fun onLost(network: Network) {
       setUnderlyingNetworks(arrayOf(null))
+      onNetworkChanged(false)
+      Logger.warn("network is lost now")
     }
 
     override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {

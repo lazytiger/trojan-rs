@@ -20,11 +20,15 @@ use jni::{
     JNIEnv, JavaVM,
 };
 
-use crate::{emit_event, types, types::VpnError};
+use crate::{
+    emit_event, types,
+    types::{EventType, VpnError, VpnStatus},
+};
 
 struct AndroidContext {
     jvm: JavaVM,
     running: Arc<AtomicBool>,
+    dns: String,
     fd: i32,
 }
 
@@ -87,6 +91,7 @@ fn init_rust<'local>(env: JNIEnv<'local>) -> Result<(), VpnError> {
         .map_err(|e| VpnError::WLock(e.to_string()))?;
     result.replace(AndroidContext {
         jvm,
+        dns: String::new(),
         running: Arc::new(AtomicBool::new(false)),
         fd: -1,
     });
@@ -100,7 +105,7 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onPermissionResu
     granted: jboolean,
 ) {
     log::info!("onPermissionResult:{}", granted);
-    if let Err(err) = crate::emit_event("on_permission_result", granted != 0) {
+    if let Err(err) = crate::emit_event(EventType::PermissionResult, granted != 0) {
         log::error!("onPermissionResult failed:{:?}", err);
     }
 }
@@ -123,26 +128,35 @@ fn on_vpn_start(fd: i32, dns: String) -> Result<(), VpnError> {
     let (context, lock) = get_mut_context()?;
     context.fd = fd;
     context.running = Arc::new(AtomicBool::new(true));
+    context.dns = dns;
     let running = context.running.clone();
     drop(lock);
-    std::thread::spawn(move || {
-        if let Err(err) = std::panic::catch_unwind(|| {
-            if let Err(err) = crate::process_vpn(fd, dns, running) {
-                log::error!("found error:{:?} while process vpn", err);
-                if let Err(err) = emit_event("on_status_changed", 2) {
+    start_vpn_process()
+}
+
+pub fn start_vpn_process() -> Result<(), VpnError> {
+    let (context, lock) = get_context()?;
+    let fd = context.fd;
+    let running = context.running.clone();
+    let dns = context.dns.clone();
+    drop(lock);
+    if running.load(Ordering::SeqCst) {
+        std::thread::spawn(move || {
+            if let Err(err) = std::panic::catch_unwind(|| {
+                crate::process_vpn(fd, dns, running).unwrap();
+            }) {
+                log::error!("uncaught exception:{:?}", err);
+                if let Err(err) =
+                    emit_event(EventType::StatusChanged, VpnStatus::ProcessExit as u32)
+                {
                     log::error!("emit status changed failed:{:?}", err);
                 }
-            } else {
-                log::warn!("vpn process exits");
             }
-        }) {
-            log::error!("uncaught exception:{:?}", err);
-            if let Err(err) = emit_event("on_status_changed", 2) {
-                log::error!("emit status changed failed:{:?}", err);
-            }
-        }
-    });
-    emit_event("on_status_changed", 1)
+        });
+        emit_event(EventType::StatusChanged, VpnStatus::VpnStart as u32)?;
+        log::error!("vpn process started");
+    }
+    Ok(())
 }
 
 #[no_mangle]
@@ -156,11 +170,34 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStop<'local>(
 }
 
 fn on_vpn_stop() -> Result<(), VpnError> {
+    log::error!("vpn process stopped");
     let (context, lock) = get_mut_context()?;
     context.fd = -1;
-    context.running.store(false, Ordering::Relaxed);
+    context.running.store(false, Ordering::SeqCst);
     drop(lock);
-    emit_event("on_status_changed", 3)
+    emit_event(EventType::StatusChanged, VpnStatus::VpnStop as u32)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onNetworkChanged<'local>(
+    _: JNIEnv<'local>,
+    _: JObject<'local>,
+    available: jboolean,
+) {
+    if let Err(err) = on_network_changed(available != 0) {
+        log::error!("call onStop failed:{:?}", err);
+    }
+}
+
+fn on_network_changed(available: bool) -> Result<(), types::VpnError> {
+    emit_event(
+        EventType::StatusChanged,
+        if available {
+            VpnStatus::NetworkAvailable
+        } else {
+            VpnStatus::NetworkLost
+        } as u32,
+    )
 }
 
 pub fn init_log(log_level: &String) {
