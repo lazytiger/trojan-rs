@@ -246,7 +246,7 @@ lazy_static::lazy_static! {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    //std::env::set_var("RUST_BACKTRACE", "full");
+    std::env::set_var("RUST_BACKTRACE", "full");
     let domains = include_bytes!("../../../trojan-client/src-tauri/config/domain.txt");
     let reader = BufReader::new(Cursor::new(domains));
     let mut blocked_domains = HashSet::new();
