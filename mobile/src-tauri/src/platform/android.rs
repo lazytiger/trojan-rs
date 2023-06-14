@@ -146,14 +146,12 @@ pub fn start_vpn_process() -> Result<(), VpnError> {
                 crate::process_vpn(fd, dns, running).unwrap();
             }) {
                 log::error!("uncaught exception:{:?}", err);
-                if let Err(err) =
-                    emit_event(EventType::StatusChanged, VpnStatus::ProcessExit as u32)
-                {
+                if let Err(err) = emit_event(EventType::StatusChanged, VpnStatus::ProcessExit) {
                     log::error!("emit status changed failed:{:?}", err);
                 }
             }
         });
-        emit_event(EventType::StatusChanged, VpnStatus::VpnStart as u32)?;
+        emit_event(EventType::StatusChanged, VpnStatus::VpnStart)?;
         log::error!("vpn process started");
     }
     Ok(())
@@ -175,7 +173,7 @@ fn on_vpn_stop() -> Result<(), VpnError> {
     context.fd = -1;
     context.running.store(false, Ordering::SeqCst);
     drop(lock);
-    emit_event(EventType::StatusChanged, VpnStatus::VpnStop as u32)
+    emit_event(EventType::StatusChanged, VpnStatus::VpnStop)
 }
 
 #[no_mangle]
@@ -196,7 +194,7 @@ fn on_network_changed(available: bool) -> Result<(), types::VpnError> {
             VpnStatus::NetworkAvailable
         } else {
             VpnStatus::NetworkLost
-        } as u32,
+        },
     )
 }
 

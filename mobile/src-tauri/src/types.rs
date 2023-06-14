@@ -1,4 +1,5 @@
 use derive_more::From;
+use serde::Serialize;
 
 #[derive(From, Debug)]
 pub enum VpnError {
@@ -32,6 +33,7 @@ pub enum CopyResult {
 }
 
 #[repr(u32)]
+#[derive(Serialize, Clone)]
 pub enum VpnStatus {
     VpnStart = 1,
     ProcessExit = 2,

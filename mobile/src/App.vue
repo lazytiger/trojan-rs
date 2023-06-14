@@ -48,13 +48,13 @@ export default {
           this.running = true;
           this.label = "停止";
         } else if (event.payload === 2) {
-          await invoke("stop_process", {})
+          await invoke("start_process", {})
           this.label = "重启中";
         } else if (event.payload === 3) {
           this.running = false;
           this.label = "开始";
         } else if(event.payload === 4) {
-          await invoke("stop_process", {})
+          await invoke("start_process", {})
           this.label = "网络重启中";
         } else if(event.payload === 5) {
           this.label = "网络连接断开";
