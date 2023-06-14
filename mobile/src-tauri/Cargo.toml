@@ -49,4 +49,4 @@ android_logger = "0.13"
 custom-protocol = ["tauri/custom-protocol"]
 
 [profile.release]
-debug = true
+debug = false

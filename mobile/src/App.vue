@@ -27,6 +27,8 @@ export default {
       showResult: false,
       domains: [],
       query: "",
+      network_lost: false,
+      process_exit: true,
     }
   },
   methods: {
@@ -44,20 +46,31 @@ export default {
     },
     async init_listener() {
       await appWindow.listen("on_status_changed", async (event) => {
+        alert(event.payload);
         if (event.payload === 1) {
           this.running = true;
+          this.process_exit = false;
           this.label = "停止";
         } else if (event.payload === 2) {
-          await invoke("start_process", {})
-          this.label = "重启中";
+          if (!this.network_lost) {
+            await invoke("start_process", {})
+            this.label = "重启中";
+          } else {
+            this.process_exit = true;
+          }
         } else if (event.payload === 3) {
+          this.process_exit = true;
           this.running = false;
           this.label = "开始";
-        } else if(event.payload === 4) {
-          await invoke("start_process", {})
+        } else if (event.payload === 4) {
+          if(this.process_exit) {
+            await invoke("start_process", {})
+          }
           this.label = "网络重启中";
-        } else if(event.payload === 5) {
+          this.network_lost = false;
+        } else if (event.payload === 5) {
           this.label = "网络连接断开";
+          this.network_lost = true;
         }
       });
       await appWindow.listen("update_speed", async (event) => {
@@ -67,7 +80,7 @@ export default {
       })
     },
     do_action() {
-      if (this.label !== '启动' && this.label !== '关闭') {
+      if (this.label !== '开始' && this.label !== '关闭') {
         return;
       }
       if (!this.running) {
@@ -77,7 +90,7 @@ export default {
       }
     },
     config_ok() {
-      return this.config.hostname !== "" && this.config.password !== ""
+      return this.config.hostname !== "" && this.config.password !== "" && (this.label === "开始" || this.label === "关闭")
     },
     showHome() {
       this.homeVisible = true;

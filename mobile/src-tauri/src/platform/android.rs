@@ -8,6 +8,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
+    thread::JoinHandle,
 };
 
 use smoltcp::wire::{
@@ -30,6 +31,7 @@ struct AndroidContext {
     running: Arc<AtomicBool>,
     dns: String,
     fd: i32,
+    handle: Option<JoinHandle<()>>,
 }
 
 unsafe impl Sync for AndroidContext {}
@@ -94,6 +96,7 @@ fn init_rust<'local>(env: JNIEnv<'local>) -> Result<(), VpnError> {
         dns: String::new(),
         running: Arc::new(AtomicBool::new(false)),
         fd: -1,
+        handle: None,
     });
     Ok(())
 }
@@ -135,13 +138,12 @@ fn on_vpn_start(fd: i32, dns: String) -> Result<(), VpnError> {
 }
 
 pub fn start_vpn_process() -> Result<(), VpnError> {
-    let (context, lock) = get_context()?;
+    let (context, lock) = get_mut_context()?;
     let fd = context.fd;
     let running = context.running.clone();
     let dns = context.dns.clone();
-    drop(lock);
-    if running.load(Ordering::SeqCst) {
-        std::thread::spawn(move || {
+    if running.load(Ordering::SeqCst) && context.handle.is_none() {
+        let handle = std::thread::spawn(move || {
             if let Err(err) = std::panic::catch_unwind(|| {
                 crate::process_vpn(fd, dns, running).unwrap();
             }) {
@@ -150,10 +152,15 @@ pub fn start_vpn_process() -> Result<(), VpnError> {
                     log::error!("emit status changed failed:{:?}", err);
                 }
             }
+            let (context, lock) = get_mut_context().unwrap();
+            context.handle.take();
+            drop(lock);
         });
+        context.handle.replace(handle);
         emit_event(EventType::StatusChanged, VpnStatus::VpnStart)?;
         log::error!("vpn process started");
     }
+    drop(lock);
     Ok(())
 }
 
