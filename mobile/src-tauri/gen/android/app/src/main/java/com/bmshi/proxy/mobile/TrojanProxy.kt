@@ -77,7 +77,7 @@ class TrojanProxy : VpnService() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Logger.info("start vpn service now")
     val notifyChannel =
-      NotificationChannelCompat.Builder("vpn", NotificationManager.IMPORTANCE_HIGH).setName("vpn")
+      NotificationChannelCompat.Builder("vpn", NotificationManager.IMPORTANCE_LOW).setName("vpn")
         .build()
     NotificationManagerCompat.from(this).createNotificationChannel(notifyChannel)
     val notifyBuilder = createNotificationBuilder()
