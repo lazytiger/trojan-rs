@@ -46,41 +46,41 @@ export default {
     },
     async init_listener() {
       await appWindow.listen("on_status_changed", async (event) => {
-        alert(event.payload);
-        if (event.payload === 1) {
+        if (event.payload === "VpnStart") {
           this.running = true;
           this.process_exit = false;
           this.label = "停止";
-        } else if (event.payload === 2) {
-          if (!this.network_lost) {
+        } else if (event.payload === "ProcessExit") {
+          if (this.network_lost) {
+            this.process_exit = true;
+          } else if(this.running) {
             await invoke("start_process", {})
             this.label = "重启中";
-          } else {
-            this.process_exit = true;
           }
-        } else if (event.payload === 3) {
+        } else if (event.payload === "VpnStop") {
           this.process_exit = true;
           this.running = false;
           this.label = "开始";
-        } else if (event.payload === 4) {
-          if(this.process_exit) {
+        } else if (event.payload === "NetworkAvailable") {
+          if(this.process_exit && this.running) {
             await invoke("start_process", {})
+            this.label = "网络重启中";
           }
-          this.label = "网络重启中";
           this.network_lost = false;
-        } else if (event.payload === 5) {
+        } else if (event.payload === "NetworkLost") {
           this.label = "网络连接断开";
           this.network_lost = true;
         }
       });
       await appWindow.listen("update_speed", async (event) => {
         if (this.running) {
+          this.label = '停止';
           await invoke("update_notification", {content: event.payload});
         }
       })
     },
     do_action() {
-      if (this.label !== '开始' && this.label !== '关闭') {
+      if (this.label !== '开始' && this.label !== '停止') {
         return;
       }
       if (!this.running) {
@@ -90,7 +90,7 @@ export default {
       }
     },
     config_ok() {
-      return this.config.hostname !== "" && this.config.password !== "" && (this.label === "开始" || this.label === "关闭")
+      return this.config.hostname !== "" && this.config.password !== "" && (this.label === "开始" || this.label === "停止")
     },
     showHome() {
       this.homeVisible = true;

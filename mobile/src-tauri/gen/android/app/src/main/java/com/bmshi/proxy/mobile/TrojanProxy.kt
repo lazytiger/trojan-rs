@@ -66,6 +66,7 @@ class TrojanProxy : VpnService() {
       .setOngoing(true)
       .setShowWhen(true)
       .setWhen(0L)
+      .setSound(null)
   }
 
   override fun onCreate() {
@@ -82,36 +83,47 @@ class TrojanProxy : VpnService() {
     val notifyBuilder = createNotificationBuilder()
     MainActivity.notifyBuilder = notifyBuilder
     Thread(Runnable {
-      val builder = Builder()
-      val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-      val network = manager.activeNetwork
-      if (network != null) {
-        builder.setUnderlyingNetworks(arrayOf(network))
-      }
-      for (route in resources.getStringArray(R.array.bypass_china_16)) {
-        val parts = route.split("/")
-        builder.addRoute(parts[0], parts[1].toInt())
-      }
-      builder.addRoute("10.10.11.1", 32)
-        .addAddress("10.10.10.1", 30)
-        .addDnsServer("10.10.11.1")
-        .addDnsServer("8.8.8.8")
-        .addDnsServer("8.8.4.4")
-        .addDnsServer("1.1.1.1")
-        .addDnsServer("1.0.0.1")
-        .addDisallowedApplication(packageName)
-        .setSession("gfw")
-        .setMtu(MainActivity.mtu)
-        .setBlocking(false)
-      var vpn = builder.establish()
-      if (vpn != null) {
-        startNetworkMonitor()
-        vpnFd = vpn
-        onStart(vpn.fd, "10.10.11.1")
-        startForeground(NOTIFICATION_ID, notifyBuilder.build())
-      } else {
-        Logger.warn("establish vpn failed")
-        close()
+      for (bypass in arrayOf(
+        R.array.bypass_china_24,
+        R.array.bypass_china_16,
+        R.array.bypass_private_route
+      )) {
+        try {
+          val builder = Builder()
+          val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+          val network = manager.activeNetwork
+          if (network != null) {
+            builder.setUnderlyingNetworks(arrayOf(network))
+          }
+          for (route in resources.getStringArray(bypass)) {
+            val parts = route.split("/")
+            builder.addRoute(parts[0], parts[1].toInt())
+          }
+          builder.addRoute("10.10.11.1", 32)
+            .addAddress("10.10.10.1", 30)
+            .addDnsServer("10.10.11.1")
+            .addDnsServer("8.8.8.8")
+            .addDnsServer("8.8.4.4")
+            .addDnsServer("1.1.1.1")
+            .addDnsServer("1.0.0.1")
+            .addDisallowedApplication(packageName)
+            .setSession("gfw")
+            .setMtu(MainActivity.mtu)
+            .setBlocking(false)
+          var vpn = builder.establish()
+          if (vpn != null) {
+            startNetworkMonitor()
+            vpnFd = vpn
+            onStart(vpn.fd, "10.10.11.1")
+            startForeground(NOTIFICATION_ID, notifyBuilder.build())
+          } else {
+            Logger.error("establish vpn failed")
+            close()
+          }
+          break
+        } catch (e: Exception) {
+          Logger.error("initialize vpn failed, switch to next bypass policy", e)
+        }
       }
     }).start()
     return super.onStartCommand(intent, flags, startId)

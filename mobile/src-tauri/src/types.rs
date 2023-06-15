@@ -32,14 +32,13 @@ pub enum CopyResult {
     TxBlock,
 }
 
-#[repr(u32)]
 #[derive(Serialize, Clone)]
 pub enum VpnStatus {
-    VpnStart = 1,
-    ProcessExit = 2,
-    VpnStop = 3,
-    NetworkAvailable = 4,
-    NetworkLost = 5,
+    VpnStart,
+    ProcessExit,
+    VpnStop,
+    NetworkAvailable,
+    NetworkLost,
 }
 
 pub enum EventType {
