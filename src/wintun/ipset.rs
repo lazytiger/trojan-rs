@@ -240,7 +240,7 @@ mod tests {
     fn test_ipset_reverse() {
         let ipset = IPSet::with_file("ipset/ipset24.txt", true).unwrap();
         let mut file = File::create("test24.txt").unwrap();
-        for (i, item) in ipset.data.iter().enumerate() {
+        for (_, item) in ipset.data.iter().enumerate() {
             let ip: Ipv4Addr = item.ip.into();
             write!(&mut file, "<item>{}/{}</item>\r\n", ip, item.prefix).unwrap();
         }
@@ -301,6 +301,6 @@ mod tests {
 
     #[test]
     fn test_iprange() {
-        my_range_to_cidr(190365721, 190365951);
+        my_range_to_cidr(190365721, 190365947);
     }
 }

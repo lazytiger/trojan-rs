@@ -225,6 +225,11 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                     .path_resolver()
                     .resolve_resource("config/domain.txt")
                     .unwrap();
+                let config_hosts = window
+                    .app_handle()
+                    .path_resolver()
+                    .resolve_resource("config/hosts.txt")
+                    .unwrap();
                 let mut args = vec![
                     "-l",
                     "logs\\dns.log",
@@ -245,6 +250,8 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                     config.trust_dns.as_str(),
                     "--dns-listen-address",
                     dns_listen.as_str(),
+                    "--hosts",
+                    config_hosts.to_str().unwrap(),
                 ];
                 if !config.enable_ipset {
                     args.push("--add-route");

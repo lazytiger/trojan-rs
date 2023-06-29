@@ -207,6 +207,10 @@ pub struct DnsArgs {
     /// Flag for adding route table for resolved IPs
     #[clap(long)]
     pub add_route: bool,
+
+    /// Custom host file, like /etc/hosts
+    #[clap(long)]
+    pub hosts: String,
 }
 
 #[derive(Parser)]

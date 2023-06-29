@@ -95,7 +95,7 @@ impl Write for TlsConn {
 }
 
 impl TlsConn {
-    pub fn new(index: usize, token: Token, mut session: Connection, stream: TcpStream) -> TlsConn {
+    pub fn new(index: usize, token: Token, session: Connection, stream: TcpStream) -> TlsConn {
         TlsConn {
             index,
             token,

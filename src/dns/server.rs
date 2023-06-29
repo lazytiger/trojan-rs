@@ -35,12 +35,21 @@ pub struct DnsServer {
     poisoned_addr: SocketAddr,
     route_added: HashSet<u32>,
     adapter_index: u32,
+    hosts: HashMap<String, HashSet<IpAddr>>,
 }
 
 struct QueryResult {
     addresses: Vec<(SocketAddr, u16)>,
     response: Option<Message>,
     expire_time: Instant,
+}
+
+enum HostParserState {
+    LineStart,
+    IpStart,
+    IpEnd,
+    HostStart,
+    HostEnd,
 }
 
 impl DnsServer {
@@ -72,11 +81,81 @@ impl DnsServer {
             ptr_name: String::new(),
             route_added: HashSet::new(),
             adapter_index: index,
+            hosts: Default::default(),
         }
     }
 
     pub fn name_server(&self) -> String {
         self.listener.local_addr().unwrap().ip().to_string()
+    }
+
+    pub fn update_hosts(&mut self) {
+        if OPTIONS.dns_args().hosts.is_empty() {
+            return;
+        }
+        let file = File::open(OPTIONS.dns_args().hosts.as_str()).unwrap();
+        let reader = BufReader::new(file);
+        let lines: Vec<_> = reader
+            .lines()
+            .filter_map(|line| {
+                line.ok()
+                    .map(|line| {
+                        let mut state = HostParserState::LineStart;
+                        let mut ip = Vec::new();
+                        let mut host = Vec::new();
+                        for c in line.chars() {
+                            match state {
+                                HostParserState::LineStart => match c {
+                                    ' ' | '\t' => continue,
+                                    '#' => break,
+                                    _ => {
+                                        state = HostParserState::IpStart;
+                                        ip.push(c);
+                                    }
+                                },
+                                HostParserState::IpStart => match c {
+                                    ' ' | '\t' => state = HostParserState::IpEnd,
+                                    _ => ip.push(c),
+                                },
+                                HostParserState::IpEnd => match c {
+                                    ' ' | '\t' => continue,
+                                    _ => {
+                                        state = HostParserState::HostStart;
+                                        host.push(c);
+                                    }
+                                },
+                                HostParserState::HostStart => match c {
+                                    ' ' | '\t' => {
+                                        state = HostParserState::HostEnd;
+                                        continue;
+                                    }
+                                    _ => host.push(c),
+                                },
+                                HostParserState::HostEnd => break,
+                            }
+                        }
+                        if let HostParserState::HostEnd = state {
+                            let ip = String::from_iter(ip.iter());
+                            let host = String::from_iter(host.iter());
+                            if let Ok(ip) = ip.parse::<IpAddr>() {
+                                Some((ip, host))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+        self.hosts.clear();
+        for (ip, host) in lines.into_iter() {
+            self.hosts
+                .entry(host)
+                .or_insert_with(|| HashSet::new())
+                .insert(ip);
+        }
     }
 
     pub fn update_domain(&mut self) {
@@ -85,27 +164,11 @@ impl DnsServer {
         let reader = BufReader::new(file);
         let lines: Vec<_> = reader
             .lines()
-            .filter_map(|line| line.ok().map(|line| line.chars().rev().collect::<String>()))
+            .filter_map(|line| line.ok())
             .sorted()
             .collect();
-        for i in 0..lines.len() - 1 {
-            let len = lines[i].chars().count();
-            let a: String = lines[i].chars().rev().collect();
-            let b: String = lines[i + 1].chars().rev().collect();
-            if lines[i + 1].starts_with(&lines[i]) {
-                let invalid = if let Some(c) = lines[i + 1].chars().nth(len) {
-                    c == '.'
-                } else {
-                    a == b
-                };
-                if invalid {
-                    log::error!("invalid config:{} {}", a, b)
-                }
-            }
-        }
         for line in lines {
-            let line: String = line.chars().rev().collect();
-            domain_map.add_domain(line.as_str())
+            domain_map.add_domain(line)
         }
         self.blocked_domains = domain_map;
     }
@@ -121,6 +184,7 @@ impl DnsServer {
             .register(&mut self.listener, Token(DNS_LOCAL), Interest::READABLE)
             .unwrap();
         self.update_domain();
+        self.update_hosts();
 
         let mut message = Message::new();
         message.set_message_type(MessageType::Response);
@@ -176,10 +240,49 @@ impl DnsServer {
             match self.listener.recv_from(self.buffer.as_mut_slice()) {
                 Ok((length, from)) => {
                     let data = &self.buffer.as_slice()[..length];
-                    if let Ok(message) = Message::from_bytes(data) {
+                    if let Ok(mut message) = Message::from_bytes(data) {
                         if message.query_count() == 1 {
-                            let query = &message.queries()[0];
+                            let query = &message.queries()[0].clone();
                             let name = query.name().to_utf8();
+                            if self.hosts.contains_key(&name) {
+                                let filter = if query.query_type() == RecordType::A {
+                                    IpAddr::is_ipv4
+                                } else if query.query_type() == RecordType::AAAA {
+                                    IpAddr::is_ipv6
+                                } else {
+                                    unsafe { std::mem::transmute(|_: &IpAddr| false) }
+                                };
+                                message.set_message_type(MessageType::Response);
+                                for ip in self
+                                    .hosts
+                                    .get(&name)
+                                    .unwrap()
+                                    .iter()
+                                    .filter(|ip| filter(*ip))
+                                {
+                                    let mut record = Record::new();
+                                    record.set_record_type(query.query_type());
+                                    record.set_name(query.name().clone());
+                                    record.set_ttl(600);
+                                    record.set_dns_class(DNSClass::IN);
+                                    match ip {
+                                        IpAddr::V4(ip) => {
+                                            record.set_data(Some(RData::A(ip.clone())));
+                                        }
+                                        IpAddr::V6(ip) => {
+                                            record.set_data(Some(RData::AAAA(ip.clone())));
+                                        }
+                                    }
+                                    message.add_answer(record);
+                                }
+                                if let Err(err) = self
+                                    .listener
+                                    .send_to(message.to_vec().unwrap().as_slice(), from)
+                                {
+                                    log::error!("send response to :{} failed:{}", from, err);
+                                }
+                                continue;
+                            }
                             if query.query_type() == RecordType::PTR && name == self.ptr_name {
                                 log::debug!("found ptr query");
                                 if let Err(err) =

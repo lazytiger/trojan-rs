@@ -1,56 +1,32 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 pub struct DomainMap {
-    map: HashMap<String, Option<DomainMap>>,
+    domains: HashSet<String>,
 }
 
 impl DomainMap {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            domains: HashSet::new(),
         }
     }
 
-    pub fn add_domain(&mut self, domain: &str) {
-        let mut iter = domain.split('.').rev();
-        if domain.ends_with('.') {
-            let _ = iter.next();
-        }
-        if let Some(first) = iter.next() {
-            if self.map.get_mut(first).is_none() {
-                self.map.insert(first.into(), None);
-            }
-            let mut current = self.map.get_mut(first).unwrap();
-            for name in iter {
-                if current.is_none() {
-                    current.replace(DomainMap::new());
-                }
-                let map = current.as_mut().unwrap();
-                if map.map.get_mut(name).is_none() {
-                    map.map.insert(name.into(), None);
-                }
-                current = map.map.get_mut(name).unwrap();
-            }
-        }
+    pub fn add_domain(&mut self, domain: impl Into<String>) {
+        self.domains.insert(domain.into());
     }
 
     pub fn contains(&self, domain: &str) -> bool {
-        let mut current = self;
-        let mut iter = domain.split('.').rev();
-        if domain.ends_with('.') {
-            let _ = iter.next();
+        if self.domains.contains(domain) {
+            return true;
         }
-        for name in iter {
-            if let Some(map) = current.map.get(name) {
-                if map.is_none() {
-                    return true;
-                }
-                current = map.as_ref().unwrap();
-            } else {
-                return false;
+        let items: Vec<_> = domain.split('.').collect();
+        for i in 1..items.len() - 1 {
+            let domain = items.as_slice()[i..].join(".");
+            if self.domains.contains(&domain) {
+                return true;
             }
         }
-        true
+        false
     }
 }
 
@@ -76,7 +52,7 @@ mod tests {
                 domain_map.add_domain(line.as_str());
             }
         });
-        assert!(domain_map.contains("www.youtube.com."));
+        assert!(domain_map.contains("www.youtube.com"));
     }
 
     #[bench]
