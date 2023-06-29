@@ -134,10 +134,14 @@ impl DnsServer {
                                 HostParserState::HostEnd => break,
                             }
                         }
-                        if let HostParserState::HostEnd = state {
+                        if !host.is_empty() {
                             let ip = String::from_iter(ip.iter());
+                            if *host.last().unwrap() != '.' {
+                                host.push('.');
+                            }
                             let host = String::from_iter(host.iter());
                             if let Ok(ip) = ip.parse::<IpAddr>() {
+                                log::warn!("host:{}, ip:{}", host, ip);
                                 Some((ip, host))
                             } else {
                                 None

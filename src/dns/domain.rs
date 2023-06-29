@@ -16,12 +16,14 @@ impl DomainMap {
     }
 
     pub fn contains(&self, domain: &str) -> bool {
-        if self.domains.contains(domain) {
-            return true;
-        }
         let items: Vec<_> = domain.split('.').collect();
-        for i in 1..items.len() - 1 {
-            let domain = items.as_slice()[i..].join(".");
+        let end_index = if domain.ends_with('.') {
+            items.len() - 2
+        } else {
+            items.len() - 1
+        };
+        for i in 0..end_index {
+            let domain = items.as_slice()[i..end_index].join(".");
             if self.domains.contains(&domain) {
                 return true;
             }

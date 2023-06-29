@@ -102,9 +102,11 @@ pub fn run() -> Result<()> {
             }
         }
         if update_domain {
+            log::warn!("domain file changed, update now");
             dns_server.update_domain();
         }
         if update_hosts {
+            log::warn!("hosts file changed, update now");
             dns_server.update_hosts();
         }
         poll.poll(&mut events, Some(timeout))?;
