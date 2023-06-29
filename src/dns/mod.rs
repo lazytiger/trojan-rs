@@ -74,8 +74,10 @@ pub fn run() -> Result<()> {
     let (sender, receiver) = unbounded();
     let monitor = FileMonitor { sender };
     let mut watcher = notify::recommended_watcher(monitor)?;
-    let watched_file = Path::new(OPTIONS.dns_args().blocked_domain_list.as_str());
-    watcher.watch(&watched_file, RecursiveMode::NonRecursive)?;
+    let domain_path = Path::new(OPTIONS.dns_args().blocked_domain_list.as_str());
+    let hosts_path = Path::new(OPTIONS.dns_args().hosts.as_str());
+    watcher.watch(domain_path, RecursiveMode::NonRecursive)?;
+    watcher.watch(hosts_path, RecursiveMode::NonRecursive)?;
 
     let mut poll = Poll::new()?;
     let mut events = Events::with_capacity(1024);
@@ -89,10 +91,21 @@ pub fn run() -> Result<()> {
     log::warn!("dns server is ready");
     let timeout = Duration::from_secs(1);
     loop {
-        let count = receiver.try_iter().count();
-        if count > 0 {
-            log::warn!("update domain now");
+        let mut update_domain = false;
+        let mut update_hosts = false;
+        for event in receiver.try_iter() {
+            if event.paths.contains(&domain_path.to_path_buf()) {
+                update_domain = true;
+            }
+            if event.paths.contains(&hosts_path.to_path_buf()) {
+                update_hosts = true;
+            }
+        }
+        if update_domain {
             dns_server.update_domain();
+        }
+        if update_hosts {
+            dns_server.update_hosts();
         }
         poll.poll(&mut events, Some(timeout))?;
         for event in &events {

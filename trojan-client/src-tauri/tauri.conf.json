@@ -65,6 +65,7 @@
       "resources": [
         "config/domain.txt",
         "config/ipset.txt",
+        "config/hosts.txt",
         "libs/wintun.dll"
       ],
       "shortDescription": "",
