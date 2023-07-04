@@ -16,6 +16,7 @@ mod types;
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 mod platform;
 
+mod atun;
 mod tun;
 
 #[derive(Serialize, Deserialize, Clone, Default)]

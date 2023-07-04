@@ -106,7 +106,7 @@ impl DnsServer {
                         for c in line.chars() {
                             match state {
                                 HostParserState::LineStart => match c {
-                                    ' ' | '\t' => continue,
+                                    c if c.is_whitespace() => continue,
                                     '#' => break,
                                     _ => {
                                         state = HostParserState::IpStart;
@@ -114,18 +114,18 @@ impl DnsServer {
                                     }
                                 },
                                 HostParserState::IpStart => match c {
-                                    ' ' | '\t' => state = HostParserState::IpEnd,
+                                    c if c.is_whitespace() => state = HostParserState::IpEnd,
                                     _ => ip.push(c),
                                 },
                                 HostParserState::IpEnd => match c {
-                                    ' ' | '\t' => continue,
+                                    c if c.is_whitespace() => continue,
                                     _ => {
                                         state = HostParserState::HostStart;
                                         host.push(c);
                                     }
                                 },
                                 HostParserState::HostStart => match c {
-                                    ' ' | '\t' => {
+                                    c if c.is_whitespace() => {
                                         state = HostParserState::HostEnd;
                                         continue;
                                     }
@@ -168,7 +168,7 @@ impl DnsServer {
         let reader = BufReader::new(file);
         let lines: Vec<_> = reader
             .lines()
-            .filter_map(|line| line.ok())
+            .filter_map(|line| line.ok().map(|line| line.trim().to_string()))
             .sorted()
             .collect();
         for line in lines {

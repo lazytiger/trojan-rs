@@ -18,11 +18,11 @@ impl DomainMap {
     pub fn contains(&self, domain: &str) -> bool {
         let items: Vec<_> = domain.split('.').collect();
         let end_index = if domain.ends_with('.') {
-            items.len() - 2
-        } else {
             items.len() - 1
+        } else {
+            items.len()
         };
-        for i in 0..end_index {
+        for i in 0..end_index - 1 {
             let domain = items.as_slice()[i..end_index].join(".");
             if self.domains.contains(&domain) {
                 return true;
@@ -54,7 +54,10 @@ mod tests {
                 domain_map.add_domain(line.as_str());
             }
         });
-        assert!(domain_map.contains("www.youtube.com"));
+        assert!(domain_map.contains("ab.youtube.com."));
+        assert!(domain_map.contains("ab.youtube.com"));
+        assert!(domain_map.contains("ab.google.com"));
+        assert!(domain_map.contains("ab.google.cn"));
     }
 
     #[bench]
