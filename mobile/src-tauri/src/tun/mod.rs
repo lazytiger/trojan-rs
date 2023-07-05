@@ -15,7 +15,7 @@ use smoltcp::{
     iface::{Config, Interface, SocketSet},
     socket::Socket,
     time::{Duration, Instant},
-    wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address},
+    wire::{HardwareAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
 };
 
 use crate::{
@@ -92,12 +92,12 @@ fn prepare_idle_pool(
 }
 
 fn prepare_device(device: &mut VpnDevice) -> Interface {
-    let mut config = Config::default();
+    let mut config = Config::new(HardwareAddress::Ip);
     config.random_seed = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let mut interface = Interface::new(config, device);
+    let mut interface = Interface::new(config, device, smoltcp::time::Instant::now());
     interface.set_any_ip(true);
     interface
         .routes_mut()

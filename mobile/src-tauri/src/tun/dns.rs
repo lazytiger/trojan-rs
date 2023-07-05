@@ -99,6 +99,7 @@ impl DnsServer {
         let mut buffer = self.buffer.clone();
         let listener = device.get_udp_socket_mut(self.listener, WakerMode::None);
         while let Ok((len, endpoint)) = listener.recv_slice(buffer.as_mut_slice()) {
+            let endpoint = endpoint.endpoint;
             log::info!("got dns request {} bytes", len);
             let data = &buffer.as_slice()[..len];
             if let Ok(message) = Message::from_bytes(data) {

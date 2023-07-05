@@ -18,7 +18,12 @@ mod types;
 mod platform;
 
 mod atun;
-//mod tun;
+mod tun;
+
+#[cfg(feature = "async")]
+use atun::run as run_vpn;
+#[cfg(not(feature = "async"))]
+use tun::run as run_vpn;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Options {
@@ -314,8 +319,7 @@ pub fn process_vpn(fd: i32, dns: String, running: Arc<AtomicBool>) -> Result<(),
         .read()
         .map_err(|e| VpnError::RLock(e.to_string()))?
         .clone();
-    let runtime = Runtime::new()?;
-    runtime.block_on(atun::run(fd, dns, context, running))
+    run_vpn(fd, dns, context, running)
 }
 
 #[allow(mutable_transmutes)]

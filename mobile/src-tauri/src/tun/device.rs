@@ -323,7 +323,8 @@ fn preprocess_packet(packet: &Packet, device: &mut VpnDevice) {
     };
 
     let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
-    if is_private(dst_endpoint) || device.is_server(dst_endpoint) {
+    if !device.is_dns(dst_endpoint) && (is_private(dst_endpoint) || device.is_server(dst_endpoint))
+    {
         log::info!("ignore private packets:{}", dst_endpoint);
         return;
     }

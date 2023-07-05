@@ -19,7 +19,7 @@ use smoltcp::{
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tauri::utils;
-use tokio::{net::UdpSocket, spawn};
+use tokio::{net::UdpSocket, runtime::Runtime, spawn};
 use trust_dns_proto::{
     op::{Message, Query},
     rr::{DNSClass, Name, RecordType},
@@ -129,7 +129,7 @@ fn show_info(level: &String) -> bool {
     level == "Debug" || level == "Info" || level == "Trace"
 }
 
-pub async fn run(
+pub async fn async_run(
     fd: i32,
     dns: String,
     context: Context,
@@ -271,4 +271,9 @@ fn get_speed_and_unit(speed: f64) -> (f64, &'static str) {
     } else {
         (speed, "KB")
     }
+}
+
+pub fn run(fd: i32, dns: String, context: Context, running: Arc<AtomicBool>) -> types::Result<()> {
+    let mut runtime = Runtime::new()?;
+    runtime.block_on(async_run(fd, dns, context, running))
 }
