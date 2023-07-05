@@ -21,7 +21,7 @@ jobs:
       - name: Setup Alpine Linux for x86_64
         uses: jirutka/setup-alpine@v1
         with:
-          branch: v3.17
+          branch: v3.18
           arch: x86_64
           shell-name: alpine-x86_64.sh
           packages: >
@@ -32,10 +32,8 @@ jobs:
             musl-dev
             gcc
             ipset
-            ipset-dev
             p7zip
             mingw-w64-gcc
-            libmnl0
       - name: build x86_64 Linux
         shell: alpine-x86_64.sh {0}
         run: |
