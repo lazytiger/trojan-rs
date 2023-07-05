@@ -23,13 +23,13 @@ pub async fn start_udp(
     server_name: ServerName,
     config: Arc<ClientConfig>,
     buffer_size: usize,
-    pass: String,
+    request: Arc<BytesMut>,
 ) {
     let target = local.target;
+    log::info!("start udp listening for {}", target);
     let mut remotes = HashMap::new();
     let mut body = vec![0u8; 1500];
     let mut header = BytesMut::new();
-    let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let (sender, mut receiver) = tokio::sync::mpsc::channel(1024);
     loop {
         let timeout = tokio::time::sleep(Duration::from_secs(120));
@@ -38,6 +38,7 @@ pub async fn start_udp(
             ret = recv => {
                 match ret {
                     Ok((n, source)) => {
+                        log::info!("receive {} bytes from {} to {}", n, source, target);
                         let remote = match remotes.get_mut(&source) {
                             Some(write_half) => write_half,
                             None => {
@@ -46,18 +47,15 @@ pub async fn start_udp(
                                     buffer_size,
                                     server_addr,
                                     server_name.clone())
-                                .await.unwrap();
+                                .await;
+                                if let Err(err) = client {
+                                    log::error!("create tls connection failed:{:?}", err);
+                                    continue;
+                                }
+                                let client = client.unwrap();
                                 let (read_half, mut write_half) = client.into_split();
-                                header.clear();
-                                TrojanRequest::generate(
-                                    &mut header,
-                                    UDP_ASSOCIATE,
-                                    pass.as_bytes(),
-                                    &empty,
-                                );
-
-                                if let Err(err) = write_half.write_all(header.as_ref()).await {
-                                    log::info!("udp send handshake failed:{}", err);
+                                if let Err(err) = write_half.write_all(request.as_ref()).await {
+                                    log::error!("udp send handshake failed:{}", err);
                                     let _ = write_half.shutdown().await;
                                     continue;
                                 }
@@ -65,7 +63,7 @@ pub async fn start_udp(
                                 spawn(remote_to_local(
                                     read_half,
                                     local.clone(),
-                                    target,
+                                    source,
                                     sender.clone(),
                                 ));
                                 remotes.insert(source, write_half);
@@ -75,20 +73,11 @@ pub async fn start_udp(
                         header.clear();
                         UdpAssociate::generate_endpoint(
                             &mut header,
-                            &IpEndpoint::new(target.addr, target.port),
+                            &target,
                             n as u16,
                         );
-                        if let Err(err) = remote.write_all(header.as_ref()).await {
-                            remotes.remove(&source);
-                            log::info!("udp send remote failed:{}", err);
-                            continue;
-                        }
-
-                        if let Err(err) = remote.write_all(&body.as_slice()[..n]).await {
-                            remotes.remove(&source);
-                            log::info!("udp send remote failed:{}", err);
-                            continue;
-                        }
+                        let _= remote.write_all(header.as_ref()).await;
+                        let _= remote.write_all(&body.as_slice()[..n]).await;
                     }
                     Err(err) => {
                         log::info!("udp read from local failed:{}", err);
@@ -97,16 +86,20 @@ pub async fn start_udp(
                 }
             },
             _ = timeout => {
+                log::info!("timeout for udp {}", target);
                 if remotes.is_empty() {
                     break;
                 }
             },
             ret = receiver.recv() => {
                 if let Some(source) = ret {
+                    log::info!("udp source:{} remote closed", source);
                     if let Some(remote) = remotes.get_mut(&source) {
                         let _ = remote.shutdown().await;
                         remotes.remove(&source);
                     }
+                } else {
+                    log::error!("udp channel is closed");
                 }
             }
         }
@@ -131,12 +124,12 @@ pub async fn remote_to_local(
             }
             ret = remote.read(&mut buffer.as_mut_slice()[offset..]) => {
                 match ret {
+                    Err(_) | Ok(0) => {
+                        log::error!("udp read from remote failed");
+                        break;
+                    }
                     Ok(n) => {
                         offset += n;
-                    }
-                    Err(err) => {
-                        log::info!("udp read from remote failed:{}", err);
-                        break;
                     }
                 }
             }
@@ -149,11 +142,12 @@ pub async fn remote_to_local(
                     if data.is_empty() {
                         offset = 0;
                     } else {
-                        let remaining = offset - data.len();
-                        offset = data.len();
-                        buffer.copy_within(remaining.., 0);
+                        let len = data.len();
+                        let remaining = offset - len;
+                        buffer.copy_within(remaining..offset, 0);
+                        offset = len;
                     }
-                    log::info!("continue parsing with {} bytes left", buffer.len());
+                    log::info!("udp continue parsing with {} bytes left", offset);
                     break;
                 }
                 UdpParseResultEndpoint::Packet(packet) => {

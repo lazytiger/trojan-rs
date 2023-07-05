@@ -30,13 +30,18 @@ pub async fn start_trust_response(
     server_addr: SocketAddr,
     server_name: ServerName,
     buffer_size: usize,
-    string: String,
+    request: Arc<BytesMut>,
 ) -> Option<TlsClientWriteHalf> {
     match init_tls_conn(config, buffer_size, server_addr, server_name).await {
         Ok(client) => {
-            let (read_half, write_half) = client.into_split();
-            spawn(do_trust_response(sender, read_half));
-            Some(write_half)
+            let (read_half, mut write_half) = client.into_split();
+            if let Err(err) = write_half.write_all(request.as_ref()).await {
+                log::error!("send handshake to remote server failed:{}", err);
+                None
+            } else {
+                spawn(do_trust_response(sender, read_half));
+                Some(write_half)
+            }
         }
         Err(err) => {
             log::error!("connect to server failed:{:?}", err);
@@ -68,7 +73,7 @@ pub async fn start_dns(
     server_addr: SocketAddr,
     server_name: ServerName,
     buffer_size: usize,
-    pass: String,
+    request: Arc<BytesMut>,
     trusted_addr: SocketAddr,
     distrusted_addr: SocketAddr,
     blocked_domains: HashSet<String>,
@@ -82,7 +87,7 @@ pub async fn start_dns(
         server_addr,
         server_name.clone(),
         buffer_size,
-        pass.clone(),
+        request.clone(),
     )
     .await
     .unwrap();
@@ -106,7 +111,7 @@ pub async fn start_dns(
                                     let _ = trust.write_all(header.as_ref()).await;
                                     let _ = trust.write_all(&buffer.as_slice()[..n]).await;
                                 } else {
-                                    let _ = distrust.send(&buffer.as_slice()[..n]).await;
+                                    let _ = distrust.send_to(&buffer.as_slice()[..n], distrusted_addr).await;
                                 }
                             }
                         }
@@ -133,7 +138,7 @@ pub async fn start_dns(
                             server_addr,
                             server_name.clone(),
                             buffer_size,
-                            pass.clone())
+                            request.clone())
                         .await
                         .unwrap();
                     },
@@ -145,6 +150,7 @@ pub async fn start_dns(
             }
         }
     }
+    panic!("dns routine quit");
 }
 
 pub async fn do_distrust_response(sender: Sender<Response>, socket: Arc<UdpSocket>) {
@@ -157,6 +163,8 @@ pub async fn do_distrust_response(sender: Sender<Response>, socket: Arc<UdpSocke
                         log::error!("sender closed with error:{}", err);
                         break;
                     }
+                } else {
+                    log::error!("parse dns response from distrusted failed");
                 }
             }
             Err(err) => {
@@ -174,7 +182,7 @@ pub async fn do_trust_response(sender: Sender<Response>, mut remote: TlsClientRe
     'main: loop {
         match remote.read(&mut buffer.as_mut_slice()[offset..]).await {
             Ok(0) | Err(_) => {
-                log::error!("read from server failed");
+                log::error!("read from trust dns server failed");
                 break;
             }
             Ok(n) => {
@@ -186,11 +194,11 @@ pub async fn do_trust_response(sender: Sender<Response>, mut remote: TlsClientRe
                             if data.is_empty() {
                                 offset = 0;
                             } else {
-                                let remaining = offset - data.len();
-                                offset = data.len();
-                                buffer.copy_within(remaining.., 0);
+                                let len = data.len();
+                                let remaining = offset - len;
+                                buffer.copy_within(remaining..offset, 0);
+                                offset = len;
                             }
-                            log::info!("continue parsing with {} bytes left", buffer.len());
                             break;
                         }
                         UdpParseResultEndpoint::Packet(packet) => {
@@ -203,7 +211,7 @@ pub async fn do_trust_response(sender: Sender<Response>, mut remote: TlsClientRe
                             data = &packet.payload[packet.length..];
                         }
                         UdpParseResultEndpoint::InvalidProtocol => {
-                            log::info!("invalid protocol close now");
+                            log::error!("invalid protocol close now");
                             break 'main;
                         }
                     }
@@ -223,8 +231,8 @@ fn is_blocked(blocked: &HashSet<String>, name: &str) -> bool {
     };
     for i in 0..(len - 1) {
         let name = split.as_slice()[i..len].join(".");
-        log::info!("test domain:{}", name);
         if blocked.contains(name.as_str()) {
+            log::info!("test domain:{} blocked", name);
             return true;
         }
     }
@@ -268,6 +276,7 @@ impl DnsItem {
             let _ = stream
                 .send(message.to_vec().unwrap().as_slice(), source)
                 .await;
+            log::info!("send response to {}", source);
         }
         if let Some(answer) = message.answers().get(0) {
             self.expire = Instant::now() + Duration::from_secs(answer.ttl() as u64);

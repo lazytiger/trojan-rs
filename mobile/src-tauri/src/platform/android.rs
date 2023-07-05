@@ -145,7 +145,9 @@ pub fn start_vpn_process() -> Result<(), VpnError> {
     if running.load(Ordering::SeqCst) && context.handle.is_none() {
         let handle = std::thread::spawn(move || {
             if let Err(err) = std::panic::catch_unwind(|| {
-                crate::process_vpn(fd, dns, running).unwrap();
+                if let Err(err) = crate::process_vpn(fd, dns, running) {
+                    log::error!("process vpn failed:{:?}", err);
+                }
             }) {
                 log::error!("uncaught exception:{:?}", err);
                 if let Err(err) = emit_event(EventType::StatusChanged, VpnStatus::ProcessExit) {
@@ -297,7 +299,7 @@ pub fn should_show_permission_rationale(permission: impl AsRef<str>) -> Result<b
 }
 
 pub fn update_notification(content: impl AsRef<str>) -> Result<(), VpnError> {
-    log::info!("update notification:{}", content.as_ref());
+    //log::info!("update notification:{}", content.as_ref());
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);

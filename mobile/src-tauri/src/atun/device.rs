@@ -3,10 +3,10 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     io::{Error, ErrorKind},
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     pin::{pin, Pin},
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{ready, Context, Poll},
     time::Duration,
 };
@@ -29,11 +29,13 @@ use smoltcp::{
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf},
-    sync::Mutex,
     time::Sleep,
 };
 
-use crate::platform::{Packet, Session};
+use crate::{
+    get_mut_unchecked,
+    platform::{Packet, Session},
+};
 
 fn is_private(endpoint: IpEndpoint) -> bool {
     if let IpAddress::Ipv4(ip) = endpoint.addr {
@@ -53,47 +55,58 @@ fn is_private(endpoint: IpEndpoint) -> bool {
 }
 
 fn preprocess_packet(packet: &Packet, device: &mut VpnDevice) {
-    let (dst_addr, payload, protocol) = match IpVersion::of_packet(packet.bytes()).unwrap() {
-        IpVersion::Ipv4 => {
-            let packet = Ipv4Packet::new_checked(packet.bytes()).unwrap();
-            let dst_addr = packet.dst_addr();
-            (
-                IpAddress::Ipv4(dst_addr),
-                packet.payload(),
-                packet.next_header(),
-            )
-        }
-        IpVersion::Ipv6 => {
-            let packet = Ipv6Packet::new_checked(packet.bytes()).unwrap();
-            let dst_addr = packet.dst_addr();
-            (
-                IpAddress::Ipv6(dst_addr),
-                packet.payload(),
-                packet.next_header(),
-            )
-        }
-    };
-    let (dst_port, connect) = match protocol {
+    let (dst_addr, src_addr, payload, protocol) =
+        match IpVersion::of_packet(packet.bytes()).unwrap() {
+            IpVersion::Ipv4 => {
+                let packet = Ipv4Packet::new_checked(packet.bytes()).unwrap();
+                let dst_addr = packet.dst_addr();
+                let src_addr = packet.src_addr();
+                (
+                    IpAddress::Ipv4(dst_addr),
+                    IpAddress::Ipv4(src_addr),
+                    packet.payload(),
+                    packet.next_header(),
+                )
+            }
+            IpVersion::Ipv6 => {
+                let packet = Ipv6Packet::new_checked(packet.bytes()).unwrap();
+                let dst_addr = packet.dst_addr();
+                let src_addr = packet.src_addr();
+                (
+                    IpAddress::Ipv6(dst_addr),
+                    IpAddress::Ipv6(src_addr),
+                    packet.payload(),
+                    packet.next_header(),
+                )
+            }
+        };
+    let (dst_port, src_port, connect) = match protocol {
         IpProtocol::Udp => {
             let packet = UdpPacket::new_checked(payload).unwrap();
-            (packet.dst_port(), None)
+            (packet.dst_port(), packet.src_port(), None)
         }
         IpProtocol::Tcp => {
             let packet = TcpPacket::new_checked(payload).unwrap();
-            (packet.dst_port(), Some(packet.syn() && !packet.ack()))
+            (
+                packet.dst_port(),
+                packet.src_port(),
+                Some(packet.syn() && !packet.ack()),
+            )
         }
         _ => return,
     };
 
     let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
-    if is_private(dst_endpoint) || device.is_server(dst_endpoint) {
-        log::info!("ignore private packets:{}", dst_endpoint);
+    let src_endpoint = IpEndpoint::new(src_addr, src_port);
+    if device.dns_addr != dst_endpoint
+        && (is_private(dst_endpoint) || device.is_server(dst_endpoint))
+    {
         return;
     }
 
     match connect {
         Some(true) => {
-            device.ensure_tcp_socket(dst_endpoint);
+            device.ensure_tcp_socket(dst_endpoint, src_endpoint);
         }
         None => {
             device.ensure_udp_socket(dst_endpoint);
@@ -120,15 +133,14 @@ impl Traffic {
 
 pub struct VpnDevice {
     session: Arc<Session>,
-    sockets: Arc<RefCell<SocketSet<'static>>>,
+    sockets: Arc<SocketSet<'static>>,
     udp_set: HashSet<IpEndpoint>,
-    tcp_ip2handle: HashMap<IpEndpoint, SocketHandle>,
-    tcp_handle2ip: HashMap<SocketHandle, IpEndpoint>,
+    tcp_ip2handle: HashMap<IpEndpoint, (SocketHandle, IpEndpoint)>,
     mtu: usize,
     server_addr: IpEndpoint,
     dns_addr: IpEndpoint,
     traffic: Traffic,
-    new_tcp: Vec<SocketHandle>,
+    new_tcp: Vec<IpEndpoint>,
     new_udp: Vec<SocketHandle>,
 }
 
@@ -137,17 +149,16 @@ unsafe impl Send for VpnDevice {}
 impl VpnDevice {
     pub fn new(
         session: Arc<Session>,
-        sockets: Arc<RefCell<SocketSet<'static>>>,
+        sockets: SocketSet<'static>,
         mtu: usize,
         server_addr: IpEndpoint,
         dns_addr: IpEndpoint,
     ) -> Self {
         Self {
             session,
-            sockets,
+            sockets: Arc::new(sockets),
             udp_set: HashSet::new(),
             tcp_ip2handle: HashMap::new(),
-            tcp_handle2ip: HashMap::new(),
             mtu,
             server_addr,
             dns_addr,
@@ -157,41 +168,43 @@ impl VpnDevice {
         }
     }
 
+    pub fn sockets_mut(mut sockets: Arc<SocketSet>) -> &'static mut SocketSet {
+        unsafe { std::mem::transmute(get_mut_unchecked(&mut sockets)) }
+    }
+
     pub fn poll(&mut self, interface: &mut Interface) -> bool {
-        let sockets = self.sockets.clone();
-        let mut sockets = sockets.borrow_mut();
-        interface.poll(Instant::now(), self, &mut sockets)
+        let sockets = Self::sockets_mut(self.sockets.clone());
+        interface.poll(Instant::now(), self, sockets)
     }
 
     pub fn poll_delay(&mut self, interface: &mut Interface) -> Option<smoltcp::time::Duration> {
-        let mut sockets = self.sockets.borrow_mut();
-        interface.poll_delay(Instant::now(), &mut sockets)
+        let sockets = Self::sockets_mut(self.sockets.clone());
+        interface.poll_delay(Instant::now(), sockets)
     }
-    pub fn ensure_tcp_socket(&mut self, endpoint: IpEndpoint) {
-        if self.tcp_ip2handle.contains_key(&endpoint) {
+    pub fn ensure_tcp_socket(&mut self, dst_endpoint: IpEndpoint, src_endpoint: IpEndpoint) {
+        if self.tcp_ip2handle.contains_key(&src_endpoint) {
             return;
         }
         let socket = TcpSocket::new(
             SocketBuffer::new(vec![0; 102400]),
             SocketBuffer::new(vec![0; 102400]),
         );
-        let mut sockets = self.sockets.borrow_mut();
+        let sockets = Self::sockets_mut(self.sockets.clone());
         let handle = sockets.add(socket);
         let socket = sockets.get_mut::<TcpSocket>(handle);
-        socket.listen(endpoint).unwrap();
+        socket.listen(dst_endpoint).unwrap();
         socket.set_nagle_enabled(false);
         socket.set_ack_delay(None);
-        self.tcp_ip2handle.insert(endpoint, handle);
-        self.tcp_handle2ip.insert(handle, endpoint);
-        self.new_tcp.push(handle);
+        self.tcp_ip2handle
+            .insert(src_endpoint, (handle, dst_endpoint));
+        self.new_tcp.push(src_endpoint);
     }
 
     pub fn ensure_udp_socket(&mut self, endpoint: IpEndpoint) {
-        if self.udp_set.contains(&endpoint) {
+        if self.dns_addr == endpoint || self.udp_set.contains(&endpoint) {
             return;
         }
         let handle = self.create_udp_socket(endpoint);
-        log::info!("udp handle:{} is {}", handle, endpoint);
         self.udp_set.insert(endpoint);
         self.new_udp.push(handle);
     }
@@ -209,22 +222,19 @@ impl VpnDevice {
     }
 
     pub async fn accept_tcp(vpn: &Arc<Mutex<VpnDevice>>) -> Vec<TcpStream> {
-        let mut device = vpn.lock().await;
+        let mut device = vpn.lock().unwrap();
         let handles = std::mem::take(&mut device.new_tcp);
         handles
             .into_iter()
-            .map(|handle| {
-                TcpStream::new(
-                    handle,
-                    vpn.clone(),
-                    device.tcp_handle2ip.get(&handle).unwrap().clone(),
-                )
+            .map(|endpoint| {
+                let (handle, dst_endpoint) = device.tcp_ip2handle.get(&endpoint).unwrap().clone();
+                TcpStream::new(handle, vpn.clone(), endpoint, dst_endpoint)
             })
             .collect()
     }
 
     pub async fn accept_udp(vpn: &Arc<Mutex<VpnDevice>>) -> Vec<UdpStream> {
-        let mut device = vpn.lock().await;
+        let mut device = vpn.lock().unwrap();
         let handles = std::mem::take(&mut device.new_udp);
         handles
             .into_iter()
@@ -244,13 +254,13 @@ impl VpnDevice {
             PacketBuffer::new(vec![PacketMetadata::EMPTY; 10000], vec![0; 1024000]),
         );
         socket.bind(endpoint).unwrap();
-        self.sockets.borrow_mut().add(socket)
+        let sockets = Self::sockets_mut(self.sockets.clone());
+        sockets.add(socket)
     }
 
     pub fn remove_socket(&mut self, handle: SocketHandle) {
-        if let None = self
-            .sockets
-            .borrow_mut()
+        let sockets = Self::sockets_mut(self.sockets.clone());
+        if let None = sockets
             .iter_mut()
             .find(|(h, _)| *h == handle)
             .map(|(_, socket)| match socket {
@@ -271,18 +281,17 @@ impl VpnDevice {
             log::error!("socket:{} not found", handle);
         }
 
-        let mut sockets = self.sockets.borrow_mut();
         sockets.remove(handle);
     }
 
     pub fn get_tcp_socket_mut(&mut self, handle: SocketHandle) -> &mut TcpSocket {
-        let mut sockets = self.sockets.borrow_mut();
+        let sockets = Self::sockets_mut(self.sockets.clone());
         let socket: &mut TcpSocket = sockets.get_mut(handle);
         unsafe { std::mem::transmute(socket) }
     }
 
     pub fn get_udp_socket_mut(&mut self, handle: SocketHandle) -> &mut UdpSocket {
-        let mut sockets = self.sockets.borrow_mut();
+        let sockets = Self::sockets_mut(self.sockets.clone());
         let socket: &mut UdpSocket = sockets.get_mut(handle);
         unsafe { std::mem::transmute(socket) }
     }
@@ -375,13 +384,13 @@ impl<'a> smoltcp::phy::TxToken for TxToken<'a> {
     }
 }
 
-impl VpnDevice {}
-
 pub struct TcpStream {
     handle: SocketHandle,
     device: Arc<Mutex<VpnDevice>>,
-    pub(crate) target: IpEndpoint,
+    pub src_addr: IpEndpoint,
+    pub dst_addr: IpEndpoint,
     close_timer: Option<Sleep>,
+    reader: bool,
 }
 
 impl Clone for TcpStream {
@@ -389,29 +398,31 @@ impl Clone for TcpStream {
         Self {
             handle: self.handle.clone(),
             device: self.device.clone(),
-            target: self.target.clone(),
+            src_addr: self.src_addr.clone(),
+            dst_addr: self.dst_addr.clone(),
             close_timer: None,
+            reader: true,
         }
     }
 }
 
 impl Unpin for TcpStream {}
 
-async fn remove_tcp_stream(device: Arc<Mutex<VpnDevice>>, handle: SocketHandle) {
-    let mut device = device.lock().await;
-    let sockets = device.sockets.clone();
-    let mut sockets = sockets.borrow_mut();
-    sockets.remove(handle);
-    if let Some(endpoint) = device.tcp_handle2ip.get(&handle) {
-        let endpoint = endpoint.clone();
+async fn remove_tcp_stream(device: Arc<Mutex<VpnDevice>>, endpoint: IpEndpoint) {
+    let mut device = device.lock().unwrap();
+    let sockets = VpnDevice::sockets_mut(device.sockets.clone());
+    if let Some((handle, _)) = device.tcp_ip2handle.get(&endpoint) {
+        sockets.remove(*handle);
         device.tcp_ip2handle.remove(&endpoint);
     }
-    device.tcp_handle2ip.remove(&handle);
 }
 
 impl Drop for TcpStream {
     fn drop(&mut self) {
-        tokio::task::spawn(remove_tcp_stream(self.device.clone(), self.handle));
+        if self.reader {
+            return;
+        }
+        tokio::task::spawn(remove_tcp_stream(self.device.clone(), self.src_addr));
     }
 }
 
@@ -419,14 +430,24 @@ impl TcpStream {
     pub fn new(
         handle: SocketHandle,
         device: Arc<Mutex<VpnDevice>>,
-        target: IpEndpoint,
+        src_addr: IpEndpoint,
+        dst_addr: IpEndpoint,
     ) -> TcpStream {
         Self {
             handle,
             device,
-            target,
+            src_addr,
+            dst_addr,
             close_timer: None,
+            reader: false,
         }
+    }
+
+    pub fn close(&self) {
+        let mut lock = self.device.lock().unwrap();
+        let socket = lock.get_tcp_socket_mut(self.handle);
+        log::info!("close socket, current state:{}", socket.state());
+        socket.close();
     }
 }
 
@@ -436,13 +457,12 @@ impl AsyncRead for TcpStream {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        let mut lock = self.device.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = self.device.lock().unwrap();
         let socket = lock.get_tcp_socket_mut(self.handle);
         if socket.may_recv() {
             if let Ok(n) = socket.recv_slice(buf.initialize_unfilled()) {
                 if n > 0 {
-                    buf.set_filled(n);
+                    buf.set_filled(n + buf.filled().len());
                     Poll::Ready(Ok(()))
                 } else {
                     socket.register_recv_waker(cx.waker());
@@ -451,7 +471,7 @@ impl AsyncRead for TcpStream {
             } else {
                 Poll::Ready(Err(ErrorKind::BrokenPipe.into()))
             }
-        } else if socket.is_active() {
+        } else if let State::Established = socket.state() {
             socket.register_recv_waker(cx.waker());
             Poll::Pending
         } else {
@@ -466,8 +486,7 @@ impl AsyncWrite for TcpStream {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
-        let mut lock = self.device.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = self.device.lock().unwrap();
         let socket = lock.get_tcp_socket_mut(self.handle);
         if socket.may_send() {
             if let Ok(n) = socket.send_slice(buf) {
@@ -493,30 +512,7 @@ impl AsyncWrite for TcpStream {
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        let pin = self.get_mut();
-        let mut lock = pin.device.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
-        let socket = lock.get_tcp_socket_mut(pin.handle);
-        if let State::Closed = socket.state() {
-            Poll::Ready(Ok(()))
-        } else {
-            socket.register_recv_waker(cx.waker());
-            if pin.close_timer.is_some() {
-                let timer = pin.close_timer.take().unwrap();
-                let deadline = timer.deadline();
-                tokio::pin!(timer);
-                let ret = timer.poll(cx).map(|_| Ok(()));
-                if ret.is_pending() {
-                    pin.close_timer.replace(tokio::time::sleep_until(deadline));
-                }
-                ret
-            } else {
-                socket.close();
-                pin.close_timer
-                    .replace(tokio::time::sleep(Duration::from_secs(60)));
-                Poll::Pending
-            }
-        }
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -554,16 +550,20 @@ impl AsyncRead for UdpStream {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let pin = self.get_mut();
-        let mut lock = pin.device.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = pin.device.lock().unwrap();
         let socket = lock.get_udp_socket_mut(pin.handle);
-        match socket.recv_slice(buf.initialize_unfilled()) {
-            Ok((n, ep)) => {
-                buf.set_filled(n + buf.filled().len());
-                pin.target = ep;
-                Poll::Ready(Ok(()))
+        if socket.can_recv() {
+            match socket.recv_slice(buf.initialize_unfilled()) {
+                Ok((n, ep)) => {
+                    buf.set_filled(n + buf.filled().len());
+                    pin.target = ep.endpoint;
+                    Poll::Ready(Ok(()))
+                }
+                Err(err) => Poll::Ready(Err(ErrorKind::BrokenPipe.into())),
             }
-            Err(_) => Poll::Pending,
+        } else {
+            socket.register_recv_waker(cx.waker());
+            Poll::Pending
         }
     }
 }
@@ -574,12 +574,14 @@ impl AsyncWrite for UdpStream {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
-        let mut lock = self.device.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = self.device.lock().unwrap();
         let socket = lock.get_udp_socket_mut(self.handle);
         match socket.send_slice(buf, self.target) {
             Ok(_) => Poll::Ready(Ok(buf.len())),
-            Err(SendError::BufferFull) => Poll::Pending,
+            Err(SendError::BufferFull) => {
+                socket.register_send_waker(cx.waker());
+                Poll::Pending
+            }
             Err(_) => Poll::Ready(Err(ErrorKind::AddrNotAvailable.into())),
         }
     }
@@ -589,8 +591,7 @@ impl AsyncWrite for UdpStream {
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        let mut lock = self.device.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = self.device.lock().unwrap();
         lock.remove_socket(self.handle);
         Poll::Ready(Ok(()))
     }

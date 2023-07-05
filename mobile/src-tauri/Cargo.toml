@@ -25,9 +25,8 @@ serde_json = "1.0"
 log = "0.4"
 lazy_static = "1.4"
 derive_more = "0.99"
-smoltcp = "0.9"
+smoltcp = "0.10"
 rustls = { version = "0.21", features = [] }
-hyper-rustls = "0.24"
 itertools = "0.10"
 bytes = "1.4"
 crossbeam = "0.8"
@@ -49,6 +48,3 @@ android_logger = "0.13"
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
-
-[profile.release]
-debug = false

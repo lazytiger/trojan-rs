@@ -3,20 +3,23 @@ use std::{
     io::Read,
     net::{IpAddr, SocketAddr},
     str::FromStr,
-    sync::{atomic::AtomicBool, Arc},
-    time::{Duration, SystemTime},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant, SystemTime},
 };
 
-use hyper_rustls::ConfigBuilderExt;
-use rustls::{ClientConfig, ClientConnection, ServerName};
+use bytes::BytesMut;
+use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
 use sha2::{Digest, Sha224};
 use smoltcp::{
     iface::{Config, Interface, SocketSet},
-    wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address},
+    wire::{HardwareAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tauri::utils;
-use tokio::{spawn, sync::Mutex};
+use tokio::{net::UdpSocket, spawn};
 use trust_dns_proto::{
     op::{Message, Query},
     rr::{DNSClass, Name, RecordType},
@@ -27,12 +30,13 @@ use crate::{
     atun::{
         device::{UdpStream, VpnDevice},
         dns::start_dns,
+        proto::{TrojanRequest, UDP_ASSOCIATE},
         tcp::start_tcp,
         tls_stream::TlsClientStream,
         udp::start_udp,
     },
-    platform, types,
-    types::VpnError,
+    emit_event, platform, types,
+    types::{EventType, VpnError},
     Context,
 };
 
@@ -55,12 +59,12 @@ pub async fn init_tls_conn(
 }
 
 fn prepare_device(device: &mut VpnDevice) -> Interface {
-    let mut config = Config::default();
+    let mut config = Config::new(HardwareAddress::Ip);
     config.random_seed = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let mut interface = Interface::new(config, device);
+    let mut interface = Interface::new(config, device, smoltcp::time::Instant::now());
     interface.set_any_ip(true);
     interface
         .routes_mut()
@@ -81,13 +85,9 @@ fn digest_pass(pass: &String) -> String {
 }
 
 /// This function resolves a domain name to a list of IP addresses.
-pub fn resolve(name: &str, dns_server_addr: &str) -> types::Result<Vec<IpAddr>> {
+pub async fn resolve(name: &str, dns_server_addr: &str) -> types::Result<Vec<IpAddr>> {
     let dns_server_addr: SocketAddr = dns_server_addr.parse()?;
-    let dns_server_addr: SockAddr = dns_server_addr.into();
-    let mut socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    let addr: SocketAddr = "0.0.0.0:0".parse()?;
-    let addr: SockAddr = addr.into();
-    socket.bind(&addr)?;
+    let mut socket = UdpSocket::bind("0.0.0.0:0").await?;
     let mut message = Message::new();
     message.set_recursion_desired(true);
     message.set_id(1);
@@ -98,21 +98,30 @@ pub fn resolve(name: &str, dns_server_addr: &str) -> types::Result<Vec<IpAddr>> 
     query.set_query_class(DNSClass::IN);
     message.add_query(query);
     let request = message.to_vec()?;
-    if request.len() != socket.send_to(request.as_slice(), &dns_server_addr)? {
+    if request.len() != socket.send_to(request.as_slice(), dns_server_addr).await? {
+        log::error!("send dns query to server failed");
         return Err(VpnError::Resolve);
     }
     let mut response = vec![0u8; 1024];
-    socket.set_read_timeout(Some(Duration::from_millis(3000)))?;
-    let length = socket.read(response.as_mut_slice())?;
-    let message = Message::from_bytes(&response.as_slice()[..length])?;
-    if message.id() != 1 {
-        Err(VpnError::Resolve)
-    } else {
-        Ok(message
-            .answers()
-            .iter()
-            .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
-            .collect())
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            log::error!("dns query timeout");
+            Err(VpnError::Resolve)
+        }
+        ret = socket.recv(response.as_mut_slice()) =>  {
+            let length = ret?;
+            let message = Message::from_bytes(&response.as_slice()[..length])?;
+            if message.id() != 1 {
+                log::error!("dns response id not match");
+                Err(VpnError::Resolve)
+            } else {
+            Ok(message
+                .answers()
+                .iter()
+                .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
+                .collect())
+            }
+        }
     }
 }
 
@@ -126,6 +135,7 @@ pub async fn run(
     context: Context,
     running: Arc<AtomicBool>,
 ) -> types::Result<()> {
+    log::error!("vpn process start running");
     let session = Arc::new(platform::Session::new(
         fd,
         context.options.mtu,
@@ -135,7 +145,9 @@ pub async fn run(
     let server_ip = resolve(
         context.options.hostname.as_str(),
         (context.options.untrusted_dns.clone() + ":53").as_str(),
-    )?;
+    )
+    .await?;
+    log::info!("server ip is {:?}", server_ip);
 
     if server_ip.is_empty() {
         return Err(VpnError::Resolve);
@@ -144,53 +156,84 @@ pub async fn run(
     let server_name: ServerName = context.options.hostname.as_str().try_into()?;
 
     let server_addr = SocketAddr::new(server_ip[0], context.options.port);
-    let listener_addr = dns + ":53";
-    let listener_addr: SocketAddr = listener_addr.parse().unwrap();
+    let dns_addr = dns + ":53";
+    let dns_addr: IpEndpoint = dns_addr.parse().unwrap();
 
     let pass = digest_pass(&context.options.password);
+
+    let mut root_store = RootCertStore::empty();
+    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+        OwnedTrustAnchor::from_subject_spki_name_constraints(
+            ta.subject,
+            ta.spki,
+            ta.name_constraints,
+        )
+    }));
 
     let config = Arc::new(
         ClientConfig::builder()
             .with_safe_defaults()
-            .with_native_roots()
+            .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
-    let sockets = Arc::new(RefCell::new(unsafe {
-        std::mem::transmute(SocketSet::new([]))
-    }));
+    let sockets = unsafe { std::mem::transmute(SocketSet::new([])) };
     let mut device = VpnDevice::new(
         session.clone(),
         sockets,
         context.options.mtu,
-        IpEndpoint::from(server_addr),
-        IpEndpoint::from(listener_addr),
+        server_addr.into(),
+        dns_addr,
     );
 
     let mut interface = prepare_device(&mut device);
 
-    let listener = device.create_udp_socket(listener_addr.into());
+    let dns_handle = device.create_udp_socket(dns_addr.into());
 
     let device = Arc::new(Mutex::new(device));
 
     let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;
     let distrusted_addr = (context.options.untrusted_dns.clone() + ":53").parse()?;
 
-    let listener = VpnDevice::new_udp(&device, listener, listener_addr.into()).await;
+    let dns_socket = VpnDevice::new_udp(&device, dns_handle, dns_addr).await;
+    let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
+    let mut header = BytesMut::new();
+    TrojanRequest::generate(&mut header, UDP_ASSOCIATE, pass.as_bytes(), &empty);
+    let udp_header = Arc::new(header);
+
     spawn(start_dns(
-        listener,
+        dns_socket,
         config.clone(),
         server_addr,
         server_name.clone(),
         4096,
-        pass.clone(),
+        udp_header.clone(),
         trusted_addr,
         distrusted_addr,
         context.blocked_domains,
     ));
-    loop {
-        let mut lock = device.lock().await;
+    let mut last_speed_time = Instant::now();
+    while running.load(Ordering::Relaxed) {
+        let mut lock = device.lock().unwrap();
         lock.poll(&mut interface);
+        drop(lock);
+
+        if last_speed_time.elapsed().as_millis() >= context.options.speed_update_ms {
+            let mut lock = device.lock().unwrap();
+            let (rx_speed, tx_speed) = lock.calculate_speed();
+            drop(lock);
+            let (rx_speed, rx_unit) = get_speed_and_unit(rx_speed);
+            let (tx_speed, tx_unit) = get_speed_and_unit(tx_speed);
+            emit_event(
+                EventType::UpdateSpeed,
+                format!(
+                    "上行速度:{:.1}{}/s, 下行速度:{:.1}{}/s",
+                    rx_speed, rx_unit, tx_speed, tx_unit
+                ),
+            )?;
+            last_speed_time = std::time::Instant::now();
+        }
         for stream in VpnDevice::accept_tcp(&device).await {
+            log::info!("accept tcp {} - {}", stream.src_addr, stream.dst_addr);
             spawn(start_tcp(
                 stream,
                 config.clone(),
@@ -201,18 +244,31 @@ pub async fn run(
             ));
         }
         for stream in VpnDevice::accept_udp(&device).await {
+            log::info!("accept udp to:{}", stream.target);
             spawn(start_udp(
                 stream,
                 server_addr,
                 server_name.clone(),
                 config.clone(),
                 4096,
-                pass.clone(),
+                udp_header.clone(),
             ));
         }
-        let mut lock = device.lock().await;
-        if let Some(delay) = lock.poll_delay(&mut interface) {
-            tokio::time::sleep(delay.into()).await;
-        }
+        let mut lock = device.lock().unwrap();
+        let delay = lock
+            .poll_delay(&mut interface)
+            .unwrap_or(smoltcp::time::Duration::from_millis(2));
+        drop(lock);
+        tokio::time::sleep(delay.into()).await;
+    }
+
+    Ok(())
+}
+
+fn get_speed_and_unit(speed: f64) -> (f64, &'static str) {
+    if speed >= 1024.0 {
+        (speed / 1024.0, "MB")
+    } else {
+        (speed, "KB")
     }
 }

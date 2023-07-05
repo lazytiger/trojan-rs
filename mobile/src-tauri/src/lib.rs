@@ -8,6 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, Window, Wry};
+use tokio::runtime::Runtime;
 
 use crate::types::{EventType, VpnError};
 
@@ -17,7 +18,7 @@ mod types;
 mod platform;
 
 mod atun;
-mod tun;
+//mod tun;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Options {
@@ -313,7 +314,8 @@ pub fn process_vpn(fd: i32, dns: String, running: Arc<AtomicBool>) -> Result<(),
         .read()
         .map_err(|e| VpnError::RLock(e.to_string()))?
         .clone();
-    tun::run(fd, dns, context, running)
+    let runtime = Runtime::new()?;
+    runtime.block_on(atun::run(fd, dns, context, running))
 }
 
 #[allow(mutable_transmutes)]

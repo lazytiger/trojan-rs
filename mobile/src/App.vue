@@ -53,7 +53,7 @@ export default {
         } else if (event.payload === "ProcessExit") {
           if (this.network_lost) {
             this.process_exit = true;
-          } else if(this.running) {
+          } else if (this.running) {
             await invoke("start_process", {})
             this.label = "重启中";
           }
@@ -62,7 +62,7 @@ export default {
           this.running = false;
           this.label = "开始";
         } else if (event.payload === "NetworkAvailable") {
-          if(this.process_exit && this.running) {
+          if (this.process_exit && this.running) {
             await invoke("start_process", {})
             this.label = "网络重启中";
           }
@@ -131,6 +131,7 @@ export default {
     let data = await invoke("load_data", {key: "config"});
     if (data !== "") {
       this.config = JSON.parse(data.toString());
+      this.config.speed_update_ms = 2000;
     }
     await invoke("init_window", {logLevel: this.config.log_level});
     await this.init_listener();
@@ -200,7 +201,7 @@ export default {
             </v-col>
           </v-row>
           <div v-if="showResult">
-            <v-list :items="domains" @click:select="handleDomain" class="my-list">
+            <v-list :items="domains" class="my-list" @click:select="handleDomain">
             </v-list>
           </div>
         </v-container>
