@@ -35,6 +35,7 @@ jobs:
             ipset-dev
             p7zip
             mingw-w64-gcc
+            mnl
       - name: build x86_64 Linux
         shell: alpine-x86_64.sh {0}
         run: |
