@@ -28,8 +28,9 @@ pub async fn run_udp(
     let mut remotes = HashMap::new();
     let mut locals = HashMap::new();
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
+    let mut request = BytesMut::new();
+    TrojanRequest::generate(&mut request, UDP_ASSOCIATE, &empty);
     let mut header = BytesMut::new();
-    TrojanRequest::generate(&mut header, UDP_ASSOCIATE, &empty);
     loop {
         listener.ready(Interest::READABLE).await?;
         let (size, src_addr, dst_addr) =
@@ -46,8 +47,8 @@ pub async fn run_udp(
                 let session = ClientConnection::new(config.clone(), server_name.clone())?;
                 let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
                 let mut remote = TlsClientStream::new(remote, session, 4096);
-                if let Err(err) = remote.write_all(header.as_ref()).await {
-                    log::error!("send request to remote failed:{}", err);
+                if let Err(err) = remote.write_all(request.as_ref()).await {
+                    log::error!("send handshake to remote failed:{}", err);
                     continue;
                 }
                 let local = locals.entry(dst_addr).or_insert_with(|| {
