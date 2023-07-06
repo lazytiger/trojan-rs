@@ -68,19 +68,17 @@ async fn copy<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
 ) {
     let mut buffer = vec![0u8; 4096];
     loop {
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(timeout)) => {
+        if let Ok(Ok(n)) = tokio::time::timeout(
+            Duration::from_secs(timeout),
+            read.read(buffer.as_mut_slice()),
+        )
+        .await
+        {
+            if let Err(err) = write.write_all(&buffer.as_slice()[..n]).await {
+                log::error!("{} write failed:{}", message, err);
                 break;
-            },
-            ret = read.read(buffer.as_mut_slice()) => {
-                if let Ok(n) = ret {
-                    if let Err(err) = write.write_all(&buffer.as_slice()[..n]).await {
-                        log::error!("{} write failed:{}", message, err);
-                        break;
-                    }
-                } else {
-                   log::error!("{} read failed", message);
-                }
+            } else {
+                log::error!("{} read failed", message);
             }
         }
     }

@@ -157,6 +157,9 @@ pub async fn start_ping(
         }
 
         request = tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(3600)) => {
+                break;
+            },
             ret = resp_receiver.recv() => {
                 let result = ret.unwrap();
                 Some(result)

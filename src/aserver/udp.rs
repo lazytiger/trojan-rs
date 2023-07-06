@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::BytesMut;
 use tokio::{
@@ -6,7 +6,7 @@ use tokio::{
     net::UdpSocket,
     spawn,
     sync::mpsc::{channel, Receiver},
-    time::Instant,
+    time::{timeout, Instant},
 };
 
 use tokio_rustls::{TlsServerStream, TlsServerWriteHalf};
@@ -60,12 +60,17 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: Vec<u8>) -> Result<(
                 }
             }
         }
-        match source.read(&mut buffer.as_mut_slice()[offset..]).await {
-            Ok(0) | Err(_) => {
+        match timeout(
+            Duration::from_secs(OPTIONS.udp_idle_timeout),
+            source.read(&mut buffer.as_mut_slice()[offset..]),
+        )
+        .await
+        {
+            Ok(Ok(0)) | Err(_) | Ok(Err(_)) => {
                 log::error!("read from source failed");
                 break;
             }
-            Ok(n) => {
+            Ok(Ok(n)) => {
                 offset += n;
             }
         }

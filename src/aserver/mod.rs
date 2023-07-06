@@ -1,4 +1,7 @@
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
 use rustls::ServerConnection;
 use tokio::{
@@ -7,6 +10,7 @@ use tokio::{
     runtime::Runtime,
     spawn,
     sync::mpsc::{unbounded_channel, UnboundedSender},
+    time::timeout,
 };
 
 use tokio_rustls::TlsServerStream;
@@ -51,7 +55,7 @@ async fn start_proxy(
     src_addr: SocketAddr,
 ) -> Result<()> {
     let mut buffer = vec![0u8; 4096];
-    if let Ok(n) = conn.read(buffer.as_mut_slice()).await {
+    if let Ok(Ok(n)) = timeout(Duration::from_secs(120), conn.read(buffer.as_mut_slice())).await {
         let (cmd, target_addr, data) = match TrojanRequest::parse(&buffer.as_mut_slice()[..n]) {
             None => (
                 CONNECT,
