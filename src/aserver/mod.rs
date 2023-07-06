@@ -38,16 +38,17 @@ async fn async_run() -> Result<()> {
     let (req_sender, req_receiver) = unbounded_channel();
     spawn(start_check_routine(req_receiver));
     loop {
-        let (client, _) = listener.accept().await?;
+        let (client, src_addr) = listener.accept().await?;
         let session = ServerConnection::new(config.clone())?;
         let conn = TlsServerStream::new(client, session, 4096);
-        spawn(start_proxy(conn, req_sender.clone()));
+        spawn(start_proxy(conn, req_sender.clone(), src_addr));
     }
 }
 
 async fn start_proxy(
     mut conn: TlsServerStream,
     sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
+    src_addr: SocketAddr,
 ) -> Result<()> {
     let mut buffer = vec![0u8; 4096];
     if let Ok(n) = conn.read(buffer.as_mut_slice()).await {
@@ -74,7 +75,7 @@ async fn start_proxy(
             ),
         };
         match cmd {
-            CONNECT => start_tcp(conn, target_addr, data).await,
+            CONNECT => start_tcp(conn, target_addr, data, src_addr).await,
             UDP_ASSOCIATE => start_udp(conn, data).await,
             PING => start_ping(conn, data, sender.clone()).await,
             _ => {

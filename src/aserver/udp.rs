@@ -83,6 +83,9 @@ async fn target_to_source(
     let mut sources = HashMap::new();
     loop {
         tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(OPTIONS.udp_idle_timeout)) => {
+                break;
+            },
             ret = receiver.recv() => {
                 *sources.entry(ret.unwrap()).or_insert_with(||Instant::now()) = Instant::now();
             },
