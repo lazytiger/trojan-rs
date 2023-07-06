@@ -29,6 +29,8 @@ pub enum TrojanError {
     SetLogger(SetLoggerError),
 }
 
+unsafe impl Send for TrojanError {}
+
 #[allow(dead_code)]
 pub enum CopyResult {
     RxBlock,

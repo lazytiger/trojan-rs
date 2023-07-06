@@ -62,8 +62,10 @@ pub struct Opts {
 
 #[derive(Parser)]
 pub enum Mode {
-    #[clap(version, name = "proxy", about = "run in proxy mode")]
+    #[clap(version, name = "proxy", about = "run in synchronous proxy mode")]
     Proxy(ProxyArgs),
+    #[clap(version, name = "aproxy", about = "run in asynchronous proxy mode")]
+    Aproxy(ProxyArgs),
     #[clap(version, name = "server", about = "run in server mode")]
     Server(ServerArgs),
     #[clap(version, name = "wintun", about = "run in windows tun mode")]
@@ -265,7 +267,7 @@ impl Opts {
 
     pub fn proxy_args(&self) -> &ProxyArgs {
         match self.mode {
-            Mode::Proxy(ref args) => args,
+            Mode::Proxy(ref args) | Mode::Aproxy(ref args) => args,
             _ => panic!("not in proxy mode"),
         }
     }
@@ -320,7 +322,7 @@ impl Opts {
                 let back_addr: SocketAddr = args.remote_addr.parse().unwrap();
                 self.back_addr = Some(back_addr);
             }
-            Mode::Proxy(ref args) => {
+            Mode::Proxy(ref args) | Mode::Aproxy(ref args) => {
                 let hostname = args.hostname.clone();
                 let port = args.port;
                 self.resolve(hostname, port, None);

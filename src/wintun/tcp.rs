@@ -7,7 +7,10 @@ use std::{
 
 use bytes::BytesMut;
 use mio::{event::Event, Poll, Token};
-use smoltcp::{iface::SocketHandle, socket::tcp::Socket};
+use smoltcp::{
+    iface::SocketHandle,
+    socket::tcp::{Socket, State},
+};
 
 use crate::{
     idle_pool::IdlePool,
@@ -35,7 +38,7 @@ impl<'a, 'b> std::io::Read for TcpStreamRef<'a, 'b> {
                     std::io::Error::last_os_error(),
                 )),
             }
-        } else if self.socket.is_active() {
+        } else if let State::Established = self.socket.state() {
             Err(ErrorKind::WouldBlock.into())
         } else {
             Err(ErrorKind::UnexpectedEof.into())

@@ -17,6 +17,7 @@ cfg_if::cfg_if! {
         mod wintun;
     }
 }
+mod aproxy;
 mod idle_pool;
 mod proto;
 mod proxy;
@@ -55,6 +56,13 @@ fn main() {
                 OPTIONS.back_addr.as_ref().unwrap()
             );
             proxy::run()
+        }
+        Mode::Aproxy(_) => {
+            log::warn!(
+                "trojan started in asynchronous mode with server:{}",
+                OPTIONS.back_addr.as_ref().unwrap()
+            );
+            aproxy::run()
         }
         Mode::Server(_) => {
             log::warn!("trojan started in server mode");
