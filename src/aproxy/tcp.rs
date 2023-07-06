@@ -45,7 +45,7 @@ async fn start_tcp_proxy(
 ) -> Result<()> {
     let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
     let session = ClientConnection::new(config, server_name)?;
-    let mut remote = TlsClientStream::new(remote, session, 4096)?;
+    let mut remote = TlsClientStream::new(remote, session, 4096);
     let mut request = BytesMut::new();
     TrojanRequest::generate(&mut request, CONNECT, &dst_addr);
     if let Err(err) = remote.write_all(request.as_ref()).await {

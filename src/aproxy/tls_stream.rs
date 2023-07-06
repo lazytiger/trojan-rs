@@ -19,8 +19,6 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::types;
-
 pub type TlsServerStream = TlsStream<ServerConnection, ServerConnectionData>;
 pub type TlsServerReadHalf = TlsReadHalf<ServerConnection, ServerConnectionData>;
 pub type TlsServerWriteHalf = TlsWriteHalf<ServerConnection, ServerConnectionData>;
@@ -107,14 +105,14 @@ where
     T: DerefMut<Target = ConnectionCommon<D>>,
     T: Unpin,
 {
-    pub(crate) fn new(stream: TcpStream, session: T, buffer_size: usize) -> types::Result<Self> {
-        Ok(Self {
+    pub(crate) fn new(stream: TcpStream, session: T, buffer_size: usize) -> Self {
+        Self {
             stream,
             session,
             recv_buf: vec![0u8; buffer_size],
             send_buf: Vec::new(),
             _phantom: Default::default(),
-        })
+        }
     }
 
     pub fn into_split(self) -> (TlsReadHalf<T, D>, TlsWriteHalf<T, D>) {

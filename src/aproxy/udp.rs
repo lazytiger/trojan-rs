@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, sync::Arc};
 
 use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, ServerName};
@@ -33,13 +33,19 @@ pub async fn run_udp(
     loop {
         listener.ready(Interest::READABLE).await?;
         let (size, src_addr, dst_addr) =
-            sys::recv_from_with_destination(&listener, recv_buffer.as_mut_slice())?;
+            match sys::recv_from_with_destination(&listener, recv_buffer.as_mut_slice()) {
+                Ok(ret) => ret,
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
         let remote = match remotes.get_mut(&src_addr) {
             Some(ret) => ret,
             None => {
                 let session = ClientConnection::new(config.clone(), server_name.clone())?;
                 let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
-                let mut remote = TlsClientStream::new(remote, session, 4096)?;
+                let mut remote = TlsClientStream::new(remote, session, 4096);
                 if let Err(err) = remote.write_all(header.as_ref()).await {
                     log::error!("send request to remote failed:{}", err);
                     continue;
