@@ -37,13 +37,21 @@ pub async fn run_udp(
             match sys::recv_from_with_destination(&listener, recv_buffer.as_mut_slice()) {
                 Ok(ret) => ret,
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    log::info!("no udp packet, ignore");
                     continue;
                 }
                 Err(err) => return Err(err.into()),
             };
+        log::info!(
+            "receive {} bytes data from {} to {}",
+            size,
+            src_addr,
+            dst_addr
+        );
         let remote = match remotes.get_mut(&src_addr) {
             Some(ret) => ret,
             None => {
+                log::info!("remote not found for {}", src_addr);
                 let session = ClientConnection::new(config.clone(), server_name.clone())?;
                 let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
                 let mut remote = TlsClientStream::new(remote, session, 4096);
@@ -52,6 +60,7 @@ pub async fn run_udp(
                     continue;
                 }
                 let local = locals.entry(dst_addr).or_insert_with(|| {
+                    log::info!("local not found for {}", dst_addr);
                     let local = new_socket(dst_addr, true).unwrap();
                     let local = UdpSocket::from_std(local.into()).unwrap();
                     Arc::new(local)
@@ -87,7 +96,7 @@ async fn remote_to_local(
     'main: loop {
         match remote.read(&mut buffer.as_mut_slice()[offset..]).await {
             Err(_) | Ok(0) => {
-                log::error!("remote to local failed:{}", err);
+                log::error!("udp remote to local failed, remote closed");
                 break;
             }
             Ok(n) => {
