@@ -32,7 +32,7 @@ pub async fn run_udp(
     TrojanRequest::generate(&mut request, UDP_ASSOCIATE, &empty);
     let mut header = BytesMut::new();
     loop {
-        listener.ready(Interest::READABLE).await?;
+        listener.peek_sender().await?;
         let (size, src_addr, dst_addr) =
             match sys::recv_from_with_destination(&listener, recv_buffer.as_mut_slice()) {
                 Ok(ret) => ret,
