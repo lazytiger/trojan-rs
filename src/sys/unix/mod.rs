@@ -1,10 +1,11 @@
-use mio::net::TcpStream;
 use std::{
     convert::TryFrom,
     io::{Error, ErrorKind, Result},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     os::unix::io::AsRawFd,
 };
+
+use mio::net::TcpStream;
 
 #[allow(dead_code)]
 pub fn set_mark<T: AsRawFd>(socket: &T, mark: u8) -> Result<()> {
@@ -67,7 +68,10 @@ pub fn set_socket_opts<T: AsRawFd>(v4: bool, is_udp: bool, socket: &T) -> Result
     Ok(())
 }
 
-pub fn get_oridst_addr(s: &TcpStream) -> Result<SocketAddr> {
+pub fn get_oridst_addr<T>(s: &T) -> Result<SocketAddr>
+where
+    T: AsRawFd,
+{
     let fd = s.as_raw_fd();
 
     unsafe {
