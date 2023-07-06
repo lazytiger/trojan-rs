@@ -135,23 +135,36 @@ where
         if self.send_buf.is_empty() {
             Poll::Ready(Ok(0))
         } else {
-            match Pin::new(&mut self.stream).poll_write(cx, self.send_buf.as_slice()) {
-                Poll::Ready(Ok(n)) => {
-                    if self.send_buf.len() == n {
-                        self.send_buf.clear();
-                    } else {
-                        self.send_buf.copy_within(n.., 0);
-                        unsafe {
-                            self.send_buf.set_len(self.send_buf.len() - n);
-                        }
+            let mut data = self.send_buf.as_slice();
+            let mut offset = 0;
+            loop {
+                match Pin::new(&mut self.stream).poll_write(cx, data) {
+                    Poll::Ready(Ok(n)) => {
+                        offset += n;
+                        data = &data[n..];
                     }
-                    Poll::Ready(Ok(n))
+                    Poll::Ready(Err(err)) => {
+                        log::error!("poll_write stream failed:{}", err);
+                        return Poll::Ready(Err(err));
+                    }
+                    Poll::Pending => {
+                        break;
+                    }
                 }
-                Poll::Ready(Err(err)) => {
-                    log::error!("poll_write stream failed:{}", err);
-                    Poll::Ready(Err(err))
+            }
+            let len = data.len();
+            if len == 0 {
+                self.send_buf.clear();
+            } else if offset != 0 {
+                self.send_buf.copy_within(offset.., 0);
+                unsafe {
+                    self.send_buf.set_len(len);
                 }
-                ret => ret,
+            }
+            if offset == 0 {
+                Poll::Pending
+            } else {
+                Poll::Ready(Ok(offset))
             }
         }
     }
