@@ -1,11 +1,12 @@
+#![allow(dead_code)]
+
 use std::{
-    future::Future,
     io::{Error, ErrorKind, Read, Write},
     marker::PhantomData,
     ops::DerefMut,
-    pin::{pin, Pin},
+    pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 use rustls::{
@@ -27,6 +28,18 @@ pub type TlsClientStream = TlsStream<ClientConnection, ClientConnectionData>;
 pub type TlsClientReadHalf = TlsReadHalf<ClientConnection, ClientConnectionData>;
 pub type TlsClientWriteHalf = TlsWriteHalf<ClientConnection, ClientConnectionData>;
 
+macro_rules! lock {
+    ($lock:expr, $cx:expr) => {
+        match $lock.try_lock() {
+            Ok(lock) => lock,
+            Err(_) => {
+                $cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+        }
+    };
+}
+
 pub struct TlsReadHalf<T, D> {
     stream: Arc<Mutex<TlsStream<T, D>>>,
 }
@@ -43,8 +56,7 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let pin = self.get_mut();
-        let mut lock = pin.stream.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = lock!(pin.stream, cx);
         Pin::new(lock.deref_mut()).poll_read(cx, buf)
     }
 }
@@ -65,22 +77,19 @@ where
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
         let pin = self.get_mut();
-        let mut lock = pin.stream.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = lock!(pin.stream, cx);
         Pin::new(lock.deref_mut()).poll_write(cx, buf)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let pin = self.get_mut();
-        let mut lock = pin.stream.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = lock!(pin.stream, cx);
         Pin::new(lock.deref_mut()).poll_flush(cx)
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let pin = self.get_mut();
-        let mut lock = pin.stream.lock();
-        let mut lock = ready!(pin!(lock).poll(cx));
+        let mut lock = lock!(pin.stream, cx);
         Pin::new(lock.deref_mut()).poll_shutdown(cx)
     }
 }
