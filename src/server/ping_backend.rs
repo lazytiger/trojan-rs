@@ -3,7 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use bytes::{Buf, BufMut, BytesMut};
@@ -15,7 +15,6 @@ use tokio::{
         mpsc,
         mpsc::{UnboundedReceiver, UnboundedSender},
     },
-    time::Instant,
 };
 
 use crate::{
@@ -28,10 +27,10 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct PingResult {
-    time: Instant,
-    ip: IpAddr,
-    lost: u8,
-    ping: u16,
+    pub time: Instant,
+    pub ip: IpAddr,
+    pub lost: u8,
+    pub ping: u16,
 }
 
 impl Default for PingResult {
@@ -94,7 +93,7 @@ impl PingBackend {
     }
 }
 
-async fn start_check_routine(
+pub async fn start_check_routine(
     mut receiver: UnboundedReceiver<IpAddr>,
     sender: UnboundedSender<PingResult>,
 ) {

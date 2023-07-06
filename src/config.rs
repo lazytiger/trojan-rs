@@ -66,8 +66,10 @@ pub enum Mode {
     Proxy(ProxyArgs),
     #[clap(version, name = "aproxy", about = "run in asynchronous proxy mode")]
     Aproxy(ProxyArgs),
-    #[clap(version, name = "server", about = "run in server mode")]
+    #[clap(version, name = "server", about = "run in synchronous server mode")]
     Server(ServerArgs),
+    #[clap(version, name = "aserver", about = "run in asynchronous server mode")]
+    Aserver(ServerArgs),
     #[clap(version, name = "wintun", about = "run in windows tun mode")]
     Wintun(WintunArgs),
     #[clap(version, name = "dns", about = "run in dns mode")]
@@ -260,7 +262,7 @@ pub struct ServerArgs {
 impl Opts {
     pub fn server_args(&self) -> &ServerArgs {
         match self.mode {
-            Mode::Server(ref args) => args,
+            Mode::Server(ref args) | Mode::Aserver(ref args) => args,
             _ => panic!("not in server mode"),
         }
     }
@@ -318,7 +320,7 @@ impl Opts {
 
     pub fn setup(&mut self) {
         match self.mode {
-            Mode::Server(ref args) => {
+            Mode::Server(ref args) | Mode::Aserver(ref args) => {
                 let back_addr: SocketAddr = args.remote_addr.parse().unwrap();
                 self.back_addr = Some(back_addr);
             }

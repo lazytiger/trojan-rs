@@ -1,7 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime::Runtime,
@@ -10,7 +9,7 @@ use tokio::{
 use crate::{
     aproxy::{tcp::run_tcp, udp::run_udp},
     config::OPTIONS,
-    sys,
+    proxy::new_socket,
     types::Result,
 };
 
@@ -20,28 +19,6 @@ mod udp;
 pub fn run() -> Result<()> {
     let runtime = Runtime::new()?;
     runtime.block_on(async_run())
-}
-
-pub fn new_socket(addr: SocketAddr, is_udp: bool) -> Result<Socket> {
-    let domain = if addr.is_ipv4() {
-        Domain::IPV4
-    } else {
-        Domain::IPV6
-    };
-    let (typ, protocol) = if is_udp {
-        (Type::DGRAM, Protocol::UDP)
-    } else {
-        (Type::STREAM, Protocol::TCP)
-    };
-    let socket = Socket::new(domain, typ, Some(protocol))?;
-    sys::set_socket_opts(addr.is_ipv4(), is_udp, &socket)?;
-    socket.set_nonblocking(true)?;
-    socket.set_reuse_address(true)?;
-    socket.bind(&SockAddr::from(addr))?;
-    if !is_udp {
-        socket.listen(1024)?;
-    }
-    Ok(socket)
 }
 
 fn prepare_tls_config() -> Arc<ClientConfig> {

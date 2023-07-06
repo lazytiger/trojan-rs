@@ -27,6 +27,8 @@ pub enum TrojanError {
     MainAdapterNotFound,
     Notify(notify::Error),
     SetLogger(SetLoggerError),
+    #[from(ignore)]
+    Resolve,
 }
 
 unsafe impl Send for TrojanError {}

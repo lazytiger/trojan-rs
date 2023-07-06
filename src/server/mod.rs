@@ -22,7 +22,7 @@ use crate::{
 };
 
 mod connection;
-mod ping_backend;
+pub mod ping_backend;
 mod stat;
 mod tcp_backend;
 mod tls_server;
@@ -63,7 +63,7 @@ fn load_private_key(filename: &str) -> rustls::PrivateKey {
     )
 }
 
-fn init_config() -> Result<Arc<ServerConfig>> {
+pub fn init_config() -> Result<Arc<ServerConfig>> {
     let client_auth = if OPTIONS.server_args().check_auth {
         let roots = load_certs(OPTIONS.server_args().cert.as_str());
         let mut client_auth_roots = RootCertStore::empty();
@@ -75,14 +75,10 @@ fn init_config() -> Result<Arc<ServerConfig>> {
         NoClientAuth::boxed()
     };
 
-    let suits = rustls::ALL_CIPHER_SUITES.to_vec();
     let certs = load_certs(OPTIONS.server_args().cert.as_str());
     let private_key = load_private_key(OPTIONS.server_args().key.as_str());
     let mut config = ServerConfig::builder()
-        .with_cipher_suites(&suits)
-        .with_safe_default_kx_groups()
-        .with_safe_default_protocol_versions()
-        .unwrap()
+        .with_safe_defaults()
         .with_client_cert_verifier(client_auth)
         .with_single_cert_with_ocsp_and_sct(certs, private_key, vec![], vec![])?;
     config.key_log = Arc::new(KeyLogFile::new());

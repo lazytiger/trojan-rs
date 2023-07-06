@@ -1,6 +1,3 @@
-pub use tls_stream::{
-    TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf, TlsServerReadHalf, TlsServerStream,
-    TlsServerWriteHalf,
-};
+pub use tls_stream::*;
 
 mod tls_stream;

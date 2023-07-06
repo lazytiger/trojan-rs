@@ -2,8 +2,6 @@
 #![feature(test)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-extern crate core;
-
 use std::panic;
 
 use backtrace::Backtrace;
@@ -18,6 +16,7 @@ cfg_if::cfg_if! {
     }
 }
 mod aproxy;
+mod aserver;
 mod idle_pool;
 mod proto;
 mod proxy;
@@ -65,8 +64,12 @@ fn main() {
             aproxy::run()
         }
         Mode::Server(_) => {
-            log::warn!("trojan started in server mode");
+            log::warn!("trojan started in synchronous server mode");
             server::run()
+        }
+        Mode::Aserver(_) => {
+            log::warn!("trojan started in asynchronous server mode");
+            aserver::run()
         }
         Mode::Wintun(_) => {
             cfg_if::cfg_if! {
