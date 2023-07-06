@@ -66,6 +66,7 @@ async fn remote_to_local(mut remote: TlsClientReadHalf, mut local: OwnedWriteHal
         log::error!("transfer from remote to local failed:{}", err);
     }
     let _ = local.shutdown().await;
+    log::info!("tcp remote to local exit");
 }
 
 async fn local_to_remote(mut local: OwnedReadHalf, mut remote: TlsClientWriteHalf) {
@@ -73,4 +74,5 @@ async fn local_to_remote(mut local: OwnedReadHalf, mut remote: TlsClientWriteHal
         log::error!("transfer from local to remote failed:{}", err);
     }
     let _ = remote.shutdown().await;
+    log::info!("tcp local to remote exit");
 }
