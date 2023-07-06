@@ -128,6 +128,7 @@ where
     fn poll_tls_write(&mut self, cx: &mut Context<'_>) -> Poll<Result<usize, Error>> {
         if self.session.wants_write() {
             if let Err(err) = self.session.write_tls(&mut self.send_buf) {
+                log::error!("read data from session failed:{}", err);
                 return Poll::Ready(Err(err));
             }
         }
@@ -145,6 +146,10 @@ where
                         }
                     }
                     Poll::Ready(Ok(n))
+                }
+                Poll::Ready(Err(err)) => {
+                    log::error!("poll_write stream failed:{}", err);
+                    Poll::Ready(Err(err))
                 }
                 ret => ret,
             }
@@ -216,7 +221,10 @@ where
                 Poll::Ready(Ok(_)) | Poll::Pending => Poll::Ready(Ok(n)),
                 ret => ret,
             },
-            Err(err) => Poll::Ready(Err(err)),
+            Err(err) => {
+                log::error!("write data to session failed:{}", err);
+                Poll::Ready(Err(err))
+            }
         }
     }
 
