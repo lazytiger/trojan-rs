@@ -15,7 +15,6 @@ use crate::{
 };
 
 mod tcp;
-mod tls_stream;
 mod udp;
 
 pub fn run() -> Result<()> {

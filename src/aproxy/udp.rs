@@ -9,11 +9,10 @@ use tokio::{
     sync::mpsc::{channel, Sender},
 };
 
+use tokio_rustls::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf};
+
 use crate::{
-    aproxy::{
-        new_socket,
-        tls_stream::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf},
-    },
+    aproxy::new_socket,
     config::OPTIONS,
     proto::{TrojanRequest, UdpAssociate, UdpParseResult, UDP_ASSOCIATE},
     sys,

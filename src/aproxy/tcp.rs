@@ -11,8 +11,9 @@ use tokio::{
     spawn,
 };
 
+use tokio_rustls::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf};
+
 use crate::{
-    aproxy::tls_stream::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf},
     config::OPTIONS,
     proto::{TrojanRequest, CONNECT},
     sys,

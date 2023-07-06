@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{
     io::{Error, ErrorKind, Read, Write},
     marker::PhantomData,
@@ -105,7 +103,7 @@ where
     T: DerefMut<Target = ConnectionCommon<D>>,
     T: Unpin,
 {
-    pub(crate) fn new(stream: TcpStream, session: T, buffer_size: usize) -> Self {
+    pub fn new(stream: TcpStream, session: T, buffer_size: usize) -> Self {
         Self {
             stream,
             session,

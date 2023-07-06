@@ -1561,6 +1561,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio_rustls"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rustls",
+ "tokio",
+]
+
+[[package]]
 name = "tracing"
 version = "0.1.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1628,6 +1637,7 @@ dependencies = [
  "surge-ping",
  "test-log",
  "tokio",
+ "tokio_rustls",
  "trust-dns-proto",
  "webpki",
  "webpki-roots",
