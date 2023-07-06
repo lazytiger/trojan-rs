@@ -64,8 +64,13 @@ pub async fn run_udp(
         };
         header.clear();
         UdpAssociate::generate(&mut header, &dst_addr, size as u16);
-        if let Err(err) = remote.write_all(header.as_ref()).await {
-            log::error!("send request to remote failed:{}", err);
+        if remote.write_all(header.as_ref()).await.is_err()
+            || remote
+                .write_all(&recv_buffer.as_slice()[..size])
+                .await
+                .is_err()
+        {
+            log::error!("send request to remote failed");
             let _ = remote.shutdown().await;
             remotes.remove(&src_addr);
         }
@@ -81,6 +86,10 @@ async fn remote_to_local(
     let mut offset = 0;
     'main: loop {
         match remote.read(&mut buffer.as_mut_slice()[offset..]).await {
+            Err(_) | Ok(0) => {
+                log::error!("remote to local failed:{}", err);
+                break;
+            }
             Ok(n) => {
                 offset += n;
                 let mut data = &buffer.as_mut_slice()[..offset];
@@ -115,10 +124,6 @@ async fn remote_to_local(
                         }
                     }
                 }
-            }
-            Err(err) => {
-                log::error!("remote to local failed:{}", err);
-                break;
             }
         }
     }
