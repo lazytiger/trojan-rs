@@ -235,6 +235,7 @@ fn parse_address_endpoint(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Addres
 
 pub struct UdpAssociate<'a> {
     pub address: SocketAddr,
+    pub offset: usize,
     pub length: usize,
     pub payload: &'a [u8],
 }
@@ -265,8 +266,10 @@ impl<'a> UdpAssociate<'a> {
         }
         let atyp = buffer[0];
         buffer = &buffer[1..];
+        let mut offset = 1;
         if let Some((size, addr)) = parse_address(atyp, buffer) {
             buffer = &buffer[size..];
+            offset += size;
             if buffer.len() < 4 {
                 return UdpParseResult::Continued;
             }
@@ -282,10 +285,12 @@ impl<'a> UdpAssociate<'a> {
                 log::error!("udp packet expected CRLF after length");
                 return UdpParseResult::InvalidProtocol;
             }
+            offset += 4;
             match addr {
                 Sock5Address::Socket(address) => UdpParseResult::Packet(UdpAssociate {
                     address,
                     length,
+                    offset,
                     payload: &buffer[4..],
                 }),
                 _ => {

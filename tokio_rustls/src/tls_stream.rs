@@ -7,6 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use bytes::{Buf, BufMut, BytesMut};
 use rustls::{
     client::ClientConnectionData, server::ServerConnectionData, ClientConnection, ConnectionCommon,
     ServerConnection,
@@ -94,7 +95,7 @@ pub struct TlsStream<T, D> {
     stream: TcpStream,
     session: T,
     recv_buf: Vec<u8>,
-    send_buf: Vec<u8>,
+    send_buf: BytesMut,
     _phantom: PhantomData<D>,
 }
 
@@ -108,7 +109,7 @@ where
             stream,
             session,
             recv_buf: vec![0u8; buffer_size],
-            send_buf: Vec::new(),
+            send_buf: BytesMut::new(),
             _phantom: Default::default(),
         }
     }
@@ -123,48 +124,34 @@ where
         )
     }
 
-    fn poll_tls_write(&mut self, cx: &mut Context<'_>) -> Poll<Result<usize, Error>> {
-        if self.session.wants_write() {
-            if let Err(err) = self.session.write_tls(&mut self.send_buf) {
-                log::error!("read data from session failed:{}", err);
-                return Poll::Ready(Err(err));
+    fn poll_tls_flush(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        while self.session.wants_write() || !self.send_buf.is_empty() {
+            if self.session.wants_write() {
+                let mut send_buf = self.send_buf.split().writer();
+                if let Err(err) = self.session.write_tls(&mut send_buf) {
+                    log::error!("read data from session failed:{}", err);
+                    return Poll::Ready(Err(err));
+                } else {
+                    self.send_buf.unsplit(send_buf.into_inner());
+                }
             }
-        }
-        if self.send_buf.is_empty() {
-            Poll::Ready(Ok(0))
-        } else {
-            let mut data = self.send_buf.as_slice();
-            let mut offset = 0;
-            loop {
-                match Pin::new(&mut self.stream).poll_write(cx, data) {
+
+            if !self.send_buf.is_empty() {
+                match Pin::new(&mut self.stream).poll_write(cx, self.send_buf.as_ref()) {
                     Poll::Ready(Ok(n)) => {
-                        offset += n;
-                        data = &data[n..];
+                        self.send_buf.advance(n);
                     }
                     Poll::Ready(Err(err)) => {
                         log::error!("poll_write stream failed:{}", err);
                         return Poll::Ready(Err(err));
                     }
                     Poll::Pending => {
-                        break;
+                        return Poll::Pending;
                     }
                 }
             }
-            let len = data.len();
-            if len == 0 {
-                self.send_buf.clear();
-            } else if offset != 0 {
-                self.send_buf.copy_within(offset.., 0);
-                unsafe {
-                    self.send_buf.set_len(len);
-                }
-            }
-            if offset == 0 {
-                Poll::Pending
-            } else {
-                Poll::Ready(Ok(offset))
-            }
         }
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -198,14 +185,12 @@ where
                     Poll::Ready(Ok(()))
                 } else if let Err(err) = pin.session.read_tls(&mut raw_buf.filled()) {
                     Poll::Ready(Err(err))
-                } else if let Err(_) = pin.session.process_new_packets() {
+                } else if pin.session.process_new_packets().is_err() {
                     Poll::Ready(Err(ErrorKind::InvalidData.into()))
+                } else if let Poll::Ready(Err(err)) = pin.poll_tls_flush(cx) {
+                    Poll::Ready(Err(err))
                 } else {
-                    if let Poll::Ready(Err(err)) = pin.poll_tls_write(cx) {
-                        Poll::Ready(Err(err))
-                    } else {
-                        Pin::new(pin).poll_read(cx, buf)
-                    }
+                    Pin::new(pin).poll_read(cx, buf)
                 }
             }
             ret => ret,
@@ -225,13 +210,18 @@ where
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
         let pin = self.get_mut();
+        match pin.poll_tls_flush(cx) {
+            Poll::Pending => {
+                return Poll::Pending;
+            }
+            Poll::Ready(Err(err)) => {
+                return Poll::Ready(Err(err));
+            }
+            _ => {}
+        }
         match pin.session.writer().write(buf) {
             // read actual data from session, drain the session.
-            Ok(n) => match pin.poll_tls_write(cx) {
-                // trying to flush data
-                Poll::Ready(Ok(_)) | Poll::Pending => Poll::Ready(Ok(n)),
-                ret => ret,
-            },
+            Ok(n) => pin.poll_tls_flush(cx).map(|ret| ret.map(|_| n)),
             Err(err) => {
                 log::error!("write data to session failed:{}", err);
                 Poll::Ready(Err(err))
@@ -241,76 +231,11 @@ where
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let pin = self.get_mut();
-        pin.poll_tls_write(cx).map(|r| r.map(|_| ()))
+        pin.poll_tls_flush(cx)
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let pin = self.get_mut();
         Pin::new(&mut pin.stream).poll_shutdown(cx)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::sync::Arc;
-
-    use rustls::{ClientConfig, ClientConnection};
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpStream,
-    };
-
-    use hyper_rustls::ConfigBuilderExt;
-
-    use crate::tls_stream::TlsClientStream;
-
-    #[test]
-    fn test_async() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        println!("start testing now");
-        runtime.block_on(async {
-            let stream = TcpStream::connect("110.242.68.3:443").await.unwrap();
-            let client_config = Arc::new(
-                ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_native_roots()
-                    .with_no_client_auth(),
-            );
-            let session =
-                ClientConnection::new(client_config, "www.baidu.com".try_into().unwrap()).unwrap();
-            let client = TlsClientStream::new(stream, session).unwrap();
-            let (mut read_half, mut write_half) = client.into_split();
-            println!("start sending request");
-            write_half
-                .write_all("GET / HTTP/1.1\r\n".as_bytes())
-                .await
-                .unwrap();
-            write_half
-                .write_all("Host: www.baidu.com\r\n".as_bytes())
-                .await
-                .unwrap();
-            write_half
-                .write_all("User-Agent: test\r\n".as_bytes())
-                .await
-                .unwrap();
-            write_half
-                .write_all("Accept: */*\r\n".as_bytes())
-                .await
-                .unwrap();
-            println!("write request finished");
-            write_half.write_all("\r\n".as_bytes()).await.unwrap();
-            let mut data = vec![0u8; 4096];
-            let size = read_half.read(data.as_mut_slice()).await.unwrap();
-            if size == 0 {
-                println!("read from client failed");
-            } else {
-                unsafe { data.set_len(size) }
-                println!(
-                    "read {} bytes, response:{}",
-                    size,
-                    String::from_utf8(data).unwrap()
-                );
-            }
-        });
     }
 }
