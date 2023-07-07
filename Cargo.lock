@@ -102,6 +102,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_smoltcp"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "smoltcp",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "atomic-polyfill"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -547,6 +557,12 @@ name = "futures-io"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fff74096e71ed47f8e023204cfd0aa1289cd54ae5430a9523be060cdb849964"
+
+[[package]]
+name = "futures-sink"
+version = "0.3.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f43be4fe21a13b9781a69afa4985b0f6ee0e1afab2c6f454a8cf30e2b2237b6e"
 
 [[package]]
 name = "futures-task"
@@ -1561,6 +1577,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-util"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "806fe8c2c87eccc8b3267cbae29ed3ab2d0bd37fca70ab622e46aaa9375ddb7d"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "tokio_rustls"
 version = "0.1.0"
 dependencies = [
@@ -1606,6 +1635,7 @@ dependencies = [
 name = "trojan"
 version = "0.15.0"
 dependencies = [
+ "async_smoltcp",
  "backtrace",
  "backtrace-on-stack-overflow",
  "bytes",
