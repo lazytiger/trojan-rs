@@ -162,5 +162,6 @@ pub async fn start_ping(
             }
         };
     }
+    let _ = source.shutdown().await;
     Ok(())
 }
