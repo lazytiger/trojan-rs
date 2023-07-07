@@ -1,25 +1,25 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
+    time::SystemTime,
 };
 
-use bytes::{BufMut, BytesMut};
 use smoltcp::{
-    iface::{SocketHandle, SocketSet},
+    iface::{Config, Interface, SocketHandle, SocketSet},
     phy::{Device, DeviceCapabilities, Medium},
     socket::{
-        tcp::{RecvError, Socket as TcpSocket, SocketBuffer, State},
-        udp::{PacketBuffer, PacketMetadata, SendError, Socket as UdpSocket},
+        tcp::{Socket as TcpSocket, SocketBuffer},
+        udp::{PacketBuffer, PacketMetadata, Socket as UdpSocket},
         Socket,
     },
     time::Instant,
     wire::{
-        IpAddress, IpEndpoint, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
+        HardwareAddress, IpAddress, IpCidr, IpEndpoint, IpProtocol, IpVersion, Ipv4Address,
+        Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
     },
 };
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::{tcp::TcpStream, Packet, Tun};
+use crate::{tcp::TcpStream, Packet, Tun, TypeConverter};
 
 pub struct Traffic {
     rx_bytes: usize,
@@ -41,24 +41,26 @@ pub struct TunDevice<'a, T: Tun> {
     tun: T,
     traffic: Traffic,
     mtu: usize,
-    udp_set: HashSet<IpEndpoint>,
     sockets: SocketSet<'a>,
     tcp_ip2handle: HashMap<IpEndpoint, (SocketHandle, IpEndpoint)>,
+    udp_ip2handle: HashMap<IpEndpoint, SocketHandle>,
     new_tcp: Vec<IpEndpoint>,
-    new_udp: Vec<SocketHandle>,
+    new_udp: Vec<IpEndpoint>,
     white_ip_list: HashSet<IpAddress>,
     allow_private: bool,
     /// (source address, data)
-    tcp_receiver: Receiver<(SocketAddr, Vec<u8>)>,
-    tcp_sender: Sender<(SocketAddr, Vec<u8>)>,
+    tcp_receiver: Receiver<(IpEndpoint, Vec<u8>)>,
+    tcp_sender: Sender<(IpEndpoint, Vec<u8>)>,
     /// (source address, sender)
     tcp_req_senders: HashMap<IpEndpoint, Sender<Vec<u8>>>,
 
     /// (source address, target address, data)
-    udp_receiver: Receiver<(SocketAddr, SocketAddr, Vec<u8>)>,
-    udp_sender: Sender<(SocketAddr, SocketAddr, Vec<u8>)>,
+    udp_receiver: Receiver<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+    udp_sender: Sender<(IpEndpoint, IpEndpoint, Vec<u8>)>,
     /// (source address, sender)
-    udp_req_senders: HashMap<IpEndpoint, Sender<(SocketAddr, Vec<u8>)>>,
+    udp_req_senders: HashMap<IpEndpoint, Sender<(IpEndpoint, Vec<u8>)>>,
+
+    interface: Option<Interface>,
 }
 
 fn is_private_v4(addr: IpAddress) -> bool {
@@ -78,23 +80,53 @@ fn is_private_v4(addr: IpAddress) -> bool {
 }
 
 impl<'a, T: Tun> TunDevice<'a, T> {
-    pub fn add_white_ip(&mut self, addr: IpAddress) {
-        self.white_ip_list.insert(addr);
+    pub fn new(mtu: usize, tun: T) -> Self {
+        let (tcp_sender, tcp_receiver) = channel(1024);
+        let (udp_sender, udp_receiver) = channel(1024);
+        let mut device = Self {
+            tun,
+            traffic: Traffic::new(),
+            mtu,
+            sockets: SocketSet::new([]),
+            tcp_ip2handle: Default::default(),
+            udp_ip2handle: Default::default(),
+            new_tcp: vec![],
+            new_udp: vec![],
+            white_ip_list: Default::default(),
+            allow_private: false,
+            tcp_receiver,
+            tcp_sender,
+            tcp_req_senders: Default::default(),
+            udp_receiver,
+            udp_sender,
+            udp_req_senders: Default::default(),
+            interface: None,
+        };
+        let interface = device.create_interface();
+        device.interface.replace(interface);
+        device
     }
 
-    pub fn allowed(&self, endpoint: IpEndpoint) -> bool {
+    pub fn allow_private(&mut self, allow: bool) {
+        self.allow_private = allow;
+    }
+
+    pub fn add_white_ip(&mut self, addr: impl Into<IpAddress>) {
+        self.white_ip_list.insert(addr.into());
+    }
+
+    fn allowed(&self, endpoint: impl Into<IpEndpoint>) -> bool {
+        let endpoint = endpoint.into();
         if endpoint.port == 0 {
             false
         } else if self.white_ip_list.contains(&endpoint.addr) {
             true
-        } else if !self.allow_private && is_private_v4(endpoint.addr) {
-            false
         } else {
-            true
+            !self.allow_private && is_private_v4(endpoint.addr)
         }
     }
 
-    pub fn ensure_tcp_socket(&mut self, dst_endpoint: IpEndpoint, src_endpoint: IpEndpoint) {
+    fn ensure_tcp_socket(&mut self, dst_endpoint: IpEndpoint, src_endpoint: IpEndpoint) {
         if self.tcp_ip2handle.contains_key(&src_endpoint) {
             return;
         }
@@ -112,36 +144,256 @@ impl<'a, T: Tun> TunDevice<'a, T> {
         self.new_tcp.push(src_endpoint);
     }
 
-    pub fn ensure_udp_socket(&mut self, endpoint: IpEndpoint) {
-        if self.udp_set.contains(&endpoint) {
+    fn ensure_udp_socket(&mut self, _src_endpoint: IpEndpoint, dst_endpoint: IpEndpoint) {
+        if self.udp_ip2handle.contains_key(&dst_endpoint) {
             return;
         }
         let mut socket = UdpSocket::new(
             PacketBuffer::new(vec![PacketMetadata::EMPTY; 200], vec![0; 10240]),
             PacketBuffer::new(vec![PacketMetadata::EMPTY; 10000], vec![0; 1024000]),
         );
-        socket.bind(endpoint).unwrap();
+        socket.bind(dst_endpoint).unwrap();
         let handle = self.sockets.add(socket);
-        self.udp_set.insert(endpoint);
-        self.new_udp.push(handle);
+        self.udp_ip2handle.insert(dst_endpoint, handle);
+        self.new_udp.push(dst_endpoint);
     }
 
     pub fn accept_tcp(&mut self) -> Vec<TcpStream> {
         let mut streams = Vec::new();
         for source in std::mem::take(&mut self.new_tcp) {
             let (sender, receiver) = channel(1024);
+            self.tcp_req_senders.insert(source, sender);
             let stream = TcpStream::new(
                 receiver,
                 self.tcp_sender.clone(),
-                source.into(),
+                source,
                 self.tcp_ip2handle.get(&source).unwrap().1,
             );
+            streams.push(stream);
         }
+        streams
     }
 
     pub fn accept_udp(&mut self) -> Vec<crate::udp::UdpSocket> {
         let mut sockets = Vec::new();
+        for target in std::mem::take(&mut self.new_udp) {
+            let (sender, receiver) = channel(1024);
+            self.udp_req_senders.insert(target, sender);
+            let socket = crate::udp::UdpSocket::new(target, receiver, self.udp_sender.clone());
+            sockets.push(socket);
+        }
         sockets
+    }
+
+    fn create_interface(&mut self) -> Interface {
+        let mut config = Config::new(HardwareAddress::Ip);
+        config.random_seed = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut interface = Interface::new(config, self, smoltcp::time::Instant::now());
+        interface.set_any_ip(true);
+        interface
+            .routes_mut()
+            .add_default_ipv4_route(Ipv4Address::new(0, 0, 0, 1))
+            .unwrap();
+
+        interface.update_ip_addrs(|ips| {
+            ips.push(IpCidr::new(IpAddress::v4(0, 0, 0, 1), 32))
+                .unwrap();
+        });
+        interface
+    }
+
+    pub fn calculate_speed(&mut self) -> (f64, f64) {
+        let time = self.traffic.begin_traffic.elapsed().as_secs_f64();
+        let rx_speed = self.traffic.rx_bytes as f64 / time / 1024.0;
+        let tx_speed = self.traffic.tx_bytes as f64 / time / 1024.0;
+        self.traffic.rx_bytes = 0;
+        self.traffic.tx_bytes = 0;
+        self.traffic.begin_traffic = std::time::Instant::now();
+        (rx_speed, tx_speed)
+    }
+
+    pub fn poll(&mut self) -> (Vec<TcpStream>, Vec<crate::udp::UdpSocket>) {
+        let mut interface = self.interface.take().unwrap();
+        let sockets = &mut self.sockets as *mut SocketSet;
+        interface.poll(smoltcp::time::Instant::now(), self, unsafe {
+            &mut *sockets
+        });
+        self.interface.replace(interface);
+        let tcp = self.accept_tcp();
+        let udp = self.accept_udp();
+        self.process_ingress();
+        self.process_egress();
+        (tcp, udp)
+    }
+
+    fn process_ingress(&mut self) {
+        let mut handles = Vec::new();
+        let mut tcp_endpoints = Vec::new();
+        let mut udp_endpoints = Vec::new();
+        let mut buffer = vec![0u8; self.mtu];
+        self.sockets
+            .iter_mut()
+            .for_each(|(handle, socket)| match socket {
+                Socket::Tcp(socket) => {
+                    if let Some(source) = socket.local_endpoint() {
+                        while socket.may_recv() {
+                            if let Ok(n) = socket.recv_slice(buffer.as_mut_slice()) {
+                                if self
+                                    .tcp_req_senders
+                                    .get(&source)
+                                    .unwrap()
+                                    .try_send(buffer.as_slice()[..n].to_vec())
+                                    .is_err()
+                                {
+                                    tcp_endpoints.push(source);
+                                }
+                            } else {
+                                socket.close();
+                                tcp_endpoints.push(source);
+                            }
+                        }
+                    } else {
+                        handles.push(handle);
+                    }
+                }
+                Socket::Udp(socket) => {
+                    while socket.can_recv() {
+                        let target: IpEndpoint = socket.endpoint().convert();
+                        if let Ok((n, source)) = socket.recv_slice(buffer.as_mut_slice()) {
+                            if self
+                                .udp_req_senders
+                                .get(&target)
+                                .unwrap()
+                                .try_send((source.endpoint, buffer.as_slice()[..n].to_vec()))
+                                .is_err()
+                            {
+                                udp_endpoints.push(target);
+                            }
+                        } else {
+                            udp_endpoints.push(target);
+                        }
+                    }
+                }
+                _ => {}
+            });
+        for endpoint in tcp_endpoints {
+            self.remove_tcp(endpoint);
+        }
+        for endpoint in udp_endpoints {
+            self.remove_udp(endpoint);
+        }
+        for handle in handles {
+            self.sockets.remove(handle);
+        }
+    }
+
+    fn process_egress(&mut self) {
+        while let Ok((source, data)) = self.tcp_receiver.try_recv() {
+            let socket = self.get_tcp_socket(source);
+            if socket.send_slice(data.as_slice()).is_err() {
+                socket.close();
+                self.remove_tcp(source);
+            }
+        }
+        while let Ok((source, target, data)) = self.udp_receiver.try_recv() {
+            let socket = self.get_udp_socket(target);
+            if socket.send_slice(data.as_slice(), source).is_err() {
+                socket.close();
+                self.remove_udp(target);
+            }
+        }
+    }
+
+    fn remove_tcp(&mut self, source: IpEndpoint) {
+        if let Some((handle, _)) = self.tcp_ip2handle.get(&source) {
+            let handle = *handle;
+            self.sockets.remove(handle);
+            self.tcp_ip2handle.remove(&source);
+        }
+        self.tcp_req_senders.remove(&source);
+    }
+
+    fn remove_udp(&mut self, target: IpEndpoint) {
+        if let Some(handle) = self.udp_ip2handle.get(&target) {
+            let handle = *handle;
+            self.sockets.remove(handle);
+            self.udp_ip2handle.remove(&target);
+        }
+        self.udp_req_senders.remove(&target);
+    }
+
+    fn get_tcp_socket(&mut self, source: IpEndpoint) -> &mut TcpSocket {
+        let handle = self.tcp_ip2handle.get(&source).unwrap().0;
+        let socket: &mut TcpSocket = self.sockets.get_mut(handle);
+        unsafe { std::mem::transmute(socket) }
+    }
+
+    fn get_udp_socket(&mut self, source: IpEndpoint) -> &mut UdpSocket {
+        let handle = *self.udp_ip2handle.get(&source).unwrap();
+        let socket: &mut UdpSocket = self.sockets.get_mut(handle);
+        unsafe { std::mem::transmute(socket) }
+    }
+
+    fn preprocess_packet(&mut self, packet: &T::Packet) {
+        let (dst_addr, src_addr, payload, protocol) =
+            match IpVersion::of_packet(packet.as_ref()).unwrap() {
+                IpVersion::Ipv4 => {
+                    let packet = Ipv4Packet::new_checked(packet.as_ref()).unwrap();
+                    let dst_addr = packet.dst_addr();
+                    let src_addr = packet.src_addr();
+                    (
+                        IpAddress::Ipv4(dst_addr),
+                        IpAddress::Ipv4(src_addr),
+                        packet.payload(),
+                        packet.next_header(),
+                    )
+                }
+                IpVersion::Ipv6 => {
+                    let packet = Ipv6Packet::new_checked(packet.as_ref()).unwrap();
+                    let dst_addr = packet.dst_addr();
+                    let src_addr = packet.src_addr();
+                    (
+                        IpAddress::Ipv6(dst_addr),
+                        IpAddress::Ipv6(src_addr),
+                        packet.payload(),
+                        packet.next_header(),
+                    )
+                }
+            };
+        let (dst_port, src_port, connect) = match protocol {
+            IpProtocol::Udp => {
+                let packet = UdpPacket::new_checked(payload).unwrap();
+                (packet.dst_port(), packet.src_port(), None)
+            }
+            IpProtocol::Tcp => {
+                let packet = TcpPacket::new_checked(payload).unwrap();
+                (
+                    packet.dst_port(),
+                    packet.src_port(),
+                    Some(packet.syn() && !packet.ack()),
+                )
+            }
+            _ => return,
+        };
+
+        let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
+        let src_endpoint = IpEndpoint::new(src_addr, src_port);
+        if !self.allowed(dst_endpoint) {
+            return;
+        }
+
+        match connect {
+            Some(true) => {
+                self.ensure_tcp_socket(dst_endpoint, src_endpoint);
+            }
+            None => {
+                self.ensure_udp_socket(src_endpoint, dst_endpoint);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -184,10 +436,10 @@ impl<'b, T: Tun> Device for TunDevice<'b, T> {
     type RxToken<'a> = RxToken<T> where Self: 'a;
     type TxToken<'a> = TxToken<'a, T> where Self: 'a;
 
-    fn receive(&mut self, timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+    fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         self.tun.receive().unwrap().map(|packet| {
             self.traffic.rx_bytes += packet.len();
-            preprocess_packet(&packet, self);
+            self.preprocess_packet(&packet);
             let rx = RxToken { packet };
             let tx = TxToken {
                 tun: self.tun.clone(),
@@ -197,7 +449,7 @@ impl<'b, T: Tun> Device for TunDevice<'b, T> {
         })
     }
 
-    fn transmit(&mut self, timestamp: Instant) -> Option<Self::TxToken<'_>> {
+    fn transmit(&mut self, _timestamp: Instant) -> Option<Self::TxToken<'_>> {
         Some(TxToken {
             tun: self.tun.clone(),
             traffic: &mut self.traffic,
@@ -209,64 +461,5 @@ impl<'b, T: Tun> Device for TunDevice<'b, T> {
         dc.medium = Medium::Ip;
         dc.max_transmission_unit = self.mtu;
         dc
-    }
-}
-
-fn preprocess_packet<T: Tun>(packet: &T::Packet, device: &mut TunDevice<T>) {
-    let (dst_addr, src_addr, payload, protocol) =
-        match IpVersion::of_packet(packet.as_ref()).unwrap() {
-            IpVersion::Ipv4 => {
-                let packet = Ipv4Packet::new_checked(packet.as_ref()).unwrap();
-                let dst_addr = packet.dst_addr();
-                let src_addr = packet.src_addr();
-                (
-                    IpAddress::Ipv4(dst_addr),
-                    IpAddress::Ipv4(src_addr),
-                    packet.payload(),
-                    packet.next_header(),
-                )
-            }
-            IpVersion::Ipv6 => {
-                let packet = Ipv6Packet::new_checked(packet.as_ref()).unwrap();
-                let dst_addr = packet.dst_addr();
-                let src_addr = packet.src_addr();
-                (
-                    IpAddress::Ipv6(dst_addr),
-                    IpAddress::Ipv6(src_addr),
-                    packet.payload(),
-                    packet.next_header(),
-                )
-            }
-        };
-    let (dst_port, src_port, connect) = match protocol {
-        IpProtocol::Udp => {
-            let packet = UdpPacket::new_checked(payload).unwrap();
-            (packet.dst_port(), packet.src_port(), None)
-        }
-        IpProtocol::Tcp => {
-            let packet = TcpPacket::new_checked(payload).unwrap();
-            (
-                packet.dst_port(),
-                packet.src_port(),
-                Some(packet.syn() && !packet.ack()),
-            )
-        }
-        _ => return,
-    };
-
-    let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
-    let src_endpoint = IpEndpoint::new(src_addr, src_port);
-    if !device.allowed(dst_endpoint) {
-        return;
-    }
-
-    match connect {
-        Some(true) => {
-            device.ensure_tcp_socket(dst_endpoint, src_endpoint);
-        }
-        None => {
-            device.ensure_udp_socket(dst_endpoint);
-        }
-        _ => {}
     }
 }

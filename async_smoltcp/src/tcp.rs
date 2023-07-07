@@ -1,10 +1,11 @@
 use std::{
-    io::{Error, ErrorKind},
+    io::Error,
     net::SocketAddr,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
+use crate::TypeConverter;
 use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
@@ -35,11 +36,11 @@ impl TcpStream {
     }
 
     pub fn local_addr(&self) -> SocketAddr {
-        self.local_addr.into()
+        self.local_addr.convert()
     }
 
     pub fn peer_addr(&self) -> SocketAddr {
-        self.peer_addr.into()
+        self.peer_addr.convert()
     }
 }
 
