@@ -80,9 +80,9 @@ fn is_private_v4(addr: IpAddress) -> bool {
 }
 
 impl<'a, T: Tun> TunDevice<'a, T> {
-    pub fn new(mtu: usize, tun: T) -> Self {
-        let (tcp_sender, tcp_receiver) = channel(1024);
-        let (udp_sender, udp_receiver) = channel(1024);
+    pub fn new(mtu: usize, channel_buffer: usize, tun: T) -> Self {
+        let (tcp_sender, tcp_receiver) = channel(channel_buffer);
+        let (udp_sender, udp_receiver) = channel(channel_buffer);
         let mut device = Self {
             tun,
             traffic: Traffic::new(),
@@ -249,10 +249,11 @@ impl<'a, T: Tun> TunDevice<'a, T> {
                                     .is_err()
                                 {
                                     tcp_endpoints.push(source);
+                                    break;
                                 }
                             } else {
-                                socket.close();
                                 tcp_endpoints.push(source);
+                                break;
                             }
                         }
                     } else {
@@ -271,9 +272,11 @@ impl<'a, T: Tun> TunDevice<'a, T> {
                                 .is_err()
                             {
                                 udp_endpoints.push(target);
+                                break;
                             }
                         } else {
                             udp_endpoints.push(target);
+                            break;
                         }
                     }
                 }

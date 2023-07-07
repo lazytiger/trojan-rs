@@ -3,6 +3,8 @@ use std::net::{IpAddr, SocketAddr};
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint};
 
 pub use device::TunDevice;
+pub use tcp::TcpStream;
+pub use udp::UdpSocket;
 
 mod device;
 mod tcp;
