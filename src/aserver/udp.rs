@@ -1,6 +1,6 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, io, net::SocketAddr, sync::Arc, time::Duration};
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UdpSocket,
@@ -8,7 +8,6 @@ use tokio::{
     sync::mpsc::{channel, Receiver},
     time::{timeout, Instant},
 };
-
 use tokio_rustls::{TlsServerStream, TlsServerWriteHalf};
 
 use crate::{
@@ -17,20 +16,14 @@ use crate::{
     types::Result,
 };
 
-pub async fn start_udp(source: TlsServerStream, mut buffer: Vec<u8>) -> Result<()> {
-    let mut offset = buffer.len();
-    buffer.reserve(4096 - offset);
-    unsafe {
-        buffer.set_len(4096);
-    }
+pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<()> {
     let target = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let (mut source, source_write) = source.into_split();
     let (sender, receiver) = channel(1024);
     spawn(target_to_source(target.clone(), source_write, receiver));
     'main: loop {
-        let mut data = &buffer.as_slice()[..offset];
         loop {
-            match UdpAssociate::parse(data) {
+            match UdpAssociate::parse(buffer.as_ref()) {
                 UdpParseResult::Packet(packet) => {
                     if OPTIONS.server_args().disable_udp_hole {
                         let _ = sender.send(packet.address).await;
@@ -42,27 +35,19 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: Vec<u8>) -> Result<(
                         log::error!("send request to target failed:{}", err);
                         break 'main;
                     }
-                    data = &packet.payload[packet.length..];
+                    buffer.advance(packet.offset);
                 }
                 UdpParseResult::InvalidProtocol => {
                     break 'main;
                 }
                 UdpParseResult::Continued => {
-                    if data.is_empty() {
-                        offset = 0;
-                    } else {
-                        let len = data.len();
-                        let remaining = offset - len;
-                        buffer.copy_within(remaining..offset, 0);
-                        offset = len;
-                    }
                     break;
                 }
             }
         }
         match timeout(
             Duration::from_secs(OPTIONS.udp_idle_timeout),
-            source.read(&mut buffer.as_mut_slice()[offset..]),
+            source.read_buf(&mut buffer),
         )
         .await
         {
@@ -70,12 +55,16 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: Vec<u8>) -> Result<(
                 log::error!("read from source failed");
                 break;
             }
-            Ok(Ok(n)) => {
-                offset += n;
-            }
+            Ok(Ok(_)) => {}
         }
     }
     Ok(())
+}
+
+enum SelectResult {
+    Sleep,
+    Receiver(Option<SocketAddr>),
+    RemoteRecv(io::Result<(usize, SocketAddr)>),
 }
 
 async fn target_to_source(
@@ -87,26 +76,47 @@ async fn target_to_source(
     let mut body = vec![0u8; 1500];
     let mut sources = HashMap::new();
     loop {
-        tokio::select! {
+        let ret = tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(OPTIONS.udp_idle_timeout)) => {
-                break;
+                SelectResult::Sleep
             },
             ret = receiver.recv() => {
-                *sources.entry(ret.unwrap()).or_insert_with(||Instant::now()) = Instant::now();
+                SelectResult::Receiver(ret)
             },
             ret = target.recv_from(body.as_mut_slice()) => {
+                SelectResult::RemoteRecv(ret)
+            }
+        };
+        match ret {
+            SelectResult::Sleep => {
+                break;
+            }
+            SelectResult::Receiver(ret) => {
+                *sources
+                    .entry(ret.unwrap())
+                    .or_insert_with(|| Instant::now()) = Instant::now();
+            }
+            SelectResult::RemoteRecv(ret) => {
                 if let Ok((n, target_addr)) = ret {
                     if OPTIONS.server_args().disable_udp_hole {
-                        if let None = sources.get(&target_addr)
-                        .map(|timeout|if timeout.elapsed().as_secs() < 60 {Some(true) }else {None})
-                        .unwrap_or_default() {
+                        if let None = sources
+                            .get(&target_addr)
+                            .map(|timeout| {
+                                if timeout.elapsed().as_secs() < 60 {
+                                    Some(true)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_default()
+                        {
                             log::error!("skip udp packet from {}", target_addr);
                             continue;
                         }
                     }
                     UdpAssociate::generate(&mut header, &target_addr, n as u16);
                     if source.write_all(header.as_ref()).await.is_err()
-                            || source.write_all(&body.as_slice()[..n]).await.is_err()
+                        || source.write_all(&body.as_slice()[..n]).await.is_err()
                     {
                         log::error!("udp write to source failed");
                         break;

@@ -37,6 +37,7 @@ pub struct TrojanRequest<'a> {
     pub command: u8,
     pub address: Sock5Address,
     pub payload: &'a [u8],
+    pub offset: usize,
 }
 
 impl<'a> TrojanRequest<'a> {
@@ -58,6 +59,7 @@ impl<'a> TrojanRequest<'a> {
         }
 
         buffer = &buffer[OPTIONS.pass_len..];
+        let mut offset = OPTIONS.pass_len;
         if buffer.len() < 2 || buffer[0] != b'\r' || buffer[1] != b'\n' {
             log::error!(
                 "unknown protocol, expected CRLF, {:#X}{:#X}",
@@ -68,6 +70,7 @@ impl<'a> TrojanRequest<'a> {
         }
 
         buffer = &buffer[2..];
+        offset += 2;
         if buffer.len() < 3 {
             log::error!("unknown protocol, invalid size");
             return None;
@@ -83,14 +86,18 @@ impl<'a> TrojanRequest<'a> {
         let command = buffer[0];
         let atyp = buffer[1];
         buffer = &buffer[2..];
+        offset += 2;
         if let Some((size, address)) = parse_address(atyp, buffer) {
             buffer = &buffer[size..];
+            offset += size;
             if buffer[0] != b'\r' || buffer[1] != b'\n' {
                 log::error!("unknown protocol, expected CRLF after address");
                 return None;
             }
+            offset += 2;
             Some(TrojanRequest {
                 command,
+                offset,
                 address,
                 payload: &buffer[2..],
             })

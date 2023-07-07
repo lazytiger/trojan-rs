@@ -3,6 +3,7 @@ use std::{
     time::Duration,
 };
 
+use bytes::{Buf, BytesMut};
 use rustls::ServerConnection;
 use tokio::{
     io::AsyncReadExt,
@@ -12,7 +13,6 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedSender},
     time::timeout,
 };
-
 use tokio_rustls::TlsServerStream;
 
 use crate::{
@@ -54,34 +54,35 @@ async fn start_proxy(
     sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
     src_addr: SocketAddr,
 ) -> Result<()> {
-    let mut buffer = vec![0u8; 4096];
-    if let Ok(Ok(n)) = timeout(Duration::from_secs(120), conn.read(buffer.as_mut_slice())).await {
-        let (cmd, target_addr, data) = match TrojanRequest::parse(&buffer.as_mut_slice()[..n]) {
-            None => (
-                CONNECT,
-                *OPTIONS.back_addr.as_ref().unwrap(),
-                buffer.as_slice()[..n].to_vec(),
-            ),
-            Some(request) => (
-                request.command,
-                match request.address {
-                    Sock5Address::Socket(addr) => addr,
-                    Sock5Address::Domain(domain, port) => {
-                        let ip = *dns_lookup::lookup_host(domain.as_str())?
-                            .get(0)
-                            .ok_or(TrojanError::Resolve)?;
-                        SocketAddr::new(ip, port)
-                    }
-                    Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
-                    _ => unreachable!(),
-                },
-                request.payload.to_vec(),
-            ),
+    let mut buffer = BytesMut::new();
+    if let Ok(Ok(_)) = timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
+        let (cmd, target_addr) = match TrojanRequest::parse(buffer.as_ref()) {
+            None => (CONNECT, *OPTIONS.back_addr.as_ref().unwrap()),
+            Some(request) => {
+                let offset = request.offset;
+                let cmd = request.command;
+                let address = request.address;
+                buffer.advance(offset);
+                (
+                    cmd,
+                    match address {
+                        Sock5Address::Socket(addr) => addr,
+                        Sock5Address::Domain(domain, port) => {
+                            let ip = *dns_lookup::lookup_host(domain.as_str())?
+                                .get(0)
+                                .ok_or(TrojanError::Resolve)?;
+                            SocketAddr::new(ip, port)
+                        }
+                        Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
+                        _ => unreachable!(),
+                    },
+                )
+            }
         };
         match cmd {
-            CONNECT => start_tcp(conn, target_addr, data, src_addr).await,
-            UDP_ASSOCIATE => start_udp(conn, data).await,
-            PING => start_ping(conn, data, sender.clone()).await,
+            CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
+            UDP_ASSOCIATE => start_udp(conn, buffer).await,
+            PING => start_ping(conn, buffer, sender.clone()).await,
             _ => {
                 unreachable!()
             }

@@ -129,7 +129,6 @@ where
             if self.session.wants_write() {
                 let mut send_buf = self.send_buf.split().writer();
                 if let Err(err) = self.session.write_tls(&mut send_buf) {
-                    log::error!("read data from session failed:{}", err);
                     return Poll::Ready(Err(err));
                 } else {
                     self.send_buf.unsplit(send_buf.into_inner());
@@ -142,7 +141,6 @@ where
                         self.send_buf.advance(n);
                     }
                     Poll::Ready(Err(err)) => {
-                        log::error!("poll_write stream failed:{}", err);
                         return Poll::Ready(Err(err));
                     }
                     Poll::Pending => {
@@ -222,10 +220,7 @@ where
         match pin.session.writer().write(buf) {
             // read actual data from session, drain the session.
             Ok(n) => pin.poll_tls_flush(cx).map(|ret| ret.map(|_| n)),
-            Err(err) => {
-                log::error!("write data to session failed:{}", err);
-                Poll::Ready(Err(err))
-            }
+            Err(err) => Poll::Ready(Err(err)),
         }
     }
 

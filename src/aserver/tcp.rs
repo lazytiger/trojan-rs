@@ -1,11 +1,11 @@
 use std::{net::SocketAddr, time::Duration};
 
+use bytes::BytesMut;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     spawn,
 };
-
 use tokio_rustls::TlsServerStream;
 
 use crate::{config::OPTIONS, types::Result};
@@ -13,21 +13,21 @@ use crate::{config::OPTIONS, types::Result};
 pub async fn start_tcp(
     mut source: TlsServerStream,
     target_addr: SocketAddr,
-    mut buffer: Vec<u8>,
+    mut buffer: BytesMut,
     src_addr: SocketAddr,
 ) -> Result<()> {
     if target_addr == *OPTIONS.back_addr.as_ref().unwrap() {
         let mut headers = [httparse::EMPTY_HEADER; 100];
         let mut request = httparse::Request::new(&mut headers);
-        match request.parse(buffer.as_slice()) {
+        match request.parse(buffer.as_ref()) {
             Ok(httparse::Status::Complete(offset)) => {
                 log::error!("X-Forwarded-For: {}", src_addr);
-                let mut data = Vec::new();
-                data.extend_from_slice(&buffer.as_slice()[..offset - 2]);
+                let mut data = BytesMut::new();
+                data.extend_from_slice(&buffer.as_ref()[..offset - 2]);
                 data.extend_from_slice(b"X-Forwarded-For: ");
                 data.extend_from_slice(src_addr.ip().to_string().as_bytes());
                 data.extend_from_slice(b"\r\n\r\n");
-                data.extend_from_slice(&buffer[offset..]);
+                data.extend_from_slice(&buffer.as_ref()[offset..]);
                 buffer = data;
             }
             _ => {
@@ -37,7 +37,7 @@ pub async fn start_tcp(
     }
 
     let mut target = TcpStream::connect(target_addr).await?;
-    if let Err(err) = target.write_all(buffer.as_slice()).await {
+    if let Err(err) = target.write_all(buffer.as_ref()).await {
         let _ = target.shutdown().await;
         let _ = source.shutdown().await;
         log::error!("tcp send data to target failed:{}", err);

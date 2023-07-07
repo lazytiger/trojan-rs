@@ -5,13 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
-
 use tokio_rustls::TlsServerStream;
 
 use crate::{config::OPTIONS, proto, server::ping_backend::PingResult, types::Result};
@@ -83,14 +82,9 @@ async fn do_check(ip: IpAddr, id: u16, client: Arc<Client>, sender: UnboundedSen
 
 pub async fn start_ping(
     mut source: TlsServerStream,
-    mut buffer: Vec<u8>,
+    mut recv_buffer: BytesMut,
     req_sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
 ) -> Result<()> {
-    let mut offset = buffer.len();
-    buffer.reserve(4096 - offset);
-    unsafe {
-        buffer.set_len(4096);
-    }
     let mut send_buffer = BytesMut::new();
     let mut request: Option<PingResult> = None;
     let (resp_sender, mut resp_receiver) = unbounded_channel();
@@ -114,16 +108,15 @@ pub async fn start_ping(
                 break;
             }
         } else {
-            let mut recv_buffer = &buffer.as_slice()[..offset];
             while !recv_buffer.is_empty() {
-                let addr: IpAddr = match recv_buffer[0] {
+                let addr: IpAddr = match *recv_buffer.get(0).unwrap() {
                     proto::IPV4 => {
                         if recv_buffer.len() < 5 {
                             break;
                         }
                         let mut data = [0u8; 4];
-                        data.copy_from_slice(&recv_buffer[1..5]);
-                        recv_buffer = &recv_buffer[5..];
+                        data.copy_from_slice(&recv_buffer.as_ref()[1..5]);
+                        recv_buffer.advance(5);
                         Ipv4Addr::from(data).into()
                     }
                     proto::IPV6 => {
@@ -131,8 +124,8 @@ pub async fn start_ping(
                             break;
                         }
                         let mut data = [0u8; 16];
-                        data.copy_from_slice(&recv_buffer[1..17]);
-                        recv_buffer = &recv_buffer[17..];
+                        data.copy_from_slice(&recv_buffer.as_ref()[1..17]);
+                        recv_buffer.advance(17);
                         Ipv6Addr::from(data).into()
                     }
                     _ => {
@@ -146,14 +139,6 @@ pub async fn start_ping(
                 }
                 let _ = req_sender.send((addr, resp_sender.clone()));
             }
-            if recv_buffer.is_empty() {
-                offset = 0;
-            } else {
-                let len = recv_buffer.len();
-                let remaining = offset - len;
-                buffer.copy_within(remaining..offset, 0);
-                offset = len;
-            }
         }
 
         request = tokio::select! {
@@ -164,14 +149,13 @@ pub async fn start_ping(
                 let result = ret.unwrap();
                 Some(result)
             },
-            ret = source.read(&mut buffer.as_mut_slice()[offset..]) => {
+            ret = source.read_buf(&mut recv_buffer) => {
                 match ret {
                    Ok(0) | Err(_) => {
                         log::error!("read from source failed");
                         break;
                     }
-                    Ok(n) => {
-                        offset += n;
+                    Ok(_) => {
                         None
                     }
                 }
