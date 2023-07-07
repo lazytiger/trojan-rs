@@ -285,7 +285,7 @@ impl<'a> UdpAssociate<'a> {
                 log::error!("udp packet expected CRLF after length");
                 return UdpParseResult::InvalidProtocol;
             }
-            offset += 4;
+            offset += 4 + length;
             match addr {
                 Sock5Address::Socket(address) => UdpParseResult::Packet(UdpAssociate {
                     address,
