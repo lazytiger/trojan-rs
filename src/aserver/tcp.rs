@@ -22,13 +22,11 @@ pub async fn start_tcp(
         match request.parse(buffer.as_ref()) {
             Ok(httparse::Status::Complete(offset)) => {
                 log::error!("X-Forwarded-For: {}", src_addr);
-                let mut data = BytesMut::new();
-                data.extend_from_slice(&buffer.as_ref()[..offset - 2]);
-                data.extend_from_slice(b"X-Forwarded-For: ");
-                data.extend_from_slice(src_addr.ip().to_string().as_bytes());
-                data.extend_from_slice(b"\r\n\r\n");
-                data.extend_from_slice(&buffer.as_ref()[offset..]);
-                buffer = data;
+                let data = buffer.split_off(offset - 2);
+                buffer.extend_from_slice(b"X-Forwarded-For: ");
+                buffer.extend_from_slice(src_addr.ip().to_string().as_bytes());
+                buffer.extend_from_slice(b"\r\n");
+                buffer.unsplit(data);
             }
             _ => {
                 log::error!("http request not completed, ignore now");
