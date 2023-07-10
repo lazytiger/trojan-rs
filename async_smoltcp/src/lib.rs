@@ -1,16 +1,20 @@
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    ops::Deref,
+    sync::Arc,
+};
 
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint};
 
 pub use device::TunDevice;
-pub use tcp::TcpStream;
-pub use udp::UdpSocket;
+pub use tcp::{TcpReadHalf, TcpStream, TcpWriteHalf};
+pub use udp::{UdpReadHalf, UdpSocket, UdpWriteHalf};
 
 mod device;
 mod tcp;
 mod udp;
 
-pub trait Tun: Clone {
+pub trait Tun {
     type Packet: Packet;
 
     /// Receive data from tun device, if nothing to read WouldBlock will be return.
@@ -21,6 +25,22 @@ pub trait Tun: Clone {
 
     /// Allocate a packet which can hold len bytes data.
     fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet>;
+}
+
+impl<T> Tun for Arc<T>
+where
+    T: Tun,
+{
+    type Packet = T::Packet;
+    fn receive(&self) -> std::io::Result<Option<Self::Packet>> {
+        self.deref().receive()
+    }
+    fn send(&self, packet: Self::Packet) -> std::io::Result<()> {
+        self.deref().send(packet)
+    }
+    fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet> {
+        self.deref().allocate_packet(len)
+    }
 }
 
 pub trait Packet {

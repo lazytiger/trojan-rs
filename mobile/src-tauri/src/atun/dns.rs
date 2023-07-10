@@ -17,11 +17,11 @@ use tokio::{
 };
 use trust_dns_proto::{op::Message, serialize::binary::BinDecodable};
 
+use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
+
 use crate::atun::{
-    device::UdpStream,
     init_tls_conn,
     proto::{UdpAssociate, UdpParseResultEndpoint},
-    tls_stream::{TlsClientReadHalf, TlsClientWriteHalf},
 };
 
 pub async fn start_trust_response(
@@ -32,21 +32,17 @@ pub async fn start_trust_response(
     buffer_size: usize,
     request: Arc<BytesMut>,
 ) -> Option<TlsClientWriteHalf> {
-    match init_tls_conn(config, buffer_size, server_addr, server_name).await {
-        Ok(client) => {
-            let (read_half, mut write_half) = client.into_split();
-            if let Err(err) = write_half.write_all(request.as_ref()).await {
-                log::error!("send handshake to remote server failed:{}", err);
-                None
-            } else {
-                spawn(do_trust_response(sender, read_half));
-                Some(write_half)
-            }
-        }
-        Err(err) => {
-            log::error!("connect to server failed:{:?}", err);
+    if let Ok(client) = init_tls_conn(config, buffer_size, server_addr, server_name).await {
+        let (read_half, mut write_half) = client.into_split();
+        if let Err(err) = write_half.write_all(request.as_ref()).await {
+            log::error!("send handshake to remote server failed:{}", err);
             None
+        } else {
+            spawn(do_trust_response(sender, read_half));
+            Some(write_half)
         }
+    } else {
+        None
     }
 }
 
@@ -67,8 +63,13 @@ fn get_message_key(message: &Message) -> String {
     name + "|" + query.query_type().to_string().as_str()
 }
 
+enum SelectResult {
+    Socket(std::io::Result<(IpEndpoint, Vec<u8>)>),
+    Receiver(Option<Response>),
+}
+
 pub async fn start_dns(
-    mut local: UdpStream,
+    mut local: async_smoltcp::UdpSocket,
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
     server_name: ServerName,
@@ -78,7 +79,6 @@ pub async fn start_dns(
     distrusted_addr: SocketAddr,
     blocked_domains: HashSet<String>,
 ) {
-    let mut buffer = vec![0u8; 1500];
     let (sender, mut receiver) = tokio::sync::mpsc::channel(1024);
     let mut distrust = start_distrust_response(sender.clone()).await.unwrap();
     let mut trust = start_trust_response(
@@ -94,60 +94,79 @@ pub async fn start_dns(
     let mut dns_store = HashMap::new();
 
     loop {
-        tokio::select! {
-            req = local.recv(buffer.as_mut_slice()) => {
-                match req {
-                    Ok((n, source)) => {
-                        if let Ok(message) = Message::from_bytes(&buffer.as_slice()[..n]) {
-                            if message.query_count() != 1 {
-                                continue;
-                            }
-                            let key = get_message_key(&message);
-                            if dns_store.entry(key).or_insert_with(||DnsItem::new(message.clone())).respond(&mut local, source, message.id()).await {
-                                let name = message.query().unwrap().name().to_utf8();
-                                if is_blocked(&blocked_domains, &name) {
-                                    let mut header = BytesMut::new();
-                                    UdpAssociate::generate(&mut header, &trusted_addr, n as u16);
-                                    let _ = trust.write_all(header.as_ref()).await;
-                                    let _ = trust.write_all(&buffer.as_slice()[..n]).await;
-                                } else {
-                                    let _ = distrust.send_to(&buffer.as_slice()[..n], distrusted_addr).await;
-                                }
-                            }
-                        }
-                    },
-                    Err(err) => {
-                        log::error!("recv from local udp failed:{}", err);
-                        break;
-                    }
-                }
+        let ret = tokio::select! {
+            req = local.recv_from() => {
+                SelectResult::Socket(req)
+
             },
             resp = receiver.recv() => {
-                match resp {
-                    Some(Response::Message(m))  => {
-                        let key = get_message_key(&m);
-                        dns_store.entry(key).or_insert_with(||DnsItem::new(m.clone())).notify(m, &mut local).await;
-                    },
-                    Some(Response::DistrustClosed) => {
-                        distrust = start_distrust_response(sender.clone()).await.unwrap();
-                    },
-                    Some(Response::TrustClosed) => {
-                        trust = start_trust_response(
-                            sender.clone(),
-                            config.clone(),
-                            server_addr,
-                            server_name.clone(),
-                            buffer_size,
-                            request.clone())
-                        .await
-                        .unwrap();
-                    },
-                    None => {
-                        log::error!("sender closed, quit now");
-                        break;
+                SelectResult::Receiver(resp)
+            }
+        };
+        match ret {
+            SelectResult::Socket(req) => match req {
+                Ok((source, data)) => {
+                    if let Ok(message) = Message::from_bytes(&data.as_slice()) {
+                        if message.query_count() != 1 {
+                            continue;
+                        }
+                        let key = get_message_key(&message);
+                        if dns_store
+                            .entry(key)
+                            .or_insert_with(|| DnsItem::new(message.clone()))
+                            .respond(&mut local, source, message.id())
+                            .await
+                        {
+                            let name = message.query().unwrap().name().to_utf8();
+                            if is_blocked(&blocked_domains, &name) {
+                                let mut header = BytesMut::new();
+                                UdpAssociate::generate(
+                                    &mut header,
+                                    &trusted_addr,
+                                    data.len() as u16,
+                                );
+                                let _ = trust.write_all(header.as_ref()).await;
+                                let _ = trust.write_all(data.as_slice()).await;
+                            } else {
+                                let _ = distrust.send_to(data.as_slice(), distrusted_addr).await;
+                            }
+                        }
                     }
                 }
-            }
+                Err(err) => {
+                    log::error!("recv from local udp failed:{}", err);
+                    break;
+                }
+            },
+            SelectResult::Receiver(resp) => match resp {
+                Some(Response::Message(m)) => {
+                    let key = get_message_key(&m);
+                    dns_store
+                        .entry(key)
+                        .or_insert_with(|| DnsItem::new(m.clone()))
+                        .notify(m, &mut local)
+                        .await;
+                }
+                Some(Response::DistrustClosed) => {
+                    distrust = start_distrust_response(sender.clone()).await.unwrap();
+                }
+                Some(Response::TrustClosed) => {
+                    trust = start_trust_response(
+                        sender.clone(),
+                        config.clone(),
+                        server_addr,
+                        server_name.clone(),
+                        buffer_size,
+                        request.clone(),
+                    )
+                    .await
+                    .unwrap();
+                }
+                None => {
+                    log::error!("sender closed, quit now");
+                    break;
+                }
+            },
         }
     }
     panic!("dns routine quit");
@@ -268,13 +287,13 @@ impl DnsItem {
         self.clients.push((client, id))
     }
 
-    pub async fn notify(&mut self, mut message: Message, stream: &mut UdpStream) {
+    pub async fn notify(&mut self, mut message: Message, stream: &mut async_smoltcp::UdpSocket) {
         for (source, id) in std::mem::take(&mut self.clients) {
             message.set_id(id);
             message.take_additionals();
             message.take_name_servers();
             let _ = stream
-                .send(message.to_vec().unwrap().as_slice(), source)
+                .send_to(message.to_vec().unwrap().as_slice(), source)
                 .await;
             log::info!("send response to {}", source);
         }
@@ -284,7 +303,12 @@ impl DnsItem {
         self.message = message;
     }
 
-    pub async fn respond(&mut self, stream: &mut UdpStream, source: IpEndpoint, id: u16) -> bool {
+    pub async fn respond(
+        &mut self,
+        stream: &mut async_smoltcp::UdpSocket,
+        source: IpEndpoint,
+        id: u16,
+    ) -> bool {
         if !self.has_response() {
             self.add_client(source, id);
             return true;
@@ -296,7 +320,7 @@ impl DnsItem {
         }
         self.message.set_id(id);
         let _ = stream
-            .send(self.message.to_vec().unwrap().as_slice(), source)
+            .send_to(self.message.to_vec().unwrap().as_slice(), source)
             .await;
         ttl.is_zero()
     }

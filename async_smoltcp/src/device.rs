@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    net::IpAddr,
     time::SystemTime,
 };
 
@@ -61,6 +62,7 @@ pub struct TunDevice<'a, T: Tun> {
     udp_req_senders: HashMap<IpEndpoint, Sender<(IpEndpoint, Vec<u8>)>>,
 
     interface: Option<Interface>,
+    server_addr: IpAddress,
 }
 
 fn is_private_v4(addr: IpAddress) -> bool {
@@ -79,8 +81,8 @@ fn is_private_v4(addr: IpAddress) -> bool {
     }
 }
 
-impl<'a, T: Tun> TunDevice<'a, T> {
-    pub fn new(mtu: usize, channel_buffer: usize, tun: T) -> Self {
+impl<'a, T: Tun + Clone> TunDevice<'a, T> {
+    pub fn new(mtu: usize, channel_buffer: usize, server_addr: impl Into<IpAddr>, tun: T) -> Self {
         let (tcp_sender, tcp_receiver) = channel(channel_buffer);
         let (udp_sender, udp_receiver) = channel(channel_buffer);
         let mut device = Self {
@@ -101,6 +103,7 @@ impl<'a, T: Tun> TunDevice<'a, T> {
             udp_sender,
             udp_req_senders: Default::default(),
             interface: None,
+            server_addr: server_addr.into().into(),
         };
         let interface = device.create_interface();
         device.interface.replace(interface);
@@ -118,6 +121,8 @@ impl<'a, T: Tun> TunDevice<'a, T> {
     fn allowed(&self, endpoint: impl Into<IpEndpoint>) -> bool {
         let endpoint = endpoint.into();
         if endpoint.port == 0 {
+            false
+        } else if endpoint.addr == self.server_addr {
             false
         } else if self.white_ip_list.contains(&endpoint.addr) {
             true
@@ -435,7 +440,7 @@ impl<'a, T: Tun> smoltcp::phy::TxToken for TxToken<'a, T> {
     }
 }
 
-impl<'b, T: Tun> Device for TunDevice<'b, T> {
+impl<'b, T: Tun + Clone> Device for TunDevice<'b, T> {
     type RxToken<'a> = RxToken<T> where Self: 'a;
     type TxToken<'a> = TxToken<'a, T> where Self: 'a;
 

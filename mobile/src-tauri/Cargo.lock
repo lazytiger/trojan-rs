@@ -92,6 +92,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_smoltcp"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "smoltcp",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "atk"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1815,6 +1825,7 @@ name = "mobile"
 version = "0.0.0"
 dependencies = [
  "android_logger",
+ "async_smoltcp",
  "bytes",
  "crossbeam",
  "derive_more",
@@ -1837,6 +1848,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-window",
  "tokio",
+ "tokio_rustls",
  "trust-dns-proto",
  "webpki-roots",
 ]
@@ -3432,6 +3444,16 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "tokio_rustls"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "log",
+ "rustls",
+ "tokio",
 ]
 
 [[package]]

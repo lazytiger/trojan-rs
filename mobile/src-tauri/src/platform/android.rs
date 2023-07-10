@@ -15,6 +15,7 @@ use smoltcp::wire::{
     IpAddress, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
 };
 
+use async_smoltcp::{Packet as _, Tun};
 use jni::{
     objects::{JClass, JObject, JString},
     sys::{jboolean, jint},
@@ -380,14 +381,18 @@ impl Session {
             }
         }
     }
+}
 
-    pub fn try_receive(&self) -> Result<Option<Packet>, ()> {
-        let mut packet = Packet::new(self.mtu as u16);
+impl Tun for Session {
+    type Packet = Packet;
+
+    fn receive(&self) -> std::io::Result<Option<Self::Packet>> {
+        let mut packet = Packet::new(self.mtu);
         let mut file = self.file.deref();
-        match file.read(packet.bytes_mut()) {
+        match file.read(packet.as_mut()) {
             Ok(0) => {
                 log::error!("end of file");
-                Err(())
+                Err(ErrorKind::BrokenPipe.into())
             }
             Ok(n) => {
                 packet.set_len(n);
@@ -396,58 +401,43 @@ impl Session {
             Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
             Err(err) => {
                 log::error!("read file failed:{:?}", err);
-                Err(())
+                Err(err)
             }
         }
     }
-
-    pub fn allocate_send_packet(&self, size: u16) -> Result<Packet, ()> {
-        Ok(Packet::new(size))
-    }
-
-    pub fn send_packet(&self, packet: Packet) {
+    fn send(&self, packet: Self::Packet) -> std::io::Result<()> {
         let mut file = self.file.deref();
-        if let Err(err) = file.write_all(packet.bytes()) {
+        if let Err(err) = file.write_all(packet.as_ref()) {
             log::error!("send packet failed:{}", err);
+            return Err(err);
         } else if self.show_info {
             if let Err(err) = packet.info() {
                 log::error!("parse return packet failed:{:?}", err);
             }
         }
+        Ok(())
     }
-
-    #[allow(unused)]
-    pub fn sync(&self) {
-        if let Err(err) = sync_data() {
-            log::error!("sync data failed:{:?}", err);
-        }
+    fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet> {
+        Ok(Packet::new(len))
     }
 }
 
 impl Packet {
-    pub fn new(size: u16) -> Self {
-        let data = vec![0u8; size as usize];
+    pub fn new(size: usize) -> Self {
+        let data = vec![0u8; size];
         Self { data }
     }
 
-    pub fn bytes_mut(&mut self) -> &mut [u8] {
-        self.data.as_mut_slice()
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        self.data.as_slice()
-    }
-
-    pub fn set_len(&mut self, len: usize) {
+    fn set_len(&mut self, len: usize) {
         unsafe {
             self.data.set_len(len);
         }
     }
 
-    pub fn info(&self) -> types::Result<()> {
-        let (dst_addr, src_addr, payload, protocol) = match IpVersion::of_packet(self.bytes())? {
+    fn info(&self) -> types::Result<()> {
+        let (dst_addr, src_addr, payload, protocol) = match IpVersion::of_packet(self.as_ref())? {
             IpVersion::Ipv4 => {
-                let packet = Ipv4Packet::new_checked(self.bytes())?;
+                let packet = Ipv4Packet::new_checked(self.as_ref())?;
                 let dst_addr = packet.dst_addr();
                 let src_addr = packet.src_addr();
                 (
@@ -458,7 +448,7 @@ impl Packet {
                 )
             }
             IpVersion::Ipv6 => {
-                let packet = Ipv6Packet::new_checked(self.bytes())?;
+                let packet = Ipv6Packet::new_checked(self.as_ref())?;
                 let dst_addr = packet.dst_addr();
                 let src_addr = packet.src_addr();
                 (
@@ -490,6 +480,18 @@ impl Packet {
             payload.len()
         );
         Ok(())
+    }
+}
+
+impl async_smoltcp::Packet for Packet {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.data.as_mut_slice()
+    }
+    fn as_ref(&self) -> &[u8] {
+        self.data.as_slice()
+    }
+    fn len(&self) -> usize {
+        self.data.len()
     }
 }
 

@@ -27,6 +27,8 @@ use tokio::{
     time::Sleep,
 };
 
+use async_smoltcp::{Packet as _, Tun as _};
+
 use crate::{
     platform::{Packet, Session},
     tun::waker::{Event, WakerMode, Wakers},
@@ -257,11 +259,10 @@ impl<'b> Device for VpnDevice<'b> {
         _: smoltcp::time::Instant,
     ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         self.session
-            .try_receive()
-            .ok()
+            .receive()
             .map(|packet| {
                 packet.map(|packet| {
-                    self.traffic.rx_bytes += packet.bytes().len();
+                    self.traffic.rx_bytes += packet.len();
                     preprocess_packet(&packet, self);
                     let rx = RxToken { packet };
                     let tx = TxToken {
@@ -290,9 +291,9 @@ impl<'b> Device for VpnDevice<'b> {
 }
 
 fn preprocess_packet(packet: &Packet, device: &mut VpnDevice) {
-    let (dst_addr, payload, protocol) = match IpVersion::of_packet(packet.bytes()).unwrap() {
+    let (dst_addr, payload, protocol) = match IpVersion::of_packet(packet.as_ref()).unwrap() {
         IpVersion::Ipv4 => {
-            let packet = Ipv4Packet::new_checked(packet.bytes()).unwrap();
+            let packet = Ipv4Packet::new_checked(packet.as_ref()).unwrap();
             let dst_addr = packet.dst_addr();
             (
                 IpAddress::Ipv4(dst_addr),
@@ -301,7 +302,7 @@ fn preprocess_packet(packet: &Packet, device: &mut VpnDevice) {
             )
         }
         IpVersion::Ipv6 => {
-            let packet = Ipv6Packet::new_checked(packet.bytes()).unwrap();
+            let packet = Ipv6Packet::new_checked(packet.as_ref()).unwrap();
             let dst_addr = packet.dst_addr();
             (
                 IpAddress::Ipv6(dst_addr),
@@ -354,7 +355,7 @@ impl smoltcp::phy::RxToken for RxToken {
     where
         F: FnOnce(&mut [u8]) -> R,
     {
-        f(self.packet.bytes_mut())
+        f(self.packet.as_mut())
     }
 }
 
@@ -365,10 +366,10 @@ impl<'a> smoltcp::phy::TxToken for TxToken<'a> {
     {
         self.traffic.tx_bytes += len;
         self.session
-            .allocate_send_packet(len as u16)
+            .allocate_packet(len)
             .map(|mut packet| {
-                let r = f(packet.bytes_mut());
-                self.session.send_packet(packet);
+                let r = f(packet.as_mut());
+                self.session.send(packet);
                 r
             })
             .unwrap()

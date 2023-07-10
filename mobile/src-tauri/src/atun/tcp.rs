@@ -7,11 +7,12 @@ use tokio::{
     spawn,
 };
 
+use async_smoltcp::{TcpReadHalf, TcpStream, TcpWriteHalf};
+use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
+
 use crate::atun::{
-    device::TcpStream,
     init_tls_conn,
     proto::{TrojanRequest, CONNECT},
-    tls_stream::{TlsClientReadHalf, TlsClientWriteHalf},
 };
 
 pub async fn start_tcp(
@@ -22,25 +23,21 @@ pub async fn start_tcp(
     buffer_size: usize,
     pass: String,
 ) {
-    match init_tls_conn(config.clone(), buffer_size, server_addr, server_name).await {
-        Ok(client) => {
-            let (read_half, write_half) = client.into_split();
-            spawn(local_to_remote(local.clone(), write_half, pass));
-            spawn(remote_to_local(read_half, local));
-        }
-        Err(err) => {
-            log::error!("create connection to server failed:{:?}", err);
-        }
+    let client = init_tls_conn(config.clone(), buffer_size, server_addr, server_name).await;
+    if let Ok(client) = client {
+        let (read_half, write_half) = client.into_split();
+        let (reader, writer) = local.into_split();
+        spawn(local_to_remote(reader, write_half, pass));
+        spawn(remote_to_local(read_half, writer));
     }
 }
 
-pub async fn local_to_remote(mut local: TcpStream, mut remote: TlsClientWriteHalf, pass: String) {
+pub async fn local_to_remote(mut local: TcpReadHalf, mut remote: TlsClientWriteHalf, pass: String) {
     let mut request = BytesMut::new();
-    TrojanRequest::generate_endpoint(&mut request, CONNECT, pass.as_bytes(), &local.dst_addr);
+    TrojanRequest::generate(&mut request, CONNECT, pass.as_bytes(), &local.peer_addr());
     if let Err(err) = remote.write_all(request.as_ref()).await {
         log::error!("send request to remote server failed:{}", err);
         let _ = remote.shutdown().await;
-        let _ = local.shutdown().await;
         return;
     }
     let _ = tokio::io::copy(&mut local, &mut remote).await;
@@ -48,7 +45,8 @@ pub async fn local_to_remote(mut local: TcpStream, mut remote: TlsClientWriteHal
     log::info!("local to remote closed");
 }
 
-pub async fn remote_to_local(mut remote: TlsClientReadHalf, mut local: TcpStream) {
+pub async fn remote_to_local(mut remote: TlsClientReadHalf, mut local: TcpWriteHalf) {
     let _ = tokio::io::copy(&mut remote, &mut local).await;
     log::info!("remote to local closed");
+    let _ = local.shutdown().await;
 }
