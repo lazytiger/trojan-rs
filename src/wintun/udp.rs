@@ -44,7 +44,7 @@ impl<'a, 'b> std::io::Read for UdpSocketRef<'a, 'b> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self.socket.recv_slice(buf) {
             Ok((n, endpoint)) => {
-                self.endpoint.replace(endpoint);
+                self.endpoint.replace(endpoint.endpoint);
                 Ok(n)
             }
             Err(RecvError::Exhausted) => Err(ErrorKind::WouldBlock.into()),
@@ -326,6 +326,7 @@ impl UdpServer {
                 .or_insert_with(|| (Instant::now(), 0));
             info.0 = Instant::now();
             while let Ok((data, src_endpoint)) = socket.recv() {
+                let src_endpoint = src_endpoint.endpoint;
                 self.buffer.clear();
                 UdpAssociate::generate_endpoint(
                     &mut self.buffer,

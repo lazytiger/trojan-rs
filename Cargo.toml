@@ -29,7 +29,7 @@ crossbeam = "0.8"
 trust-dns-proto = "0.22"
 widestring = "1.0"
 itertools = "0.10"
-smoltcp = { version = "0.9" }
+smoltcp = { version = "0.10" }
 backtrace = "0.3"
 hex = "0.4"
 surge-ping = "0.8"

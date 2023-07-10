@@ -47,6 +47,7 @@ pub struct Config {
     pub enable_ipset: bool,
     pub inverse_route: bool,
     pub enable_dns: bool,
+    pub sync_mode: bool,
     pub dns_listen: String,
     pub trust_dns: String,
 }
@@ -173,6 +174,11 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                 .path_resolver()
                 .resolve_resource("libs/wintun.dll")
                 .unwrap();
+            let command = if config.sync_mode {
+                "wintun"
+            } else {
+                "awintun"
+            };
             let mut args = vec![
                 "-l",
                 "logs\\wintun.log",
@@ -182,7 +188,7 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                 "127.0.0.1:60080",
                 "-p",
                 config.server_auth.as_str(),
-                "wintun",
+                command,
                 "-n",
                 config.iface_name.as_str(),
                 "-H",

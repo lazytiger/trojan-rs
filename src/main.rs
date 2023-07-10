@@ -13,6 +13,7 @@ cfg_if::cfg_if! {
     if #[cfg(windows)] {
         mod dns;
         mod wintun;
+        mod awintun;
     }
 }
 mod aproxy;
@@ -76,6 +77,16 @@ fn main() {
                 if #[cfg(windows)] {
                     log::warn!("trojan started in wintun mode with server:{}", OPTIONS.back_addr.as_ref().unwrap());
                     wintun::run()
+                } else {
+                    panic!("trojan in wintun mode not supported on non-windows platform");
+                }
+            }
+        }
+        Mode::Awintun(_) => {
+            cfg_if::cfg_if! {
+                if #[cfg(windows)] {
+                    log::warn!("trojan started in wintun mode with server:{}", OPTIONS.back_addr.as_ref().unwrap());
+                    awintun::run()
                 } else {
                     panic!("trojan in wintun mode not supported on non-windows platform");
                 }

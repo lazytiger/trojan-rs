@@ -70,8 +70,18 @@ pub enum Mode {
     Server(ServerArgs),
     #[clap(version, name = "aserver", about = "run in asynchronous server mode")]
     Aserver(ServerArgs),
-    #[clap(version, name = "wintun", about = "run in windows tun mode")]
+    #[clap(
+        version,
+        name = "wintun",
+        about = "run in synchronous windows tun mode"
+    )]
     Wintun(WintunArgs),
+    #[clap(
+        version,
+        name = "awintun",
+        about = "run in asynchronous windows tun mode"
+    )]
+    Awintun(WintunArgs),
     #[clap(version, name = "dns", about = "run in dns mode")]
     Dns(DnsArgs),
 }
@@ -329,7 +339,7 @@ impl Opts {
                 let port = args.port;
                 self.resolve(hostname, port, None);
             }
-            Mode::Wintun(ref args) => {
+            Mode::Wintun(ref args) | Mode::Awintun(ref args) => {
                 let hostname = args.hostname.clone();
                 let port = args.port;
                 let dns_server = args.dns_server_addr.clone();

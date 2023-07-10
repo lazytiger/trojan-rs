@@ -14,7 +14,7 @@ use smoltcp::{
     iface::{Config, Interface, SocketSet},
     socket::Socket,
     time::{Duration, Instant},
-    wire::{IpAddress, IpCidr, Ipv4Address},
+    wire::{HardwareAddress, IpAddress, IpCidr, Ipv4Address},
 };
 use wintun::Adapter;
 
@@ -51,7 +51,7 @@ const CHANNEL_UDP: usize = 1;
 /// Channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
 
-fn apply_ipset(file: &str, index: u32, inverse: bool) -> Result<()> {
+pub fn apply_ipset(file: &str, index: u32, inverse: bool) -> Result<()> {
     let ipset = IPSet::with_file(file, inverse)?;
     ipset.add_route(index)?;
     log::warn!("route add completed");
@@ -89,12 +89,12 @@ fn prepare_idle_pool(poll: &Poll, resolver: &DnsResolver) -> Result<IdlePool> {
 }
 
 fn prepare_device(device: &mut WintunDevice) -> Interface {
-    let mut config = Config::default();
+    let mut config = Config::new(HardwareAddress::Ip);
     config.random_seed = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let mut interface = Interface::new(config, device);
+    let mut interface = Interface::new(config, device, smoltcp::time::Instant::now());
     interface.set_any_ip(true);
     interface
         .routes_mut()

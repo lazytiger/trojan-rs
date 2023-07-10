@@ -114,11 +114,18 @@ pub async fn async_run(
         show_info(&context.options.log_level),
     ));
 
-    let server_ip = resolve(
-        context.options.hostname.as_str(),
-        (context.options.untrusted_dns.clone() + ":53").as_str(),
-    )
-    .await?;
+    let mut server_ip = Vec::new();
+    for _ in 0..10 {
+        if let Ok(ips) = resolve(
+            context.options.hostname.as_str(),
+            (context.options.untrusted_dns.clone() + ":53").as_str(),
+        )
+        .await
+        {
+            server_ip = ips;
+            break;
+        }
+    }
     log::info!("server ip is {:?}", server_ip);
 
     if server_ip.is_empty() {
@@ -218,7 +225,7 @@ pub async fn async_run(
             )?;
             last_speed_time = std::time::Instant::now();
         }
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     Ok(())

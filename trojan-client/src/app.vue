@@ -25,6 +25,7 @@ export default {
         enable_dns: true,
         dns_listen: "",
         trust_dns: "",
+        sync_mode: false,
       },
       label: "开始",
       running: false,
@@ -115,6 +116,7 @@ export default {
             ></v-text-field>
           </template>
         </v-slider>
+        <v-checkbox v-model="config.sync_mode" :readonly="running" label="同步模式"></v-checkbox>
         <v-row>
           <v-checkbox v-model="config.enable_ipset" :readonly="running" label="全局代理"></v-checkbox>
           <v-checkbox v-model="config.inverse_route" :readonly="running" label="反转地址"></v-checkbox>
