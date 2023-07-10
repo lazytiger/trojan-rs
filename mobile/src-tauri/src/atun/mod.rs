@@ -1,24 +1,16 @@
 use std::{
-    cell::RefCell,
-    io::Read,
     net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 
 use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
 use sha2::{Digest, Sha224};
-use smoltcp::{
-    iface::{Config, Interface, SocketSet},
-    wire::{HardwareAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
-};
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use tauri::utils;
 use tokio::{net::UdpSocket, runtime::Runtime, spawn};
 use trust_dns_proto::{
     op::{Message, Query},
@@ -67,7 +59,7 @@ fn digest_pass(pass: &String) -> String {
 /// This function resolves a domain name to a list of IP addresses.
 pub async fn resolve(name: &str, dns_server_addr: &str) -> types::Result<Vec<IpAddr>> {
     let dns_server_addr: SocketAddr = dns_server_addr.parse()?;
-    let mut socket = UdpSocket::bind("0.0.0.0:0").await?;
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
     let mut message = Message::new();
     message.set_recursion_desired(true);
     message.set_id(1);
@@ -241,6 +233,6 @@ fn get_speed_and_unit(speed: f64) -> (f64, &'static str) {
 }
 
 pub fn run(fd: i32, dns: String, context: Context, running: Arc<AtomicBool>) -> types::Result<()> {
-    let mut runtime = Runtime::new()?;
+    let runtime = Runtime::new()?;
     runtime.block_on(async_run(fd, dns, context, running))
 }

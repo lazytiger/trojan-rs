@@ -133,7 +133,6 @@ fn on_vpn_start(fd: i32, dns: String) -> Result<(), VpnError> {
     context.fd = fd;
     context.running = Arc::new(AtomicBool::new(true));
     context.dns = dns;
-    let running = context.running.clone();
     drop(lock);
     start_vpn_process()
 }

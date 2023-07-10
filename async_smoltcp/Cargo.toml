@@ -10,3 +10,4 @@ smoltcp = { version = "0.10", features = [] }
 bytes = "1.4"
 tokio = { version = "1.28", features = [] }
 tokio-util = "0.7"
+log = "0.4"

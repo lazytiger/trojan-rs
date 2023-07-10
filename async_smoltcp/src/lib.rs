@@ -8,7 +8,7 @@ use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint};
 
 pub use device::TunDevice;
 pub use tcp::{TcpReadHalf, TcpStream, TcpWriteHalf};
-pub use udp::{UdpReadHalf, UdpSocket, UdpWriteHalf};
+pub use udp::{UdpSocket, UdpWriteHalf};
 
 mod device;
 mod tcp;

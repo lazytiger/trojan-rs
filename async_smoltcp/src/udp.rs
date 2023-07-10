@@ -7,7 +7,7 @@ use crate::TypeConverter;
 
 pub struct UdpSocket {
     peer_addr: IpEndpoint,
-    read_half: UdpReadHalf,
+    receiver: Receiver<(IpEndpoint, Vec<u8>)>,
     write_half: UdpWriteHalf,
 }
 
@@ -19,7 +19,7 @@ impl UdpSocket {
     ) -> Self {
         Self {
             peer_addr,
-            read_half: UdpReadHalf { receiver },
+            receiver,
             write_half: UdpWriteHalf { sender, peer_addr },
         }
     }
@@ -28,32 +28,6 @@ impl UdpSocket {
         self.peer_addr.convert()
     }
 
-    pub async fn recv_from(&mut self) -> std::io::Result<(IpEndpoint, Vec<u8>)> {
-        self.read_half.recv_from().await
-    }
-    pub async fn recv_from_std(&mut self) -> std::io::Result<(SocketAddr, Vec<u8>)> {
-        self.read_half.recv_from_std().await
-    }
-    pub async fn send_to(
-        &self,
-        data: &[u8],
-        from: impl Into<IpEndpoint>,
-    ) -> std::io::Result<usize> {
-        self.write_half.send_to(data, from).await
-    }
-    pub async fn send_to_std(&self, data: &[u8], from: SocketAddr) -> std::io::Result<usize> {
-        self.write_half.send_to_std(data, from).await
-    }
-    pub fn into_split(self) -> (UdpReadHalf, UdpWriteHalf) {
-        (self.read_half, self.write_half)
-    }
-}
-
-pub struct UdpReadHalf {
-    receiver: Receiver<(IpEndpoint, Vec<u8>)>,
-}
-
-impl UdpReadHalf {
     pub async fn recv_from(&mut self) -> std::io::Result<(IpEndpoint, Vec<u8>)> {
         self.receiver
             .recv()
@@ -67,8 +41,26 @@ impl UdpReadHalf {
             .await
             .map(|(addr, data)| (addr.convert(), data))
     }
+    pub async fn send_to(
+        &self,
+        data: &[u8],
+        from: impl Into<IpEndpoint>,
+    ) -> std::io::Result<usize> {
+        self.write_half.send_to(data, from).await
+    }
+    pub async fn send_to_std(&self, data: &[u8], from: SocketAddr) -> std::io::Result<usize> {
+        self.write_half.send_to_std(data, from).await
+    }
+    pub fn writer(&self) -> UdpWriteHalf {
+        self.write_half.clone()
+    }
+    pub async fn close(&mut self) {
+        let _ = self.write_half.send_to(&[], self.peer_addr).await;
+        self.receiver.close();
+    }
 }
 
+#[derive(Clone)]
 pub struct UdpWriteHalf {
     sender: Sender<(IpEndpoint, IpEndpoint, Vec<u8>)>,
     peer_addr: IpEndpoint,

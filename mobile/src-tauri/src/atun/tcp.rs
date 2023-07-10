@@ -1,11 +1,8 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use bytes::BytesMut;
-use rustls::{ClientConfig, ClientConnection, ServerName};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    spawn,
-};
+use rustls::{ClientConfig, ServerName};
+use tokio::{io::AsyncWriteExt, spawn};
 
 use async_smoltcp::{TcpReadHalf, TcpStream, TcpWriteHalf};
 use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
@@ -41,6 +38,7 @@ pub async fn local_to_remote(mut local: TcpReadHalf, mut remote: TlsClientWriteH
         return;
     }
     let _ = tokio::io::copy(&mut local, &mut remote).await;
+    local.close();
     let _ = remote.shutdown().await;
     log::info!("local to remote closed");
 }

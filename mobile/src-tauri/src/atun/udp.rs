@@ -1,13 +1,12 @@
-use std::{collections::HashMap, future::Future, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
-use bytes::BytesMut;
-use rustls::{ClientConfig, ClientConnection, ServerName};
+use bytes::{Buf, BytesMut};
+use rustls::{ClientConfig, ServerName};
 use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     spawn,
     sync::mpsc::Sender,
-    task::spawn_blocking,
 };
 
 use async_smoltcp::{UdpSocket, UdpWriteHalf};
@@ -15,7 +14,7 @@ use tokio_rustls::TlsClientReadHalf;
 
 use crate::atun::{
     init_tls_conn,
-    proto::{TrojanRequest, UdpAssociate, UdpParseResultEndpoint, UDP_ASSOCIATE},
+    proto::{UdpAssociate, UdpParseResultEndpoint},
 };
 
 enum SelectResult {
@@ -25,7 +24,7 @@ enum SelectResult {
 }
 
 pub async fn start_udp(
-    local: UdpSocket,
+    mut local: UdpSocket,
     server_addr: SocketAddr,
     server_name: ServerName,
     config: Arc<ClientConfig>,
@@ -37,11 +36,9 @@ pub async fn start_udp(
     let mut remotes = HashMap::new();
     let mut header = BytesMut::new();
     let (sender, mut receiver) = tokio::sync::mpsc::channel(1024);
-    let (mut reader, writer) = local.into_split();
-    let writer = Arc::new(writer);
     loop {
         let ret = tokio::select! {
-            ret = reader.recv_from() => {
+            ret = local.recv_from() => {
                 SelectResult::Socket(ret)
             },
             _ = tokio::time::sleep(Duration::from_secs(120)) => {
@@ -81,7 +78,7 @@ pub async fn start_udp(
 
                                 spawn(remote_to_local(
                                     read_half,
-                                    writer.clone(),
+                                    local.writer(),
                                     source,
                                     sender.clone(),
                                 ));
@@ -115,48 +112,39 @@ pub async fn start_udp(
             }
         }
     }
+    log::info!("udp socket:{} closed", target);
+    local.close().await;
 }
 
 pub async fn remote_to_local(
     mut remote: TlsClientReadHalf,
-    local: Arc<UdpWriteHalf>,
+    local: UdpWriteHalf,
     target: IpEndpoint,
     sender: Sender<IpEndpoint>,
 ) {
-    let mut buffer = vec![0u8; 2048];
-    let mut offset = 0;
+    let mut buffer = BytesMut::new();
     'main: loop {
         let timeout = tokio::time::sleep(Duration::from_secs(120));
         tokio::select! {
             _ = timeout => {
                 break;
             }
-            ret = remote.read(&mut buffer.as_mut_slice()[offset..]) => {
+            ret = remote.read_buf(&mut buffer) => {
                 match ret {
                     Err(_) | Ok(0) => {
                         log::error!("udp read from remote failed");
                         break;
                     }
-                    Ok(n) => {
-                        offset += n;
+                    Ok(_) => {
                     }
                 }
             }
         }
 
-        let mut data = &buffer.as_slice()[..offset];
         loop {
-            match UdpAssociate::parse_endpoint(data) {
+            match UdpAssociate::parse_endpoint(buffer.as_ref()) {
                 UdpParseResultEndpoint::Continued => {
-                    if data.is_empty() {
-                        offset = 0;
-                    } else {
-                        let len = data.len();
-                        let remaining = offset - len;
-                        buffer.copy_within(remaining..offset, 0);
-                        offset = len;
-                    }
-                    log::info!("udp continue parsing with {} bytes left", offset);
+                    log::info!("udp continue parsing with {} bytes left", buffer.len());
                     break;
                 }
                 UdpParseResultEndpoint::Packet(packet) => {
@@ -168,7 +156,7 @@ pub async fn remote_to_local(
                         target,
                         payload.len()
                     );
-                    data = &packet.payload[packet.length..];
+                    buffer.advance(packet.offset);
                 }
                 UdpParseResultEndpoint::InvalidProtocol => {
                     log::info!("invalid protocol close now");

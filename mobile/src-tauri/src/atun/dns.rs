@@ -1,12 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::Error,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use rustls::{ClientConfig, ServerName};
 use smoltcp::wire::IpEndpoint;
 use tokio::{
@@ -196,46 +195,33 @@ pub async fn do_distrust_response(sender: Sender<Response>, socket: Arc<UdpSocke
 }
 
 pub async fn do_trust_response(sender: Sender<Response>, mut remote: TlsClientReadHalf) {
-    let mut buffer = vec![0u8; 1500];
-    let mut offset = 0;
+    let mut buffer = BytesMut::new();
     'main: loop {
-        match remote.read(&mut buffer.as_mut_slice()[offset..]).await {
+        match remote.read_buf(&mut buffer).await {
             Ok(0) | Err(_) => {
                 log::error!("read from trust dns server failed");
                 break;
             }
-            Ok(n) => {
-                offset += n;
-                let mut data = &buffer.as_slice()[..offset];
-                loop {
-                    match UdpAssociate::parse_endpoint(data) {
-                        UdpParseResultEndpoint::Continued => {
-                            if data.is_empty() {
-                                offset = 0;
-                            } else {
-                                let len = data.len();
-                                let remaining = offset - len;
-                                buffer.copy_within(remaining..offset, 0);
-                                offset = len;
+            Ok(_) => loop {
+                match UdpAssociate::parse_endpoint(buffer.as_ref()) {
+                    UdpParseResultEndpoint::Continued => {
+                        break;
+                    }
+                    UdpParseResultEndpoint::Packet(packet) => {
+                        let payload = &packet.payload[..packet.length];
+                        if let Ok(message) = Message::from_bytes(payload) {
+                            if let Err(_) = sender.send(Response::Message(message)).await {
+                                break 'main;
                             }
-                            break;
                         }
-                        UdpParseResultEndpoint::Packet(packet) => {
-                            let payload = &packet.payload[..packet.length];
-                            if let Ok(message) = Message::from_bytes(payload) {
-                                if let Err(err) = sender.send(Response::Message(message)).await {
-                                    break 'main;
-                                }
-                            }
-                            data = &packet.payload[packet.length..];
-                        }
-                        UdpParseResultEndpoint::InvalidProtocol => {
-                            log::error!("invalid protocol close now");
-                            break 'main;
-                        }
+                        buffer.advance(packet.offset);
+                    }
+                    UdpParseResultEndpoint::InvalidProtocol => {
+                        log::error!("invalid protocol close now");
+                        break 'main;
                     }
                 }
-            }
+            },
         }
     }
     let _ = sender.send(Response::TrustClosed).await;

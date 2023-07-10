@@ -8,7 +8,7 @@ use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet},
     phy::{Device, DeviceCapabilities, Medium},
     socket::{
-        tcp::{Socket as TcpSocket, SocketBuffer},
+        tcp::{Socket as TcpSocket, SocketBuffer, State},
         udp::{PacketBuffer, PacketMetadata, Socket as UdpSocket},
         Socket,
     },
@@ -44,6 +44,7 @@ pub struct TunDevice<'a, T: Tun> {
     mtu: usize,
     sockets: SocketSet<'a>,
     tcp_ip2handle: HashMap<IpEndpoint, (SocketHandle, IpEndpoint)>,
+    tcp_handle2ip: HashMap<SocketHandle, IpEndpoint>,
     udp_ip2handle: HashMap<IpEndpoint, SocketHandle>,
     new_tcp: Vec<IpEndpoint>,
     new_udp: Vec<IpEndpoint>,
@@ -91,6 +92,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             mtu,
             sockets: SocketSet::new([]),
             tcp_ip2handle: Default::default(),
+            tcp_handle2ip: Default::default(),
             udp_ip2handle: Default::default(),
             new_tcp: vec![],
             new_udp: vec![],
@@ -127,7 +129,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         } else if self.white_ip_list.contains(&endpoint.addr) {
             true
         } else {
-            !self.allow_private && is_private_v4(endpoint.addr)
+            self.allow_private || !is_private_v4(endpoint.addr)
         }
     }
 
@@ -146,7 +148,9 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         socket.set_ack_delay(None);
         self.tcp_ip2handle
             .insert(src_endpoint, (handle, dst_endpoint));
+        self.tcp_handle2ip.insert(handle, src_endpoint);
         self.new_tcp.push(src_endpoint);
+        log::info!("found new tcp:{}", src_endpoint);
     }
 
     fn ensure_udp_socket(&mut self, _src_endpoint: IpEndpoint, dst_endpoint: IpEndpoint) {
@@ -168,6 +172,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         for source in std::mem::take(&mut self.new_tcp) {
             let (sender, receiver) = channel(1024);
             self.tcp_req_senders.insert(source, sender);
+            log::info!("accept tcp {}", source);
             let stream = TcpStream::new(
                 receiver,
                 self.tcp_sender.clone(),
@@ -243,9 +248,11 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             .iter_mut()
             .for_each(|(handle, socket)| match socket {
                 Socket::Tcp(socket) => {
-                    if let Some(source) = socket.local_endpoint() {
-                        while socket.may_recv() {
+                    if let Some(source) = socket.remote_endpoint() {
+                        while socket.can_recv() {
+                            log::info!("dispatch ingress tcp {} {}", source, socket.state());
                             if let Ok(n) = socket.recv_slice(buffer.as_mut_slice()) {
+                                log::info!("receive {} bytes from {}", n, source);
                                 if self
                                     .tcp_req_senders
                                     .get(&source)
@@ -253,21 +260,36 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                                     .try_send(buffer.as_slice()[..n].to_vec())
                                     .is_err()
                                 {
-                                    tcp_endpoints.push(source);
+                                    log::info!("send request failed");
+                                    socket.close();
                                     break;
                                 }
                             } else {
-                                tcp_endpoints.push(source);
+                                socket.close();
                                 break;
                             }
                         }
+                        if socket.state() == State::CloseWait && socket.send_queue() == 0 {
+                            let _ = self
+                                .tcp_req_senders
+                                .get(&source)
+                                .unwrap()
+                                .try_send(Vec::new());
+                            socket.close();
+                        }
+                        if !socket.is_active() {
+                            log::info!("socket is not active now");
+                            tcp_endpoints.push(source);
+                        }
                     } else {
+                        log::info!("remove socket handle:{} state:{}", handle, socket.state());
                         handles.push(handle);
                     }
                 }
                 Socket::Udp(socket) => {
+                    let target: IpEndpoint = socket.endpoint().convert();
                     while socket.can_recv() {
-                        let target: IpEndpoint = socket.endpoint().convert();
+                        log::info!("dispatch udp {}", target);
                         if let Ok((n, source)) = socket.recv_slice(buffer.as_mut_slice()) {
                             if self
                                 .udp_req_senders
@@ -284,6 +306,9 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                             break;
                         }
                     }
+                    if !socket.is_open() {
+                        udp_endpoints.push(target);
+                    }
                 }
                 _ => {}
             });
@@ -294,28 +319,43 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             self.remove_udp(endpoint);
         }
         for handle in handles {
-            self.sockets.remove(handle);
+            self.remove_tcp_handle(handle);
         }
     }
 
     fn process_egress(&mut self) {
         while let Ok((source, data)) = self.tcp_receiver.try_recv() {
+            if !self.tcp_ip2handle.contains_key(&source) {
+                continue;
+            }
+            log::info!("get tcp socket:{}", source);
             let socket = self.get_tcp_socket(source);
-            if socket.send_slice(data.as_slice()).is_err() {
+            if data.is_empty() || socket.send_slice(data.as_slice()).is_err() {
                 socket.close();
-                self.remove_tcp(source);
             }
         }
         while let Ok((source, target, data)) = self.udp_receiver.try_recv() {
+            if !self.udp_ip2handle.contains_key(&target) {
+                continue;
+            }
+            log::info!("get udp socket:{}", target);
             let socket = self.get_udp_socket(target);
-            if socket.send_slice(data.as_slice(), source).is_err() {
-                socket.close();
+            if data.is_empty() || socket.send_slice(data.as_slice(), source).is_err() {
                 self.remove_udp(target);
             }
         }
     }
 
+    fn remove_tcp_handle(&mut self, handle: SocketHandle) {
+        if let Some(source) = self.tcp_handle2ip.get(&handle) {
+            let source = *source;
+            self.remove_tcp(source);
+            self.tcp_handle2ip.remove(&handle);
+        }
+    }
+
     fn remove_tcp(&mut self, source: IpEndpoint) {
+        log::info!("remove tcp {}", source);
         if let Some((handle, _)) = self.tcp_ip2handle.get(&source) {
             let handle = *handle;
             self.sockets.remove(handle);
@@ -325,6 +365,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
     }
 
     fn remove_udp(&mut self, target: IpEndpoint) {
+        log::info!("remove udp {}", target);
         if let Some(handle) = self.udp_ip2handle.get(&target) {
             let handle = *handle;
             self.sockets.remove(handle);
@@ -390,9 +431,11 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
         let src_endpoint = IpEndpoint::new(src_addr, src_port);
         if !self.allowed(dst_endpoint) {
+            log::info!("ignore packet to {}", dst_endpoint);
             return;
         }
 
+        log::info!("got packet from {} to {}", src_endpoint, dst_endpoint);
         match connect {
             Some(true) => {
                 self.ensure_tcp_socket(dst_endpoint, src_endpoint);

@@ -23,6 +23,9 @@ impl TcpReadHalf {
     pub fn peer_addr(&self) -> SocketAddr {
         self.peer_addr.convert()
     }
+    pub fn close(&mut self) {
+        self.receiver.close();
+    }
 }
 
 pub struct TcpWriteHalf {
@@ -93,10 +96,10 @@ impl AsyncWrite for TcpWriteHalf {
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
         let pin = self.get_mut();
-        if let Ok(_) = ready!(pin.sender.poll_reserve(cx)) {
+        if ready!(pin.sender.poll_reserve(cx)).is_ok() {
             let buf = buf.to_vec();
             let len = buf.len();
-            if let Ok(_) = pin.sender.send_item((pin.local_addr, buf)) {
+            if pin.sender.send_item((pin.local_addr, buf)).is_ok() {
                 return Poll::Ready(Ok(len));
             }
         }
@@ -107,10 +110,8 @@ impl AsyncWrite for TcpWriteHalf {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        let pin = self.get_mut();
-        pin.sender.close();
-        Poll::Ready(Ok(()))
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        self.poll_write(cx, &[]).map(|ret| ret.map(|_| ()))
     }
 }
 

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::{BufRead, BufReader, Cursor, ErrorKind, Write},
+    io::{ErrorKind, Write},
     net::{Shutdown, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -158,7 +158,7 @@ impl DnsServer {
     }
 
     fn do_trusted_response(&mut self, device: &mut VpnDevice) {
-        let mut socket = UdpSocketRef {
+        let socket = UdpSocketRef {
             socket: device.get_udp_socket_mut(self.listener, WakerMode::None),
             endpoint: None,
         };
@@ -222,7 +222,7 @@ impl DnsServer {
     fn do_untrusted_response(&mut self, device: &mut VpnDevice) {
         while let Ok((len, from)) = self.untrusted.recv_from(self.buffer.as_mut_slice()) {
             let data = &self.buffer.as_slice()[..len];
-            if let Ok(mut message) = Message::from_bytes(data) {
+            if let Ok(message) = Message::from_bytes(data) {
                 log::info!("get response from untrusted");
                 self.dispatch_message(
                     message,
@@ -418,7 +418,7 @@ fn new_tls_conn(
     #[cfg(not(target_os = "windows"))]
     server.set_nodelay(true)?;
 
-    let mut session = ClientConnection::new(config, hostname)?;
+    let session = ClientConnection::new(config, hostname)?;
     let mut conn = TlsConn::new(0, Token(0), Connection::Client(session), server);
     let empty_addr = "0.0.0.0:0".parse().unwrap();
 

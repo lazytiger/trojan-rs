@@ -8,7 +8,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, Window, Wry};
-use tokio::runtime::Runtime;
 
 use crate::types::{EventType, VpnError};
 
@@ -17,7 +16,9 @@ mod types;
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 mod platform;
 
+#[cfg(feature = "async")]
 mod atun;
+#[cfg(not(feature = "async"))]
 mod tun;
 
 #[cfg(feature = "async")]

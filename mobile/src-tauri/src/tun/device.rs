@@ -1,30 +1,20 @@
 use std::{
     collections::{HashMap, HashSet},
-    future::Future,
-    io::{Error, ErrorKind},
-    ops::DerefMut,
-    pin::{pin, Pin},
     sync::Arc,
-    task::{ready, Context, Poll},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use smoltcp::{
     iface::{SocketHandle, SocketSet},
     phy::{Device, DeviceCapabilities, Medium},
     socket::{
-        tcp::{Socket as TcpSocket, SocketBuffer, State},
+        tcp::{Socket as TcpSocket, SocketBuffer},
         udp::{PacketBuffer, PacketMetadata, Socket as UdpSocket},
         Socket,
     },
     wire::{
         IpAddress, IpEndpoint, IpProtocol, IpVersion, Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
     },
-};
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    sync::Mutex,
-    time::Sleep,
 };
 
 use async_smoltcp::{Packet as _, Tun as _};
