@@ -512,7 +512,7 @@ async fn start_remote_response(
                 log::info!("get {} bytes from remote", n);
             }
         }
-        loop {
+        while !recv_buffer.is_empty() {
             let resp = match recv_buffer.as_ref()[0] {
                 proto::IPV4 => {
                     if recv_buffer.len() < 8 {
