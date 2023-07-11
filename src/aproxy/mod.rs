@@ -62,15 +62,26 @@ async fn async_run() -> Result<()> {
         (None, None)
     };
 
-    tokio::select! {
-        ret = run_tcp(tcp_listener, server_name.clone(), config.clone(), sender.clone()) => {
-            log::error!("tcp routine exit with:{:?}", ret);
-        },
-        ret = run_udp(udp_listener, server_name.clone(), config.clone(), sender.clone()) => {
-            log::error!("udp routine exit with:{:?}", ret);
+    if sender.is_none() {
+        tokio::select! {
+            ret = run_tcp(tcp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+                log::error!("tcp routine exit with:{:?}", ret);
+            },
+            ret = run_udp(udp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+                log::error!("udp routine exit with:{:?}", ret);
+            }
         }
-        ret = run_profiler(receiver, sender, server_name.clone(), config) => {
-            log::error!("profiler routine exit with:{:?}", ret);
+    } else {
+        tokio::select! {
+            ret = run_tcp(tcp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+                log::error!("tcp routine exit with:{:?}", ret);
+            },
+            ret = run_udp(udp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+                log::error!("udp routine exit with:{:?}", ret);
+            }
+            ret = run_profiler(receiver, sender, server_name.clone(), config) => {
+                log::error!("profiler routine exit with:{:?}", ret);
+            }
         }
     }
     Ok(())
