@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use derive_more::From;
 use log::SetLoggerError;
 
@@ -27,6 +29,7 @@ pub enum TrojanError {
     MainAdapterNotFound,
     Notify(notify::Error),
     SetLogger(SetLoggerError),
+    TokioSendIpAddr(tokio::sync::mpsc::error::SendError<IpAddr>),
     #[from(ignore)]
     Resolve,
 }

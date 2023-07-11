@@ -4,15 +4,21 @@ use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime::Runtime,
+    sync::mpsc::unbounded_channel,
 };
 
 use crate::{
-    aproxy::{tcp::run_tcp, udp::run_udp},
+    aproxy::{
+        profiler::{run_profiler, start_check_server},
+        tcp::run_tcp,
+        udp::run_udp,
+    },
     config::OPTIONS,
     proxy::new_socket,
     types::Result,
 };
 
+mod profiler;
 mod tcp;
 mod udp;
 
@@ -43,12 +49,28 @@ async fn async_run() -> Result<()> {
     let udp_listener = UdpSocket::from_std(new_socket(addr, true)?.into())?;
     let server_name: ServerName = OPTIONS.proxy_args().hostname.as_str().try_into()?;
     let config = prepare_tls_config();
+    start_check_server(
+        OPTIONS.proxy_args().hostname.clone(),
+        150,
+        OPTIONS.proxy_args().bypass_timeout,
+    );
+
+    let (sender, receiver) = if OPTIONS.proxy_args().enable_bypass {
+        let (sender, receiver) = unbounded_channel();
+        (Some(sender), Some(receiver))
+    } else {
+        (None, None)
+    };
+
     tokio::select! {
-        ret = run_tcp(tcp_listener, server_name.clone(), config.clone()) => {
+        ret = run_tcp(tcp_listener, server_name.clone(), config.clone(), sender.clone()) => {
             log::error!("tcp routine exit with:{:?}", ret);
         },
-        ret = run_udp(udp_listener, server_name, config) => {
+        ret = run_udp(udp_listener, server_name.clone(), config.clone(), sender.clone()) => {
             log::error!("udp routine exit with:{:?}", ret);
+        }
+        ret = run_profiler(receiver, sender, server_name.clone(), config) => {
+            log::error!("profiler routine exit with:{:?}", ret);
         }
     }
     Ok(())

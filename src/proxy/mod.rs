@@ -43,7 +43,7 @@ const UDP_LISTENER: usize = 2;
 /// Token used for dns resolver
 const RESOLVER: usize = 3;
 /// Token used for ping
-const PINGER: usize = 4;
+pub(crate) const PINGER: usize = 4;
 /// total channel count for Poll
 const CHANNEL_CNT: usize = 4;
 /// channel index  for `IdlePool`

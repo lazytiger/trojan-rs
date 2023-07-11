@@ -1,4 +1,7 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, ServerName};
@@ -9,6 +12,7 @@ use tokio::{
         TcpListener, TcpStream,
     },
     spawn,
+    sync::mpsc::UnboundedSender,
 };
 
 use tokio_rustls::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf};
@@ -24,10 +28,14 @@ pub async fn run_tcp(
     listener: TcpListener,
     server_name: ServerName,
     config: Arc<ClientConfig>,
+    sender: Option<UnboundedSender<IpAddr>>,
 ) -> Result<()> {
     loop {
         let (client, _) = listener.accept().await?;
         let dst_addr = sys::get_oridst_addr(&client)?;
+        if let Some(ref sender) = sender {
+            sender.send(dst_addr.ip())?;
+        }
         client.set_nodelay(true)?;
         spawn(start_tcp_proxy(
             client,

@@ -1,4 +1,11 @@
-use std::{collections::HashMap, io, io::ErrorKind, net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    io,
+    io::ErrorKind,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Instant,
+};
 
 use bytes::{Buf, BytesMut};
 use rustls::{ClientConfig, ClientConnection, ServerName};
@@ -6,7 +13,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
     spawn,
-    sync::mpsc::{channel, Sender},
+    sync::mpsc::{channel, Sender, UnboundedSender},
 };
 
 use tokio_rustls::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf};
@@ -28,6 +35,7 @@ pub async fn run_udp(
     listener: UdpSocket,
     server_name: ServerName,
     config: Arc<ClientConfig>,
+    profiler_sender: Option<UnboundedSender<IpAddr>>,
 ) -> Result<()> {
     let mut recv_buffer = vec![0u8; 1500];
     let mut remotes: HashMap<SocketAddr, TlsClientWriteHalf> = HashMap::new();
@@ -65,6 +73,9 @@ pub async fn run_udp(
                     src_addr,
                     dst_addr
                 );
+                if let Some(ref sender) = profiler_sender {
+                    sender.send(dst_addr.ip())?;
+                }
                 let remote = match remotes.get_mut(&src_addr) {
                     Some(ret) => ret,
                     None => {

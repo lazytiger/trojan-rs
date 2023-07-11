@@ -287,7 +287,7 @@ impl Opts {
     #[allow(dead_code)]
     pub fn wintun_args(&self) -> &WintunArgs {
         match self.mode {
-            Mode::Wintun(ref args) => args,
+            Mode::Wintun(ref args) | Mode::Awintun(ref args) => args,
             _ => panic!("not in wintun mode"),
         }
     }
