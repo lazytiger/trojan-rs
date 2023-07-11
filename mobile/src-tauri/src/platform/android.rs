@@ -397,7 +397,11 @@ impl Tun for Session {
                 packet.set_len(n);
                 Ok(Some(packet))
             }
-            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
+            Err(err)
+                if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted =>
+            {
+                Ok(None)
+            }
             Err(err) => {
                 log::error!("read file failed:{:?}", err);
                 Err(err)

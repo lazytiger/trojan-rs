@@ -79,6 +79,7 @@ async fn start_proxy(
                 )
             }
         };
+        log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
         match cmd {
             CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
             UDP_ASSOCIATE => start_udp(conn, buffer).await,

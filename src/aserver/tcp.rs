@@ -6,6 +6,7 @@ use tokio::{
     net::TcpStream,
     spawn,
 };
+
 use tokio_rustls::TlsServerStream;
 
 use crate::{config::OPTIONS, types::Result};
@@ -29,16 +30,21 @@ pub async fn start_tcp(
                 buffer.unsplit(data);
             }
             _ => {
-                log::error!("http request not completed, ignore now");
+                log::error!(
+                    "{} - {} http request not completed, ignore now",
+                    src_addr,
+                    target_addr
+                );
             }
         }
     }
 
+    log::info!("tcp backend:{}", target_addr);
     let mut target = TcpStream::connect(target_addr).await?;
     if let Err(err) = target.write_all(buffer.as_ref()).await {
         let _ = target.shutdown().await;
         let _ = source.shutdown().await;
-        log::error!("tcp send data to target failed:{}", err);
+        log::error!("tcp send data to target:{} failed:{}", target_addr, err);
         return Ok(());
     }
     let (source_read, source_write) = source.into_split();
@@ -46,13 +52,13 @@ pub async fn start_tcp(
     spawn(copy(
         source_read,
         target_write,
-        "tcp source to target".to_string(),
+        format!("tcp {} to {}", src_addr, target_addr),
         OPTIONS.tcp_idle_timeout,
     ));
     spawn(copy(
         target_read,
         source_write,
-        "tcp target to source".to_string(),
+        format!("tcp {} to {}", target_addr, src_addr),
         OPTIONS.tcp_idle_timeout,
     ));
     Ok(())
