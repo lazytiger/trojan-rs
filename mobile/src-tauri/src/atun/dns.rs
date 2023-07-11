@@ -124,8 +124,11 @@ pub async fn start_dns(
                                     &trusted_addr,
                                     data.len() as u16,
                                 );
-                                let _ = trust.write_all(header.as_ref()).await;
-                                let _ = trust.write_all(data.as_slice()).await;
+                                if trust.write_all(header.as_ref()).await.is_err()
+                                    || trust.write_all(data.as_slice()).await.is_err()
+                                {
+                                    let _ = trust.shutdown().await;
+                                }
                             } else {
                                 let _ = distrust.send_to(data.as_slice(), distrusted_addr).await;
                             }
