@@ -132,7 +132,7 @@ pub async fn remote_to_local(
             ret = remote.read_buf(&mut buffer) => {
                 match ret {
                     Err(_) | Ok(0) => {
-                        log::error!("udp read from remote failed");
+                        //log::error!("udp read from remote failed");
                         break;
                     }
                     Ok(_) => {
