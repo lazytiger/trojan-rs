@@ -31,6 +31,11 @@ pub async fn start_udp(
     buffer_size: usize,
     request: Arc<BytesMut>,
 ) {
+    if local.peer_addr().ip() == server_addr.ip() {
+        log::error!("ignore udp request to server");
+        local.close().await;
+        return;
+    }
     let target = local.peer_addr().into();
     log::info!("start udp listening for {}", target);
     let mut remotes = HashMap::new();

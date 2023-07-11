@@ -87,12 +87,8 @@ async fn async_run() -> Result<()> {
     );
 
     let server_addr = *OPTIONS.back_addr.as_ref().unwrap();
-    let mut device = TunDevice::new(
-        OPTIONS.wintun_args().mtu,
-        1024,
-        server_addr.ip(),
-        Wintun::new(session),
-    );
+    let mut device = TunDevice::new(OPTIONS.wintun_args().mtu, 1024, Wintun::new(session));
+    device.add_black_ip(server_addr.ip());
 
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let mut header = BytesMut::new();

@@ -156,7 +156,7 @@ pub async fn async_run(
             .with_no_client_auth(),
     );
 
-    let mut device = TunDevice::new(context.options.mtu, 1024, server_ip[0], session);
+    let mut device = TunDevice::new(context.options.mtu, 1024, session);
     device.add_white_ip(dns_addr.ip());
 
     let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;

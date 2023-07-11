@@ -13,19 +13,36 @@ use crate::atun::{
 };
 
 pub async fn start_tcp(
-    local: TcpStream,
+    mut local: TcpStream,
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
     server_name: ServerName,
     buffer_size: usize,
     pass: String,
 ) {
-    let client = init_tls_conn(config.clone(), buffer_size, server_addr, server_name).await;
-    if let Ok(client) = client {
-        let (read_half, write_half) = client.into_split();
-        let (reader, writer) = local.into_split();
-        spawn(local_to_remote(reader, write_half, pass));
-        spawn(remote_to_local(read_half, writer));
+    if local.peer_addr().ip() == server_addr.ip() {
+        if let Ok(remote) = tokio::net::TcpStream::connect(local.peer_addr()).await {
+            let (mut local_read, mut local_write) = local.into_split();
+            let (mut remote_read, mut remote_write) = remote.into_split();
+            spawn(async move {
+                let _ = tokio::io::copy(&mut local_read, &mut remote_write).await;
+                let _ = remote_write.shutdown().await;
+            });
+            spawn(async move {
+                let _ = tokio::io::copy(&mut remote_read, &mut local_write).await;
+                let _ = local_write.shutdown().await;
+            });
+        } else {
+            let _ = local.shutdown().await;
+        }
+    } else {
+        let client = init_tls_conn(config.clone(), buffer_size, server_addr, server_name).await;
+        if let Ok(client) = client {
+            let (read_half, write_half) = client.into_split();
+            let (reader, writer) = local.into_split();
+            spawn(local_to_remote(reader, write_half, pass));
+            spawn(remote_to_local(read_half, writer));
+        }
     }
 }
 

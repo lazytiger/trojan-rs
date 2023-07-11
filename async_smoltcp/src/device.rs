@@ -49,6 +49,7 @@ pub struct TunDevice<'a, T: Tun> {
     new_tcp: Vec<IpEndpoint>,
     new_udp: Vec<IpEndpoint>,
     white_ip_list: HashSet<IpAddress>,
+    black_ip_list: HashSet<IpAddress>,
     allow_private: bool,
     /// (source address, data)
     tcp_receiver: Receiver<(IpEndpoint, Vec<u8>)>,
@@ -63,7 +64,6 @@ pub struct TunDevice<'a, T: Tun> {
     udp_req_senders: HashMap<IpEndpoint, Sender<(IpEndpoint, Vec<u8>)>>,
 
     interface: Option<Interface>,
-    server_addr: IpAddress,
 }
 
 fn is_private_v4(addr: IpAddress) -> bool {
@@ -83,7 +83,7 @@ fn is_private_v4(addr: IpAddress) -> bool {
 }
 
 impl<'a, T: Tun + Clone> TunDevice<'a, T> {
-    pub fn new(mtu: usize, channel_buffer: usize, server_addr: impl Into<IpAddr>, tun: T) -> Self {
+    pub fn new(mtu: usize, channel_buffer: usize, tun: T) -> Self {
         let (tcp_sender, tcp_receiver) = channel(channel_buffer);
         let (udp_sender, udp_receiver) = channel(channel_buffer);
         let mut device = Self {
@@ -97,6 +97,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             new_tcp: vec![],
             new_udp: vec![],
             white_ip_list: Default::default(),
+            black_ip_list: Default::default(),
             allow_private: false,
             tcp_receiver,
             tcp_sender,
@@ -105,11 +106,14 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             udp_sender,
             udp_req_senders: Default::default(),
             interface: None,
-            server_addr: server_addr.into().into(),
         };
         let interface = device.create_interface();
         device.interface.replace(interface);
         device
+    }
+
+    pub fn add_black_ip(&mut self, server_addr: impl Into<IpAddr>) {
+        self.black_ip_list.insert(server_addr.into().into());
     }
 
     pub fn allow_private(&mut self, allow: bool) {
@@ -124,7 +128,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         let endpoint = endpoint.into();
         if endpoint.port == 0 {
             false
-        } else if endpoint.addr == self.server_addr {
+        } else if self.black_ip_list.contains(&endpoint.addr) {
             false
         } else if self.white_ip_list.contains(&endpoint.addr) {
             true
