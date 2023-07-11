@@ -11,7 +11,7 @@ use std::{
 use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
 use sha2::{Digest, Sha224};
-use tokio::{net::UdpSocket, runtime::Runtime, spawn};
+use tokio::{net::UdpSocket, runtime::Builder, spawn};
 use trust_dns_proto::{
     op::{Message, Query},
     rr::{DNSClass, Name, RecordType},
@@ -240,6 +240,6 @@ fn get_speed_and_unit(speed: f64) -> (f64, &'static str) {
 }
 
 pub fn run(fd: i32, dns: String, context: Context, running: Arc<AtomicBool>) -> types::Result<()> {
-    let runtime = Runtime::new()?;
+    let runtime = Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async_run(fd, dns, context, running))
 }

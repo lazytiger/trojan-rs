@@ -27,6 +27,7 @@ pub async fn start_tcp(
             spawn(async move {
                 let _ = tokio::io::copy(&mut local_read, &mut remote_write).await;
                 let _ = remote_write.shutdown().await;
+                local_read.close();
             });
             spawn(async move {
                 let _ = tokio::io::copy(&mut remote_read, &mut local_write).await;
