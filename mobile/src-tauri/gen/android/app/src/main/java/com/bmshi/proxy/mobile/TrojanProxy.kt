@@ -103,7 +103,7 @@ class TrojanProxy : VpnService() {
             //.addRoute("8.8.8.8", 32)
             //.addRoute("212.103.62.58", 32)
             .addAddress("10.10.10.1", 30)
-            //.addDnsServer("10.10.11.1")
+            .addDnsServer("10.10.11.1")
             //.addDnsServer("8.8.8.8")
             //.addDnsServer("8.8.4.4")
             //.addDnsServer("1.1.1.1")
