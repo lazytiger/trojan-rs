@@ -503,9 +503,14 @@ async fn start_remote_response(
     log::error!("remote check routine started");
     let mut recv_buffer = BytesMut::new();
     loop {
-        if reader.read_buf(&mut recv_buffer).await.is_err() {
-            let _ = sender.send((IpAddr::V4(Ipv4Addr::from(0u32)), 0u16, 0u8));
-            break;
+        match reader.read_buf(&mut recv_buffer).await {
+            Ok(0) | Err(_) => {
+                let _ = sender.send((IpAddr::V4(Ipv4Addr::from(0u32)), 0u16, 0u8));
+                break;
+            }
+            Ok(n) => {
+                log::info!("get {} bytes from remote", n);
+            }
         }
         loop {
             let resp = match recv_buffer.as_ref()[0] {
@@ -536,6 +541,7 @@ async fn start_remote_response(
                 _ => unreachable!("invalid address type:{}", recv_buffer.as_ref()[0]),
             };
             let _ = sender.send(resp);
+            log::info!("get remote response:{:?}", resp);
         }
     }
     log::error!("remote check routine exit");
