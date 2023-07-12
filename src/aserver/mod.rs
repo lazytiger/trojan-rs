@@ -1,6 +1,6 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use bytes::{Buf, BytesMut};
@@ -57,6 +57,7 @@ async fn start_proxy(
     src_addr: SocketAddr,
 ) -> Result<()> {
     let mut buffer = BytesMut::new();
+    let now = Instant::now();
     let ret = loop {
         if let Ok(Ok(n)) = timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
             if n == 0 {
@@ -100,7 +101,13 @@ async fn start_proxy(
         }
     };
     if ret.is_none() {
-        log::error!("read request from {} failed", src_addr);
+        let time = now.elapsed().as_millis();
+        log::error!(
+            "read request from {} failed with {} bytes after {} ms",
+            src_addr,
+            buffer.len()
+            time
+        );
         let _ = conn.shutdown().await;
         return Ok(());
     }
