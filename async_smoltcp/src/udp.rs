@@ -24,10 +24,13 @@ impl UdpSocket {
         }
     }
 
-    pub fn peer_addr(&self) -> SocketAddr {
-        self.peer_addr.convert()
+    pub fn peer_addr(&self) -> IpEndpoint {
+        self.peer_addr
     }
 
+    pub fn peer_addr_std(&self) -> SocketAddr {
+        self.peer_addr.convert()
+    }
     pub async fn recv_from(&mut self) -> std::io::Result<(IpEndpoint, Vec<u8>)> {
         self.receiver
             .recv()
@@ -82,5 +85,13 @@ impl UdpWriteHalf {
 
     pub async fn send_to_std(&self, data: &[u8], from: SocketAddr) -> std::io::Result<usize> {
         self.send_to(data, from).await
+    }
+
+    pub fn peer_addr(&self) -> IpEndpoint {
+        self.peer_addr
+    }
+
+    pub fn peer_addr_std(&self) -> SocketAddr {
+        self.peer_addr.convert()
     }
 }

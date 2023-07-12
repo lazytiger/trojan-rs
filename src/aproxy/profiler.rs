@@ -384,13 +384,14 @@ pub async fn run_profiler(
 
         if reconnect {
             let _ = writer.shutdown().await;
-            let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
-            let session = ClientConnection::new(config.clone(), server_name.clone())?;
-            let remote = TlsClientStream::new(remote, session, 4096);
-            (reader, writer) = remote.into_split();
-            reconnect = writer.write_all(request.as_ref()).await.is_err();
-            if !reconnect {
-                spawn(start_remote_response(reader, remote_resp_sender.clone()));
+            if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
+                let session = ClientConnection::new(config.clone(), server_name.clone())?;
+                let remote = TlsClientStream::new(remote, session, 4096);
+                (reader, writer) = remote.into_split();
+                reconnect = writer.write_all(request.as_ref()).await.is_err();
+                if !reconnect {
+                    spawn(start_remote_response(reader, remote_resp_sender.clone()));
+                }
             }
         }
 

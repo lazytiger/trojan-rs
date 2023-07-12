@@ -98,6 +98,7 @@ pub async fn run_udp(
                         });
                         let (read_half, write_half) = remote.into_split();
                         let (req_sender, req_receiver) = channel(1024);
+                        remotes.insert(src_addr, req_sender);
                         spawn(local_to_remote(req_receiver, write_half));
                         spawn(remote_to_local(
                             read_half,
@@ -105,7 +106,6 @@ pub async fn run_udp(
                             src_addr,
                             sender.clone(),
                         ));
-                        remotes.insert(src_addr, req_sender);
                         remotes.get(&src_addr).unwrap()
                     }
                 };

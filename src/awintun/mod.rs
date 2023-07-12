@@ -6,7 +6,7 @@ use std::{
 
 use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
-use tokio::{runtime::Runtime, spawn};
+use tokio::{runtime::Runtime, spawn, sync::mpsc::channel};
 use wintun::Adapter;
 
 use async_smoltcp::TunDevice;
@@ -15,7 +15,11 @@ use types::Result;
 use wintool::adapter::get_main_adapter_gwif;
 
 use crate::{
-    awintun::{tcp::start_tcp, tun::Wintun, udp::start_udp},
+    awintun::{
+        tcp::start_tcp,
+        tun::Wintun,
+        udp::{run_udp_dispatch, start_udp},
+    },
     config::OPTIONS,
     proto::{TrojanRequest, UDP_ASSOCIATE},
     types,
@@ -95,6 +99,21 @@ async fn async_run() -> Result<()> {
     TrojanRequest::generate(&mut header, UDP_ASSOCIATE, &empty);
     let udp_header = Arc::new(header);
 
+    let (data_sender, data_receiver) = channel(4096);
+    let (socket_sender, socket_receiver) = channel(4096);
+    let (close_sender, close_receiver) = channel(4096);
+    spawn(run_udp_dispatch(
+        data_receiver,
+        socket_receiver,
+        server_addr,
+        server_name.clone(),
+        config.clone(),
+        4096,
+        udp_header.clone(),
+        close_receiver,
+        close_sender.clone(),
+    ));
+
     loop {
         let (tcp_streams, udp_sockets) = device.poll();
         for stream in tcp_streams {
@@ -113,14 +132,9 @@ async fn async_run() -> Result<()> {
         }
         for socket in udp_sockets {
             log::info!("accept udp to:{}", socket.peer_addr());
-            spawn(start_udp(
-                socket,
-                server_addr,
-                server_name.clone(),
-                config.clone(),
-                4096,
-                udp_header.clone(),
-            ));
+            let writer = Arc::new(socket.writer());
+            let _ = socket_sender.send(writer).await;
+            spawn(start_udp(socket, data_sender.clone(), close_sender.clone()));
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }

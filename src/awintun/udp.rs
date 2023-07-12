@@ -17,109 +17,135 @@ use crate::{
     proto::{UdpAssociate, UdpParseResultEndpoint},
 };
 
-enum SelectResult {
-    Timeout,
-    Socket(std::io::Result<(IpEndpoint, Vec<u8>)>),
-    Receiver(Option<IpEndpoint>),
+enum DispatchReturn {
+    Data(Option<(IpEndpoint, IpEndpoint, Vec<u8>)>),
+    Socket(Option<Arc<UdpWriteHalf>>),
+    Close(Option<(IpEndpoint, bool)>),
 }
 
-pub async fn start_udp(
-    mut local: UdpSocket,
+pub async fn run_udp_dispatch(
+    mut data_receiver: Receiver<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+    mut socket_receiver: Receiver<Arc<UdpWriteHalf>>,
     server_addr: SocketAddr,
     server_name: ServerName,
     config: Arc<ClientConfig>,
     buffer_size: usize,
     request: Arc<BytesMut>,
+    mut close_receiver: Receiver<(IpEndpoint, bool)>,
+    close_sender: Sender<(IpEndpoint, bool)>,
 ) {
-    let target: IpEndpoint = local.peer_addr().into();
-    log::info!("start udp listening for {}", target);
-    let mut remotes = HashMap::new();
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
+    let mut locals: HashMap<IpEndpoint, Arc<UdpWriteHalf>> = HashMap::new();
+    let mut req_senders = HashMap::new();
     loop {
         let ret = tokio::select! {
-            ret = local.recv_from() => {
-                SelectResult::Socket(ret)
+            ret = data_receiver.recv() => {
+                DispatchReturn::Data(ret)
             },
-            _ = tokio::time::sleep(Duration::from_secs(120)) => {
-                SelectResult::Timeout
+            ret = socket_receiver.recv() => {
+                DispatchReturn::Socket(ret)
             },
-            ret = receiver.recv() => {
-                SelectResult::Receiver(ret)
+            ret = close_receiver.recv() => {
+                DispatchReturn::Close(ret)
             }
         };
         match ret {
-            SelectResult::Timeout => {
-                log::info!("timeout for udp {}", target);
-                if remotes.is_empty() {
-                    break;
-                }
-            }
-            SelectResult::Socket(ret) => match ret {
-                Ok((source, data)) => {
-                    log::info!("receive {} bytes from {} to {}", data.len(), source, target);
-                    let remote = match remotes.get(&source) {
-                        Some(sender) => sender,
-                        None => {
-                            if let Ok(client) = init_tls_conn(
-                                config.clone(),
-                                buffer_size,
-                                server_addr,
-                                server_name.clone(),
-                            )
-                            .await
-                            {
-                                let (read_half, mut write_half) = client.into_split();
-                                if let Err(err) = write_half.write_all(request.as_ref()).await {
-                                    log::error!("udp send handshake failed:{}", err);
-                                    let _ = write_half.shutdown().await;
-                                    continue;
-                                }
-
-                                let (req_sender, req_receiver) = channel(buffer_size);
-                                spawn(local_to_remote(req_receiver, write_half));
-                                spawn(remote_to_local(
-                                    read_half,
-                                    local.writer(),
-                                    source,
-                                    target.into(),
-                                    sender.clone(),
-                                ));
-                                remotes.insert(source, req_sender);
-                                remotes.get(&source).unwrap()
-                            } else {
-                                log::error!("connect to remote server failed, ignore udp packet");
+            DispatchReturn::Data(ret) => {
+                let (src_addr, dst_addr, data) = ret.unwrap();
+                log::info!(
+                    "found data {} - {} {} bytes",
+                    src_addr,
+                    dst_addr,
+                    data.len()
+                );
+                let sender = match req_senders.get(&src_addr) {
+                    Some(sender) => sender,
+                    None => {
+                        log::info!("remote for {} not found", src_addr);
+                        if let Ok(client) = init_tls_conn(
+                            config.clone(),
+                            buffer_size,
+                            server_addr,
+                            server_name.clone(),
+                        )
+                        .await
+                        {
+                            let (read_half, mut write_half) = client.into_split();
+                            if let Err(err) = write_half.write_all(request.as_ref()).await {
+                                log::error!("udp send handshake failed:{}", err);
+                                let _ = write_half.shutdown().await;
                                 continue;
                             }
+
+                            let local = locals.get(&dst_addr).unwrap().clone();
+
+                            let (req_sender, req_receiver) = channel(buffer_size);
+                            req_senders.insert(src_addr, req_sender);
+                            spawn(local_to_remote(req_receiver, write_half));
+                            spawn(remote_to_local(
+                                read_half,
+                                local,
+                                src_addr,
+                                close_sender.clone(),
+                            ));
+                            req_senders.get(&src_addr).unwrap()
+                        } else {
+                            log::error!("{} connect to remote server failed", src_addr);
+                            continue;
                         }
-                    };
-                    let _ = remote.send((target, data)).await;
-                }
-                Err(err) => {
-                    log::info!("udp read from local failed:{}", err);
-                    break;
-                }
-            },
-            SelectResult::Receiver(ret) => {
-                if let Some(source) = ret {
-                    log::info!("udp source:{} remote closed", source);
-                    remotes.remove(&source);
+                    }
+                };
+                let _ = sender.send((dst_addr, data)).await;
+            }
+            DispatchReturn::Socket(ret) => {
+                let socket = ret.unwrap();
+                log::info!("add socket for {}", socket.peer_addr());
+                locals.insert(socket.peer_addr(), socket);
+            }
+            DispatchReturn::Close(ret) => {
+                let (addr, is_remote) = ret.unwrap();
+                log::info!("close {} {}", addr, is_remote);
+                if is_remote {
+                    req_senders.remove(&addr);
                 } else {
-                    log::error!("udp channel is closed");
+                    locals.remove(&addr);
                 }
+            }
+        }
+    }
+}
+
+pub async fn start_udp(
+    mut local: UdpSocket,
+    data_sender: Sender<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+    close_sender: Sender<(IpEndpoint, bool)>,
+) {
+    let target: IpEndpoint = local.peer_addr();
+    log::info!("start udp listening for {}", target);
+    loop {
+        match tokio::time::timeout(Duration::from_secs(120), local.recv_from()).await {
+            Ok(Ok((source, data))) => {
+                log::info!("receive {} bytes from {} to {}", data.len(), source, target);
+                let _ = data_sender.send((source, target, data)).await;
+            }
+            Err(_) | Ok(Err(_)) => {
+                log::info!("udp read from local failed");
+                break;
             }
         }
     }
     log::info!("udp socket:{} closed", target);
     local.close().await;
+    let _ = close_sender.send((target, false)).await;
 }
 
 async fn local_to_remote(
-    mut local: Receiver<(IpEndpoint, Vec<u8>)>,
+    mut receiver: Receiver<(IpEndpoint, Vec<u8>)>,
     mut remote: TlsClientWriteHalf,
 ) {
+    log::info!("local to remote started");
     let mut header = BytesMut::new();
-    while let Some((target, data)) = local.recv().await {
-        header.clear();
+    while let Some((target, data)) = receiver.recv().await {
+        log::info!("send {} bytes data to {}", data.len(), target);
         header.clear();
         UdpAssociate::generate_endpoint(&mut header, &target, data.len() as u16);
         if remote.write_all(header.as_ref()).await.is_err()
@@ -128,33 +154,25 @@ async fn local_to_remote(
             break;
         }
     }
-    local.close();
     let _ = remote.shutdown().await;
+    log::error!("remote shutdown now");
 }
 
-pub async fn remote_to_local(
+async fn remote_to_local(
     mut remote: TlsClientReadHalf,
-    local: UdpWriteHalf,
-    target: IpEndpoint,
+    local: Arc<UdpWriteHalf>,
     source: IpEndpoint,
-    sender: Sender<IpEndpoint>,
+    sender: Sender<(IpEndpoint, bool)>,
 ) {
+    log::info!("remote to local started");
     let mut buffer = BytesMut::new();
     'main: loop {
-        let timeout = tokio::time::sleep(Duration::from_secs(120));
-        tokio::select! {
-            _ = timeout => {
+        match tokio::time::timeout(Duration::from_secs(120), remote.read_buf(&mut buffer)).await {
+            Ok(Ok(0)) | Err(_) | Ok(Err(_)) => {
+                log::error!("{} read from remote failed", source);
                 break;
             }
-            ret = remote.read_buf(&mut buffer) => {
-                match ret {
-                    Err(_) | Ok(0) => {
-                        break;
-                    }
-                    Ok(_) => {
-                    }
-                }
-            }
+            _ => {}
         }
 
         loop {
@@ -165,23 +183,24 @@ pub async fn remote_to_local(
                 }
                 UdpParseResultEndpoint::Packet(packet) => {
                     let payload = &packet.payload[..packet.length];
-                    let _ = local.send_to(payload, target).await;
+                    let _ = local.send_to(payload, source).await;
                     log::info!(
                         "{} - {} get one packet with size:{}",
                         packet.endpoint,
-                        target,
+                        source,
                         payload.len()
                     );
                     buffer.advance(packet.offset);
                 }
                 UdpParseResultEndpoint::InvalidProtocol => {
-                    log::error!("invalid protocol for {} - {}", target, source);
+                    log::error!("invalid protocol for {}", source);
                     break 'main;
                 }
             }
         }
     }
-    if let Err(err) = sender.send(target).await {
+
+    if let Err(err) = sender.send((source, true)).await {
         log::error!("udp channel send failed:{}", err);
     }
 }
