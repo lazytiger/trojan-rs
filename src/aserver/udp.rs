@@ -56,8 +56,16 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
         )
         .await
         {
-            Ok(Ok(0)) | Err(_) | Ok(Err(_)) => {
-                log::warn!("read from source failed");
+            Ok(Ok(0)) => {
+                log::error!("read from source with 0 bytes");
+                break;
+            }
+            Ok(Err(err)) => {
+                log::error!("read from source failed:{}", err);
+                break;
+            }
+            Err(err) => {
+                log::error!("read timeout after {}", err);
                 break;
             }
             Ok(Ok(_)) => {}
