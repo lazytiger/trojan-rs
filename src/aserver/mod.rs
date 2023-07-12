@@ -59,45 +59,54 @@ async fn start_proxy(
     let mut buffer = BytesMut::new();
     let now = Instant::now();
     let ret = loop {
-        if let Ok(Ok(n)) = timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
-            if n == 0 {
+        match timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
+            Ok(Ok(0)) => {
+                log::error!("source:{} shutdown connection", src_addr);
                 break None;
             }
-            log::info!("read {} bytes from client {}", n, src_addr);
-            match TrojanRequest::parse(buffer.as_ref()) {
-                RequestParseResult::PassThrough => {
-                    break Some((CONNECT, *OPTIONS.back_addr.as_ref().unwrap()));
-                }
-                RequestParseResult::Request(request) => {
-                    let offset = request.offset;
-                    let cmd = request.command;
-                    let address = request.address;
-                    buffer.advance(offset);
-                    break Some((
-                        cmd,
-                        match address {
-                            Sock5Address::Socket(addr) => addr,
-                            Sock5Address::Domain(domain, port) => {
-                                let ip = *dns_lookup::lookup_host(domain.as_str())?
-                                    .get(0)
-                                    .ok_or(TrojanError::Resolve)?;
-                                SocketAddr::new(ip, port)
-                            }
-                            Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
-                            _ => unreachable!(),
-                        },
-                    ));
-                }
-                RequestParseResult::InvalidProtocol => {
-                    log::error!("invalid protocol from {}", src_addr);
-                    break None;
-                }
-                RequestParseResult::Continue => {
-                    log::info!("incomplete trojan request, continue");
-                }
-            };
-        } else {
-            break None;
+            Ok(Ok(n)) => {
+                log::info!("read {} bytes from client {}", n, src_addr);
+                match TrojanRequest::parse(buffer.as_ref()) {
+                    RequestParseResult::PassThrough => {
+                        break Some((CONNECT, *OPTIONS.back_addr.as_ref().unwrap()));
+                    }
+                    RequestParseResult::Request(request) => {
+                        let offset = request.offset;
+                        let cmd = request.command;
+                        let address = request.address;
+                        buffer.advance(offset);
+                        break Some((
+                            cmd,
+                            match address {
+                                Sock5Address::Socket(addr) => addr,
+                                Sock5Address::Domain(domain, port) => {
+                                    let ip = *dns_lookup::lookup_host(domain.as_str())?
+                                        .get(0)
+                                        .ok_or(TrojanError::Resolve)?;
+                                    SocketAddr::new(ip, port)
+                                }
+                                Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
+                                _ => unreachable!(),
+                            },
+                        ));
+                    }
+                    RequestParseResult::InvalidProtocol => {
+                        log::error!("invalid protocol from {}", src_addr);
+                        break None;
+                    }
+                    RequestParseResult::Continue => {
+                        log::info!("incomplete trojan request, continue");
+                    }
+                };
+            }
+            Ok(Err(err)) => {
+                log::error!("read from source:{} failed with {}", src_addr, err);
+                break None;
+            }
+            Err(err) => {
+                log::error!("read from source:{} timeout {}", src_addr, err);
+                break None;
+            }
         }
     };
     if ret.is_none() {

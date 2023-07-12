@@ -23,6 +23,7 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
     let (mut source, source_write) = source.into_split();
     let (sender, receiver) = channel(1024);
     spawn(target_to_source(target.clone(), source_write, receiver));
+    let mut count = 0;
     'main: loop {
         loop {
             match UdpAssociate::parse(buffer.as_ref()) {
@@ -39,6 +40,7 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
                         break 'main;
                     }
                     buffer.advance(packet.offset);
+                    count += 1;
                 }
                 UdpParseResult::InvalidProtocol => {
                     log::error!("invalid protocol from {:?}", src_addr);
@@ -71,7 +73,7 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
             Ok(Ok(_)) => {}
         }
     }
-    log::info!("udp read from proxy exit");
+    log::error!("udp read from proxy exit after {} packets", count);
     Ok(())
 }
 
