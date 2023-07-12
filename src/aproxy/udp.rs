@@ -107,16 +107,8 @@ pub async fn run_udp(
                 };
                 header.clear();
                 UdpAssociate::generate(&mut header, &dst_addr, size as u16);
-                if remote.write_all(header.as_ref()).await.is_err()
-                    || remote
-                        .write_all(&recv_buffer.as_slice()[..size])
-                        .await
-                        .is_err()
-                {
-                    log::error!("send request to remote failed");
-                    let _ = remote.shutdown().await;
-                    remotes.remove(&src_addr);
-                }
+                let _ = remote.write_all(header.as_ref()).await;
+                let _ = remote.write_all(&recv_buffer.as_slice()[..size]).await;
 
                 if last_check.elapsed().as_secs() > 3600 {
                     let addrs: Vec<_> = locals

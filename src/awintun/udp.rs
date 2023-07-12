@@ -35,7 +35,7 @@ pub async fn start_udp(
     log::info!("start udp listening for {}", target);
     let mut remotes = HashMap::new();
     let mut header = BytesMut::new();
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(1024);
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
     loop {
         let ret = tokio::select! {
             ret = local.recv_from() => {
@@ -86,6 +86,7 @@ pub async fn start_udp(
                                 remotes.insert(source, write_half);
                                 remotes.get_mut(&source).unwrap()
                             } else {
+                                log::error!("connect to remote server failed, ignore udp packet");
                                 continue;
                             }
                         }
