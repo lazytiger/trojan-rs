@@ -252,7 +252,7 @@ fn parse_address_endpoint(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Addres
             Some((18, Sock5Address::Endpoint(endpoint)))
         }
         _ => {
-            log::warn!("unknown protocol, invalid address type:{}", atyp);
+            log::error!("unknown protocol, invalid address type:{}", atyp);
             None
         }
     }
