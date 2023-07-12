@@ -54,7 +54,11 @@ impl<'a> TrojanRequest<'a> {
                 "data length:{} is too short for a trojan request",
                 buffer.len()
             );
-            return RequestParseResult::Continue;
+            return if String::from_utf8_lossy(buffer).contains("HTTP") {
+                RequestParseResult::PassThrough
+            } else {
+                RequestParseResult::Continue
+            };
         }
 
         let pass = String::from_utf8_lossy(&buffer[..OPTIONS.pass_len]);
