@@ -14,7 +14,7 @@ pub const PING: u8 = 0x2;
 /// protocol code for UDP_ASSOCIATE command
 pub const UDP_ASSOCIATE: u8 = 0x03;
 /// max packet size for udp, MTU = 1500 minus IP head size
-pub const MAX_PACKET_SIZE: usize = 1450;
+pub const MAX_PACKET_SIZE: usize = 1480;
 /// protocol code for IPV4 type
 pub const IPV4: u8 = 0x01;
 /// protocol code for DOMAIN type

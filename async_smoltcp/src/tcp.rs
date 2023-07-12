@@ -1,5 +1,5 @@
 use std::{
-    io::Error,
+    io::{Error, ErrorKind},
     net::SocketAddr,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -82,6 +82,14 @@ impl AsyncRead for TcpReadHalf {
     ) -> Poll<std::io::Result<()>> {
         let pin = self.get_mut();
         if let Some(data) = ready!(pin.receiver.poll_recv(cx)) {
+            if data.len() > buf.initialize_unfilled().len() {
+                log::error!(
+                    "received {} bytes, but available space is {}",
+                    data.len(),
+                    buf.initialize_unfilled().len()
+                );
+                return Poll::Ready(Err(ErrorKind::OutOfMemory.into()));
+            }
             let _ = &buf.initialize_unfilled()[..data.len()].copy_from_slice(data.as_slice());
             buf.set_filled(buf.filled().len() + data.len());
         }
