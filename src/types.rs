@@ -32,6 +32,7 @@ pub enum TrojanError {
     TokioSendIpAddr(tokio::sync::mpsc::error::SendError<IpAddr>),
     #[from(ignore)]
     Resolve,
+    Elapsed(tokio::time::error::Elapsed),
 }
 
 unsafe impl Send for TrojanError {}

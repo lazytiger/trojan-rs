@@ -40,14 +40,21 @@ pub struct TrojanRequest<'a> {
     pub offset: usize,
 }
 
+pub enum RequestParseResult<'a> {
+    Request(TrojanRequest<'a>),
+    InvalidProtocol,
+    PassThrough,
+    Continue,
+}
+
 impl<'a> TrojanRequest<'a> {
-    pub fn parse(mut buffer: &'a [u8]) -> Option<TrojanRequest<'a>> {
+    pub fn parse(mut buffer: &'a [u8]) -> RequestParseResult<'a> {
         if buffer.len() < OPTIONS.pass_len {
             log::debug!(
                 "data length:{} is too short for a trojan request",
                 buffer.len()
             );
-            return None;
+            return RequestParseResult::Continue;
         }
 
         let pass = String::from_utf8_lossy(&buffer[..OPTIONS.pass_len]);
@@ -55,54 +62,59 @@ impl<'a> TrojanRequest<'a> {
             log::debug!("request using password:{}", &orig);
         } else {
             log::debug!("request didn't find matched password");
-            return None;
+            return RequestParseResult::PassThrough;
         }
 
         buffer = &buffer[OPTIONS.pass_len..];
         let mut offset = OPTIONS.pass_len;
-        if buffer.len() < 2 || buffer[0] != b'\r' || buffer[1] != b'\n' {
+        if buffer.len() < 2 {
+            return RequestParseResult::Continue;
+        }
+        if buffer[0] != b'\r' || buffer[1] != b'\n' {
             log::error!(
                 "unknown protocol, expected CRLF, {:#X}{:#X}",
                 buffer[0],
                 buffer[1]
             );
-            return None;
+            return RequestParseResult::InvalidProtocol;
         }
 
         buffer = &buffer[2..];
         offset += 2;
         if buffer.len() < 3 {
             log::error!("unknown protocol, invalid size");
-            return None;
+            return RequestParseResult::Continue;
         }
         if buffer[0] != CONNECT && buffer[0] != UDP_ASSOCIATE && buffer[0] != PING {
             log::error!(
                 "unknown protocol, expected valid command, found:{}",
                 buffer[0]
             );
-            return None;
+            return RequestParseResult::InvalidProtocol;
         }
 
         let command = buffer[0];
         let atyp = buffer[1];
         buffer = &buffer[2..];
         offset += 2;
-        if let Some((size, address)) = parse_address(atyp, buffer) {
-            buffer = &buffer[size..];
-            offset += size;
-            if buffer[0] != b'\r' || buffer[1] != b'\n' {
-                log::error!("unknown protocol, expected CRLF after address");
-                return None;
+        match parse_address(atyp, buffer) {
+            AddressParseResult::Continue => RequestParseResult::Continue,
+            AddressParseResult::Address((size, address)) => {
+                buffer = &buffer[size..];
+                offset += size;
+                if buffer[0] != b'\r' || buffer[1] != b'\n' {
+                    log::error!("unknown protocol, expected CRLF after address");
+                    return RequestParseResult::InvalidProtocol;
+                }
+                offset += 2;
+                RequestParseResult::Request(TrojanRequest {
+                    command,
+                    offset,
+                    address,
+                    payload: &buffer[2..],
+                })
             }
-            offset += 2;
-            Some(TrojanRequest {
-                command,
-                offset,
-                address,
-                payload: &buffer[2..],
-            })
-        } else {
-            None
+            AddressParseResult::InvalidProtocol => RequestParseResult::InvalidProtocol,
         }
     }
 
@@ -128,42 +140,48 @@ impl<'a> TrojanRequest<'a> {
     }
 }
 
-fn parse_address(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Address)> {
+enum AddressParseResult {
+    Address((usize, Sock5Address)),
+    InvalidProtocol,
+    Continue,
+}
+
+fn parse_address(atyp: u8, buffer: &[u8]) -> AddressParseResult {
     match atyp {
         IPV4 => {
             log::debug!("ipv4 address found");
             if buffer.len() < 6 {
-                log::error!("unknown protocol, invalid ipv4 address");
-                return None;
+                return AddressParseResult::Continue;
             }
             let port = to_u16(&buffer[4..]);
             let addr = SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(buffer[0], buffer[1], buffer[2], buffer[3]),
                 port,
             ));
-            Some((6, Sock5Address::Socket(addr)))
+            AddressParseResult::Address((6, Sock5Address::Socket(addr)))
         }
         DOMAIN => {
             log::debug!("domain address found");
             let length = buffer[0] as usize;
             if buffer.len() < length + 3 {
-                log::error!("unknown protocol, invalid domain address");
-                return None;
+                return AddressParseResult::Continue;
             }
             let domain: String = String::from_utf8_lossy(&buffer[1..length + 1]).into();
             let port = to_u16(&buffer[length + 1..]);
             if let Ok(ip) = domain.parse::<IpAddr>() {
-                Some((length + 3, Sock5Address::Socket(SocketAddr::new(ip, port))))
+                AddressParseResult::Address((
+                    length + 3,
+                    Sock5Address::Socket(SocketAddr::new(ip, port)),
+                ))
             } else {
                 log::debug!("domain found:{}:{}", domain, port);
-                Some((length + 3, Sock5Address::Domain(domain, port)))
+                AddressParseResult::Address((length + 3, Sock5Address::Domain(domain, port)))
             }
         }
         IPV6 => {
             log::debug!("ipv6 address found");
             if buffer.len() < 18 {
-                log::error!("unknown protocol, invalid ipv6 address");
-                return None;
+                return AddressParseResult::Continue;
             }
             let addr = SocketAddr::V6(SocketAddrV6::new(
                 Ipv6Addr::new(
@@ -180,11 +198,11 @@ fn parse_address(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Address)> {
                 0,
                 0,
             ));
-            Some((18, Sock5Address::Socket(addr)))
+            AddressParseResult::Address((18, Sock5Address::Socket(addr)))
         }
         _ => {
             log::error!("unknown protocol, invalid address type:{}", atyp);
-            None
+            AddressParseResult::InvalidProtocol
         }
     }
 }
@@ -275,39 +293,41 @@ impl<'a> UdpAssociate<'a> {
         let atyp = buffer[0];
         buffer = &buffer[1..];
         let mut offset = 1;
-        if let Some((size, addr)) = parse_address(atyp, buffer) {
-            buffer = &buffer[size..];
-            offset += size;
-            if buffer.len() < 4 {
-                return UdpParseResult::Continued;
-            }
-            let length = to_u16(buffer) as usize;
-            if length > MAX_PACKET_SIZE {
-                log::error!("udp packet size:{} is too long", length);
-                return UdpParseResult::InvalidProtocol;
-            }
-            if buffer.len() < length + 4 {
-                return UdpParseResult::Continued;
-            }
-            if buffer[2] != b'\r' || buffer[3] != b'\n' {
-                log::error!("udp packet expected CRLF after length");
-                return UdpParseResult::InvalidProtocol;
-            }
-            offset += 4 + length;
-            match addr {
-                Sock5Address::Socket(address) => UdpParseResult::Packet(UdpAssociate {
-                    address,
-                    length,
-                    offset,
-                    payload: &buffer[4..],
-                }),
-                _ => {
-                    log::error!("udp packet only accept ip address");
-                    UdpParseResult::InvalidProtocol
+        match parse_address(atyp, buffer) {
+            AddressParseResult::Address((size, addr)) => {
+                buffer = &buffer[size..];
+                offset += size;
+                if buffer.len() < 4 {
+                    return UdpParseResult::Continued;
+                }
+                let length = to_u16(buffer) as usize;
+                if length > MAX_PACKET_SIZE {
+                    log::error!("udp packet size:{} is too long", length);
+                    return UdpParseResult::InvalidProtocol;
+                }
+                if buffer.len() < length + 4 {
+                    return UdpParseResult::Continued;
+                }
+                if buffer[2] != b'\r' || buffer[3] != b'\n' {
+                    log::error!("udp packet expected CRLF after length");
+                    return UdpParseResult::InvalidProtocol;
+                }
+                offset += 4 + length;
+                match addr {
+                    Sock5Address::Socket(address) => UdpParseResult::Packet(UdpAssociate {
+                        address,
+                        length,
+                        offset,
+                        payload: &buffer[4..],
+                    }),
+                    _ => {
+                        log::error!("udp packet only accept ip address");
+                        UdpParseResult::InvalidProtocol
+                    }
                 }
             }
-        } else {
-            UdpParseResult::InvalidProtocol
+            AddressParseResult::InvalidProtocol => UdpParseResult::InvalidProtocol,
+            AddressParseResult::Continue => UdpParseResult::Continued,
         }
     }
 

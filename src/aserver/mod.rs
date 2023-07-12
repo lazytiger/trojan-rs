@@ -13,6 +13,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedSender},
     time::timeout,
 };
+
 use tokio_rustls::TlsServerStream;
 
 use crate::{
@@ -22,7 +23,7 @@ use crate::{
         udp::start_udp,
     },
     config::OPTIONS,
-    proto::{Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
+    proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     server::{init_config, ping_backend::PingResult},
     types::{Result, TrojanError},
 };
@@ -43,6 +44,7 @@ async fn async_run() -> Result<()> {
     spawn(start_check_routine(req_receiver));
     loop {
         let (client, src_addr) = listener.accept().await?;
+        log::info!("accept {}", src_addr);
         let session = ServerConnection::new(config.clone())?;
         let conn = TlsServerStream::new(client, session, 4096);
         spawn(start_proxy(conn, req_sender.clone(), src_addr));
@@ -55,40 +57,52 @@ async fn start_proxy(
     src_addr: SocketAddr,
 ) -> Result<()> {
     let mut buffer = BytesMut::new();
-    if let Ok(Ok(_)) = timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
-        let (cmd, target_addr) = match TrojanRequest::parse(buffer.as_ref()) {
-            None => (CONNECT, *OPTIONS.back_addr.as_ref().unwrap()),
-            Some(request) => {
-                let offset = request.offset;
-                let cmd = request.command;
-                let address = request.address;
-                buffer.advance(offset);
-                (
-                    cmd,
-                    match address {
-                        Sock5Address::Socket(addr) => addr,
-                        Sock5Address::Domain(domain, port) => {
-                            let ip = *dns_lookup::lookup_host(domain.as_str())?
-                                .get(0)
-                                .ok_or(TrojanError::Resolve)?;
-                            SocketAddr::new(ip, port)
-                        }
-                        Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
-                        _ => unreachable!(),
-                    },
-                )
+    let (cmd, target_addr) = loop {
+        if let Ok(Ok(n)) = timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
+            if n == 0 {
+                log::error!("read request header failed");
+                return Ok(());
             }
-        };
-        log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
-        match cmd {
-            CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
-            UDP_ASSOCIATE => start_udp(conn, buffer).await,
-            PING => start_ping(conn, buffer, sender.clone()).await,
-            _ => {
-                unreachable!()
-            }
+            log::info!("read {} bytes from client {}", n, src_addr);
+            match TrojanRequest::parse(buffer.as_ref()) {
+                RequestParseResult::PassThrough => {
+                    break (CONNECT, *OPTIONS.back_addr.as_ref().unwrap());
+                }
+                RequestParseResult::Request(request) => {
+                    let offset = request.offset;
+                    let cmd = request.command;
+                    let address = request.address;
+                    buffer.advance(offset);
+                    break (
+                        cmd,
+                        match address {
+                            Sock5Address::Socket(addr) => addr,
+                            Sock5Address::Domain(domain, port) => {
+                                let ip = *dns_lookup::lookup_host(domain.as_str())?
+                                    .get(0)
+                                    .ok_or(TrojanError::Resolve)?;
+                                SocketAddr::new(ip, port)
+                            }
+                            Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
+                            _ => unreachable!(),
+                        },
+                    );
+                }
+                RequestParseResult::InvalidProtocol => return Ok(()),
+                RequestParseResult::Continue => {
+                    log::info!("incomplete trojan request, continue");
+                }
+            };
         }
-    } else {
-        Ok(())
+    };
+
+    log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
+    match cmd {
+        CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
+        UDP_ASSOCIATE => start_udp(conn, buffer).await,
+        PING => start_ping(conn, buffer, sender.clone()).await,
+        _ => {
+            unreachable!()
+        }
     }
 }

@@ -12,7 +12,7 @@ use mio::{
 use crate::{
     config::OPTIONS,
     proto,
-    proto::{Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
+    proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     resolver::DnsResolver,
     server::{
         ping_backend::PingBackend,
@@ -227,7 +227,7 @@ impl Connection {
     }
 
     fn try_handshake(&mut self, buffer: &mut &[u8], resolver: &mut &mut DnsResolver) -> bool {
-        if let Some(request) = TrojanRequest::parse(buffer) {
+        if let RequestParseResult::Request(request) = TrojanRequest::parse(buffer) {
             self.command = request.command;
             self.sock5_addr = request.address;
             *buffer = request.payload;
