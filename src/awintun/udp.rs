@@ -31,7 +31,7 @@ pub async fn start_udp(
     buffer_size: usize,
     request: Arc<BytesMut>,
 ) {
-    let target = local.peer_addr().into();
+    let target: IpEndpoint = local.peer_addr().into();
     log::info!("start udp listening for {}", target);
     let mut remotes = HashMap::new();
     let mut header = BytesMut::new();
@@ -80,6 +80,7 @@ pub async fn start_udp(
                                     read_half,
                                     local.writer(),
                                     source,
+                                    target.into(),
                                     sender.clone(),
                                 ));
                                 remotes.insert(source, write_half);
@@ -90,7 +91,7 @@ pub async fn start_udp(
                         }
                     };
                     header.clear();
-                    UdpAssociate::generate(&mut header, &target, data.len() as u16);
+                    UdpAssociate::generate_endpoint(&mut header, &target, data.len() as u16);
                     let _ = remote.write_all(header.as_ref()).await;
                     let _ = remote.write_all(data.as_slice()).await;
                 }
@@ -120,6 +121,7 @@ pub async fn remote_to_local(
     mut remote: TlsClientReadHalf,
     local: UdpWriteHalf,
     target: IpEndpoint,
+    source: IpEndpoint,
     sender: Sender<IpEndpoint>,
 ) {
     let mut buffer = BytesMut::new();
@@ -132,7 +134,6 @@ pub async fn remote_to_local(
             ret = remote.read_buf(&mut buffer) => {
                 match ret {
                     Err(_) | Ok(0) => {
-                        //log::error!("udp read from remote failed");
                         break;
                     }
                     Ok(_) => {
@@ -159,7 +160,7 @@ pub async fn remote_to_local(
                     buffer.advance(packet.offset);
                 }
                 UdpParseResultEndpoint::InvalidProtocol => {
-                    log::info!("invalid protocol close now");
+                    log::error!("invalid protocol for {} - {}", target, source);
                     break 'main;
                 }
             }

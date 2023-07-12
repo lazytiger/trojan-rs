@@ -57,24 +57,22 @@ async fn start_proxy(
     src_addr: SocketAddr,
 ) -> Result<()> {
     let mut buffer = BytesMut::new();
-    let (cmd, target_addr) = loop {
+    let ret = loop {
         if let Ok(Ok(n)) = timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
             if n == 0 {
-                log::error!("read request header from {} failed", src_addr);
-                let _ = conn.shutdown().await;
-                return Ok(());
+                break None;
             }
             log::info!("read {} bytes from client {}", n, src_addr);
             match TrojanRequest::parse(buffer.as_ref()) {
                 RequestParseResult::PassThrough => {
-                    break (CONNECT, *OPTIONS.back_addr.as_ref().unwrap());
+                    break Some((CONNECT, *OPTIONS.back_addr.as_ref().unwrap()));
                 }
                 RequestParseResult::Request(request) => {
                     let offset = request.offset;
                     let cmd = request.command;
                     let address = request.address;
                     buffer.advance(offset);
-                    break (
+                    break Some((
                         cmd,
                         match address {
                             Sock5Address::Socket(addr) => addr,
@@ -87,19 +85,26 @@ async fn start_proxy(
                             Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
                             _ => unreachable!(),
                         },
-                    );
+                    ));
                 }
                 RequestParseResult::InvalidProtocol => {
                     log::error!("invalid protocol from {}", src_addr);
-                    let _ = conn.shutdown().await;
-                    return Ok(());
+                    break None;
                 }
                 RequestParseResult::Continue => {
                     log::info!("incomplete trojan request, continue");
                 }
             };
+        } else {
+            break None;
         }
     };
+    if ret.is_none() {
+        log::error!("read request from {} failed", src_addr);
+        let _ = conn.shutdown().await;
+        return Ok(());
+    }
+    let (cmd, target_addr) = ret.unwrap();
 
     log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
     match cmd {

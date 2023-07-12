@@ -239,3 +239,17 @@ where
         Pin::new(&mut pin.stream).poll_shutdown(cx)
     }
 }
+
+mod test {
+    #[test]
+    fn test_bytes() {
+        use bytes::{BufMut, BytesMut};
+        use std::io::Write;
+        let mut buffer = BytesMut::new();
+        buffer.extend_from_slice(b"hello, world.");
+        let mut writer = buffer.split().writer();
+        writer.write_all(b"world, hello.").unwrap();
+        buffer.unsplit(writer.into_inner());
+        println!("{}", String::from_utf8_lossy(buffer.as_ref()));
+    }
+}
