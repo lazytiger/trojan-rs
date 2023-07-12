@@ -286,7 +286,7 @@ pub enum UdpParseResultEndpoint<'a> {
 
 impl<'a> UdpAssociate<'a> {
     pub fn parse(mut buffer: &'a [u8]) -> UdpParseResult<'a> {
-        if buffer.len() < 11 {
+        if buffer.len() < 1 {
             log::debug!("data is too short for UDP_ASSOCIATE");
             return UdpParseResult::Continued;
         }

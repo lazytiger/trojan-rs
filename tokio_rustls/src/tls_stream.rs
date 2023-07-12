@@ -1,6 +1,7 @@
 use std::{
     io::{Error, ErrorKind, Read, Write},
     marker::PhantomData,
+    net::SocketAddr,
     ops::DerefMut,
     pin::Pin,
     sync::Arc,
@@ -112,6 +113,10 @@ where
             send_buf: BytesMut::new(),
             _phantom: Default::default(),
         }
+    }
+
+    pub fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+        self.stream.peer_addr()
     }
 
     pub fn into_split(self) -> (TlsReadHalf<T, D>, TlsWriteHalf<T, D>) {

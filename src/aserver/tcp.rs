@@ -103,6 +103,6 @@ async fn copy<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
             break;
         }
     }
-    log::error!("{} read failed", message);
+    log::warn!("{} read failed", message);
     let _ = write.shutdown().await;
 }

@@ -18,6 +18,7 @@ use crate::{
 };
 
 pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<()> {
+    let src_addr = source.peer_addr();
     let target = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let (mut source, source_write) = source.into_split();
     let (sender, receiver) = channel(1024);
@@ -40,6 +41,7 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
                     buffer.advance(packet.offset);
                 }
                 UdpParseResult::InvalidProtocol => {
+                    log::error!("invalid protocol from {:?}", src_addr);
                     break 'main;
                 }
                 UdpParseResult::Continued => {
