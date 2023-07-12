@@ -6,11 +6,11 @@ use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     spawn,
-    sync::mpsc::Sender,
+    sync::mpsc::{channel, Receiver, Sender},
 };
 
 use async_smoltcp::{UdpSocket, UdpWriteHalf};
-use tokio_rustls::TlsClientReadHalf;
+use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
 
 use crate::{
     awintun::init_tls_conn,
@@ -34,7 +34,6 @@ pub async fn start_udp(
     let target: IpEndpoint = local.peer_addr().into();
     log::info!("start udp listening for {}", target);
     let mut remotes = HashMap::new();
-    let mut header = BytesMut::new();
     let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer_size);
     loop {
         let ret = tokio::select! {
@@ -58,8 +57,8 @@ pub async fn start_udp(
             SelectResult::Socket(ret) => match ret {
                 Ok((source, data)) => {
                     log::info!("receive {} bytes from {} to {}", data.len(), source, target);
-                    let remote = match remotes.get_mut(&source) {
-                        Some(write_half) => write_half,
+                    let remote = match remotes.get(&source) {
+                        Some(sender) => sender,
                         None => {
                             if let Ok(client) = init_tls_conn(
                                 config.clone(),
@@ -76,6 +75,8 @@ pub async fn start_udp(
                                     continue;
                                 }
 
+                                let (req_sender, req_receiver) = channel(buffer_size);
+                                spawn(local_to_remote(req_receiver, write_half));
                                 spawn(remote_to_local(
                                     read_half,
                                     local.writer(),
@@ -83,18 +84,15 @@ pub async fn start_udp(
                                     target.into(),
                                     sender.clone(),
                                 ));
-                                remotes.insert(source, write_half);
-                                remotes.get_mut(&source).unwrap()
+                                remotes.insert(source, req_sender);
+                                remotes.get(&source).unwrap()
                             } else {
                                 log::error!("connect to remote server failed, ignore udp packet");
                                 continue;
                             }
                         }
                     };
-                    header.clear();
-                    UdpAssociate::generate_endpoint(&mut header, &target, data.len() as u16);
-                    let _ = remote.write_all(header.as_ref()).await;
-                    let _ = remote.write_all(data.as_slice()).await;
+                    let _ = remote.send((target, data)).await;
                 }
                 Err(err) => {
                     log::info!("udp read from local failed:{}", err);
@@ -104,10 +102,7 @@ pub async fn start_udp(
             SelectResult::Receiver(ret) => {
                 if let Some(source) = ret {
                     log::info!("udp source:{} remote closed", source);
-                    if let Some(remote) = remotes.get_mut(&source) {
-                        let _ = remote.shutdown().await;
-                        remotes.remove(&source);
-                    }
+                    remotes.remove(&source);
                 } else {
                     log::error!("udp channel is closed");
                 }
@@ -116,6 +111,25 @@ pub async fn start_udp(
     }
     log::info!("udp socket:{} closed", target);
     local.close().await;
+}
+
+async fn local_to_remote(
+    mut local: Receiver<(IpEndpoint, Vec<u8>)>,
+    mut remote: TlsClientWriteHalf,
+) {
+    let mut header = BytesMut::new();
+    while let Some((target, data)) = local.recv().await {
+        header.clear();
+        header.clear();
+        UdpAssociate::generate_endpoint(&mut header, &target, data.len() as u16);
+        if remote.write_all(header.as_ref()).await.is_err()
+            || remote.write_all(data.as_slice()).await.is_err()
+        {
+            break;
+        }
+    }
+    local.close();
+    let _ = remote.shutdown().await;
 }
 
 pub async fn remote_to_local(

@@ -93,7 +93,7 @@ async fn copy<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
         {
             if n > 0 {
                 if let Err(err) = write.write_all(&buffer.as_slice()[..n]).await {
-                    log::error!("{} write failed:{}", message, err);
+                    log::warn!("{} write failed:{}", message, err);
                     break;
                 }
             } else {

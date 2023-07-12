@@ -13,7 +13,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
     spawn,
-    sync::mpsc::{channel, Sender, UnboundedSender},
+    sync::mpsc::{channel, Receiver, Sender, UnboundedSender},
 };
 
 use tokio_rustls::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf};
@@ -37,13 +37,11 @@ pub async fn run_udp(
     config: Arc<ClientConfig>,
     profiler_sender: Option<UnboundedSender<IpAddr>>,
 ) -> Result<()> {
-    let mut recv_buffer = vec![0u8; 1500];
-    let mut remotes: HashMap<SocketAddr, TlsClientWriteHalf> = HashMap::new();
+    let mut remotes = HashMap::new();
     let mut locals = HashMap::new();
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let mut request = BytesMut::new();
     TrojanRequest::generate(&mut request, UDP_ASSOCIATE, &empty);
-    let mut header = BytesMut::new();
     let last_check = Instant::now();
     let (sender, mut receiver) = channel(1024);
     loop {
@@ -58,6 +56,7 @@ pub async fn run_udp(
         match ret {
             SelectResult::Listener(ret) => {
                 ret?;
+                let mut recv_buffer = vec![0u8; 1500];
                 let (size, src_addr, dst_addr) =
                     match sys::recv_from_with_destination(&listener, recv_buffer.as_mut_slice()) {
                         Ok(ret) => ret,
@@ -67,6 +66,9 @@ pub async fn run_udp(
                         }
                         Err(err) => return Err(err.into()),
                     };
+                unsafe {
+                    recv_buffer.set_len(size);
+                }
                 log::info!(
                     "receive {} bytes data from {} to {}",
                     size,
@@ -76,7 +78,7 @@ pub async fn run_udp(
                 if let Some(ref sender) = profiler_sender {
                     sender.send(dst_addr.ip())?;
                 }
-                let remote = match remotes.get_mut(&src_addr) {
+                let remote = match remotes.get(&src_addr) {
                     Some(ret) => ret,
                     None => {
                         log::info!("remote not found for {}", src_addr);
@@ -95,20 +97,19 @@ pub async fn run_udp(
                             Arc::new(local)
                         });
                         let (read_half, write_half) = remote.into_split();
+                        let (req_sender, req_receiver) = channel(1024);
+                        spawn(local_to_remote(req_receiver, write_half));
                         spawn(remote_to_local(
                             read_half,
                             local.clone(),
                             src_addr,
                             sender.clone(),
                         ));
-                        remotes.insert(src_addr, write_half);
-                        remotes.get_mut(&src_addr).unwrap()
+                        remotes.insert(src_addr, req_sender);
+                        remotes.get(&src_addr).unwrap()
                     }
                 };
-                header.clear();
-                UdpAssociate::generate(&mut header, &dst_addr, size as u16);
-                let _ = remote.write_all(header.as_ref()).await;
-                let _ = remote.write_all(&recv_buffer.as_slice()[..size]).await;
+                let _ = remote.send((dst_addr, recv_buffer)).await;
 
                 if last_check.elapsed().as_secs() > 3600 {
                     let addrs: Vec<_> = locals
@@ -129,14 +130,29 @@ pub async fn run_udp(
             }
             SelectResult::Receiver(ret) => {
                 let src_addr = ret.unwrap();
-                if let Some(remote) = remotes.get_mut(&src_addr) {
-                    log::info!("remote closed for {}", src_addr);
-                    let _ = remote.shutdown().await;
-                    remotes.remove(&src_addr);
-                }
+                remotes.remove(&src_addr);
             }
         }
     }
+}
+
+async fn local_to_remote(
+    mut local: Receiver<(SocketAddr, Vec<u8>)>,
+    mut remote: TlsClientWriteHalf,
+) {
+    let mut header = BytesMut::new();
+    while let Some((target, data)) = local.recv().await {
+        header.clear();
+        header.clear();
+        UdpAssociate::generate(&mut header, &target, data.len() as u16);
+        if remote.write_all(header.as_ref()).await.is_err()
+            || remote.write_all(data.as_slice()).await.is_err()
+        {
+            break;
+        }
+    }
+    local.close();
+    let _ = remote.shutdown().await;
 }
 
 async fn remote_to_local(
