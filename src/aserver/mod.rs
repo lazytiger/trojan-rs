@@ -89,7 +89,11 @@ async fn start_proxy(
                         },
                     );
                 }
-                RequestParseResult::InvalidProtocol => return Ok(()),
+                RequestParseResult::InvalidProtocol => {
+                    log::error!("invalid protocol from {}", src_addr);
+                    let _ = conn.shutdown().await;
+                    return Ok(());
+                }
                 RequestParseResult::Continue => {
                     log::info!("incomplete trojan request, continue");
                 }
