@@ -105,7 +105,7 @@ async fn start_proxy(
         log::error!(
             "read request from {} failed with {} bytes after {} ms",
             src_addr,
-            buffer.len()
+            buffer.len(),
             time
         );
         let _ = conn.shutdown().await;
