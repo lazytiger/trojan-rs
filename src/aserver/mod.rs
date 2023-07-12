@@ -6,7 +6,7 @@ use std::{
 use bytes::{Buf, BytesMut};
 use rustls::ServerConnection;
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     runtime::Runtime,
     spawn,
@@ -60,7 +60,8 @@ async fn start_proxy(
     let (cmd, target_addr) = loop {
         if let Ok(Ok(n)) = timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
             if n == 0 {
-                log::error!("read request header failed");
+                log::error!("read request header from {} failed", src_addr);
+                let _ = conn.shutdown().await;
                 return Ok(());
             }
             log::info!("read {} bytes from client {}", n, src_addr);
