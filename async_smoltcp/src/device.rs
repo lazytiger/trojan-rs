@@ -390,6 +390,9 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                     }
                 }
             }
+            if packets.is_empty() {
+                packets.shrink_to_fit();
+            }
         }
         self.tcp_response = response;
 
