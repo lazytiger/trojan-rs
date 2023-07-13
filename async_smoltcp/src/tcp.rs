@@ -84,9 +84,10 @@ impl AsyncRead for TcpReadHalf {
         if let Some(data) = ready!(pin.receiver.poll_recv(cx)) {
             if data.len() > buf.initialize_unfilled().len() {
                 log::error!(
-                    "received {} bytes, but available space is {}",
+                    "received {} bytes, but available space is {}, capacity:{}",
                     data.len(),
-                    buf.initialize_unfilled().len()
+                    buf.initialize_unfilled().len(),
+                    buf.capacity()
                 );
                 return Poll::Ready(Err(ErrorKind::OutOfMemory.into()));
             }

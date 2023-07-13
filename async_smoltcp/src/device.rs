@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     net::IpAddr,
     time::SystemTime,
 };
@@ -64,6 +64,13 @@ pub struct TunDevice<'a, T: Tun> {
     udp_req_senders: HashMap<IpEndpoint, Sender<(IpEndpoint, Vec<u8>)>>,
 
     interface: Option<Interface>,
+    channel_buffer_size: usize,
+    tcp_tx_bufffer_size: usize,
+    tcp_rx_buffer_size: usize,
+    udp_tx_buffer_size: usize,
+    udp_rx_buffer_size: usize,
+
+    tcp_response: HashMap<IpEndpoint, VecDeque<Vec<u8>>>,
 }
 
 fn is_private_v4(addr: IpAddress) -> bool {
@@ -83,7 +90,8 @@ fn is_private_v4(addr: IpAddress) -> bool {
 }
 
 impl<'a, T: Tun + Clone> TunDevice<'a, T> {
-    pub fn new(mtu: usize, channel_buffer: usize, tun: T) -> Self {
+    pub fn new(mtu: usize, tun: T) -> Self {
+        let channel_buffer = 1024;
         let (tcp_sender, tcp_receiver) = channel(channel_buffer);
         let (udp_sender, udp_receiver) = channel(channel_buffer);
         let mut device = Self {
@@ -106,6 +114,13 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             udp_sender,
             udp_req_senders: Default::default(),
             interface: None,
+            channel_buffer_size: channel_buffer,
+            tcp_tx_bufffer_size: mtu * 1024,
+            tcp_rx_buffer_size: mtu * 128,
+            udp_tx_buffer_size: mtu * 128,
+            udp_rx_buffer_size: mtu * 64,
+
+            tcp_response: Default::default(),
         };
         let interface = device.create_interface();
         device.interface.replace(interface);
@@ -122,6 +137,22 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
 
     pub fn add_white_ip(&mut self, addr: impl Into<IpAddress>) {
         self.white_ip_list.insert(addr.into());
+    }
+
+    pub fn set_tcp_buffer_size(&mut self, rx: usize, tx: usize) {
+        self.tcp_rx_buffer_size = rx.max(self.mtu * 128);
+        self.tcp_tx_bufffer_size = tx.max(self.mtu * self.channel_buffer_size);
+    }
+
+    pub fn set_channel_buffer_size(&mut self, channel: usize) {
+        self.channel_buffer_size = channel.max(self.channel_buffer_size);
+        self.set_tcp_buffer_size(self.tcp_rx_buffer_size, self.tcp_tx_bufffer_size);
+        self.set_udp_buffer_size(self.udp_rx_buffer_size, self.udp_tx_buffer_size);
+    }
+
+    pub fn set_udp_buffer_size(&mut self, rx: usize, tx: usize) {
+        self.udp_rx_buffer_size = rx.max(self.mtu * 128);
+        self.udp_tx_buffer_size = tx.max(self.mtu * self.channel_buffer_size);
     }
 
     fn allowed(&self, endpoint: impl Into<IpEndpoint>) -> bool {
@@ -142,8 +173,8 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             return;
         }
         let socket = TcpSocket::new(
-            SocketBuffer::new(vec![0; 102400]),
-            SocketBuffer::new(vec![0; 1024000]),
+            SocketBuffer::new(vec![0; self.tcp_rx_buffer_size]),
+            SocketBuffer::new(vec![0; self.tcp_tx_bufffer_size]),
         );
         let handle = self.sockets.add(socket);
         let socket = self.sockets.get_mut::<TcpSocket>(handle);
@@ -162,8 +193,14 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             return;
         }
         let mut socket = UdpSocket::new(
-            PacketBuffer::new(vec![PacketMetadata::EMPTY; 200], vec![0; 102400]),
-            PacketBuffer::new(vec![PacketMetadata::EMPTY; 10000], vec![0; 1024000]),
+            PacketBuffer::new(
+                vec![PacketMetadata::EMPTY; self.udp_rx_buffer_size / self.mtu],
+                vec![0; self.udp_rx_buffer_size],
+            ),
+            PacketBuffer::new(
+                vec![PacketMetadata::EMPTY; self.udp_tx_buffer_size / self.mtu],
+                vec![0; self.udp_tx_buffer_size],
+            ),
         );
         socket.bind(dst_endpoint).unwrap();
         let handle = self.sockets.add(socket);
@@ -174,7 +211,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
     pub fn accept_tcp(&mut self) -> Vec<TcpStream> {
         let mut streams = Vec::new();
         for source in std::mem::take(&mut self.new_tcp) {
-            let (sender, receiver) = channel(1024);
+            let (sender, receiver) = channel(self.channel_buffer_size);
             self.tcp_req_senders.insert(source, sender);
             log::info!("accept tcp {}", source);
             let stream = TcpStream::new(
@@ -191,7 +228,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
     pub fn accept_udp(&mut self) -> Vec<crate::udp::UdpSocket> {
         let mut sockets = Vec::new();
         for target in std::mem::take(&mut self.new_udp) {
-            let (sender, receiver) = channel(1024);
+            let (sender, receiver) = channel(self.channel_buffer_size);
             self.udp_req_senders.insert(target, sender);
             let socket = crate::udp::UdpSocket::new(target, receiver, self.udp_sender.clone());
             sockets.push(socket);
@@ -253,18 +290,18 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             .for_each(|(handle, socket)| match socket {
                 Socket::Tcp(socket) => {
                     if let Some(source) = socket.remote_endpoint() {
-                        while socket.can_recv() {
+                        let sender = self
+                            .tcp_req_senders
+                            .get(&source)
+                            .unwrap();
+                        while socket.can_recv() && sender.capacity() > 0 {
                             log::info!("dispatch ingress tcp {} {}", source, socket.state());
                             if let Ok(n) = socket.recv_slice(buffer.as_mut_slice()) {
                                 log::info!("receive {} bytes from {}", n, source);
-                                if self
-                                    .tcp_req_senders
-                                    .get(&source)
-                                    .unwrap()
-                                    .try_send(buffer.as_slice()[..n].to_vec())
+                                if sender.try_send(buffer.as_slice()[..n].to_vec())
                                     .is_err()
                                 {
-                                    log::info!("send request failed");
+                                    log::error!("tcp send request failed, trying to adjust request channel buffer size");
                                     socket.close();
                                     break;
                                 }
@@ -292,16 +329,16 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                 }
                 Socket::Udp(socket) => {
                     let target: IpEndpoint = socket.endpoint().convert();
-                    while socket.can_recv() {
+                    let sender = self
+                        .udp_req_senders
+                        .get(&target)
+                        .unwrap();
+                    while socket.can_recv() && sender.capacity() > 0 {
                         log::info!("dispatch udp {}", target);
                         if let Ok((n, source)) = socket.recv_slice(buffer.as_mut_slice()) {
-                            if self
-                                .udp_req_senders
-                                .get(&target)
-                                .unwrap()
-                                .try_send((source.endpoint, buffer.as_slice()[..n].to_vec()))
-                                .is_err()
+                            if sender.try_send((source.endpoint, buffer.as_slice()[..n].to_vec())).is_err()
                             {
+                                log::error!("send udp request failed, trying to adjust udp request channel buffer size");
                                 udp_endpoints.push(target);
                                 break;
                             }
@@ -328,34 +365,52 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
     }
 
     fn process_egress(&mut self) {
+        let mut response = std::mem::take(&mut self.tcp_response);
         while let Ok((source, data)) = self.tcp_receiver.try_recv() {
-            if !self.tcp_ip2handle.contains_key(&source) {
+            response.entry(source).or_default().push_back(data);
+        }
+        for (source, packets) in &mut response {
+            if !self.tcp_ip2handle.contains_key(source) {
                 continue;
             }
             log::info!("get tcp socket:{}", source);
-            let socket = self.get_tcp_socket(source);
-            if data.is_empty()
-                || !{
-                    if let Ok(n) = socket.send_slice(data.as_slice()) {
-                        if n != data.len() {
-                            log::error!("tcp socket is full, trying to adjust socket buffer size");
-                        }
-                        n == data.len()
-                    } else {
-                        false
+            let socket = self.get_tcp_socket(*source);
+            while let Some(data) = packets.pop_front() {
+                if socket.send_queue() + data.len() > socket.send_capacity() {
+                    log::error!(
+                        "tcp socket is full {}, trying to adjust socket buffer size",
+                        socket.send_queue()
+                    );
+                    packets.push_front(data);
+                    break;
+                }
+                if data.is_empty() || socket.send_slice(data.as_slice()).is_err() {
+                    {
+                        socket.close();
                     }
                 }
-            {
-                socket.close();
             }
         }
+        self.tcp_response = response;
+
+        let mut response: HashMap<IpEndpoint, Vec<(IpEndpoint, Vec<u8>)>> = HashMap::new();
         while let Ok((source, target, data)) = self.udp_receiver.try_recv() {
+            response.entry(target).or_default().push((source, data));
+        }
+        for (target, packets) in response {
             if !self.udp_ip2handle.contains_key(&target) {
                 continue;
             }
             log::info!("get udp socket:{}", target);
             let socket = self.get_udp_socket(target);
-            if data.is_empty() || socket.send_slice(data.as_slice(), source).is_err() {
+            let mut remove = false;
+            for (source, data) in packets {
+                if data.is_empty() || socket.send_slice(data.as_slice(), source).is_err() {
+                    remove = true;
+                    break;
+                }
+            }
+            if remove {
                 self.remove_udp(target);
             }
         }
@@ -377,6 +432,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             self.tcp_ip2handle.remove(&source);
         }
         self.tcp_req_senders.remove(&source);
+        self.tcp_response.remove(&source);
     }
 
     fn remove_udp(&mut self, target: IpEndpoint) {

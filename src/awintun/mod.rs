@@ -91,7 +91,8 @@ async fn async_run() -> Result<()> {
     );
 
     let server_addr = *OPTIONS.back_addr.as_ref().unwrap();
-    let mut device = TunDevice::new(OPTIONS.wintun_args().mtu, 1024, Wintun::new(session));
+    let mtu = OPTIONS.wintun_args().mtu;
+    let mut device = TunDevice::new(mtu, Wintun::new(session));
     device.add_black_ip(server_addr.ip());
 
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
@@ -99,16 +100,16 @@ async fn async_run() -> Result<()> {
     TrojanRequest::generate(&mut header, UDP_ASSOCIATE, &empty);
     let udp_header = Arc::new(header);
 
-    let (data_sender, data_receiver) = channel(4096);
-    let (socket_sender, socket_receiver) = channel(4096);
-    let (close_sender, close_receiver) = channel(4096);
+    let (data_sender, data_receiver) = channel(128);
+    let (socket_sender, socket_receiver) = channel(128);
+    let (close_sender, close_receiver) = channel(128);
     spawn(run_udp_dispatch(
         data_receiver,
         socket_receiver,
         server_addr,
         server_name.clone(),
         config.clone(),
-        4096,
+        mtu,
         udp_header.clone(),
         close_receiver,
         close_sender.clone(),
@@ -127,7 +128,7 @@ async fn async_run() -> Result<()> {
                 config.clone(),
                 server_addr,
                 server_name.clone(),
-                4096,
+                mtu,
             ));
         }
         for socket in udp_sockets {

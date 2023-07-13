@@ -29,7 +29,7 @@ pub async fn run_udp_dispatch(
     server_addr: SocketAddr,
     server_name: ServerName,
     config: Arc<ClientConfig>,
-    buffer_size: usize,
+    mtu: usize,
     request: Arc<BytesMut>,
     mut close_receiver: Receiver<(IpEndpoint, bool)>,
     close_sender: Sender<(IpEndpoint, bool)>,
@@ -65,13 +65,9 @@ pub async fn run_udp_dispatch(
                     Some(sender) => sender,
                     None => {
                         log::info!("remote for {} not found", src_addr);
-                        if let Ok(client) = init_tls_conn(
-                            config.clone(),
-                            buffer_size,
-                            server_addr,
-                            server_name.clone(),
-                        )
-                        .await
+                        if let Ok(client) =
+                            init_tls_conn(config.clone(), mtu, server_addr, server_name.clone())
+                                .await
                         {
                             let (read_half, mut write_half) = client.into_split();
                             if let Err(err) = write_half.write_all(request.as_ref()).await {
@@ -87,7 +83,7 @@ pub async fn run_udp_dispatch(
 
                             let local = locals.get(&dst_addr).unwrap().clone();
 
-                            let (req_sender, req_receiver) = channel(buffer_size);
+                            let (req_sender, req_receiver) = channel(mtu);
                             req_senders.insert(src_addr, req_sender);
                             spawn(local_to_remote(req_receiver, write_half, src_addr));
                             spawn(remote_to_local(
