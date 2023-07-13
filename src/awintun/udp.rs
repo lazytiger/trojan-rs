@@ -57,6 +57,10 @@ pub async fn run_udp_dispatch(
                     dst_addr,
                     data.len()
                 );
+                if !locals.contains_key(&dst_addr) {
+                    log::error!("socket:{} not found in cache", dst_addr);
+                    continue;
+                }
                 let sender = match req_senders.get(&src_addr) {
                     Some(sender) => sender,
                     None => {
@@ -75,12 +79,17 @@ pub async fn run_udp_dispatch(
                                 let _ = write_half.shutdown().await;
                                 continue;
                             }
+                            log::error!(
+                                "remote:{:?} created for source:{}",
+                                read_half.local_addr().await,
+                                src_addr
+                            );
 
                             let local = locals.get(&dst_addr).unwrap().clone();
 
                             let (req_sender, req_receiver) = channel(buffer_size);
                             req_senders.insert(src_addr, req_sender);
-                            spawn(local_to_remote(req_receiver, write_half));
+                            spawn(local_to_remote(req_receiver, write_half, src_addr));
                             spawn(remote_to_local(
                                 read_half,
                                 local,
@@ -141,10 +150,15 @@ pub async fn start_udp(
 async fn local_to_remote(
     mut receiver: Receiver<(IpEndpoint, Vec<u8>)>,
     mut remote: TlsClientWriteHalf,
+    src_addr: IpEndpoint,
 ) {
     log::info!("local to remote started");
     let mut header = BytesMut::new();
     while let Some((target, data)) = receiver.recv().await {
+        if data.len() == 0 {
+            log::error!("empty data found");
+            continue;
+        }
         log::info!("send {} bytes data to {}", data.len(), target);
         header.clear();
         UdpAssociate::generate_endpoint(&mut header, &target, data.len() as u16);
@@ -155,7 +169,11 @@ async fn local_to_remote(
         }
     }
     let _ = remote.shutdown().await;
-    log::error!("remote shutdown now");
+    log::error!(
+        "remote:{:?} shutdown now for {}",
+        remote.local_addr().await,
+        src_addr
+    );
 }
 
 async fn remote_to_local(
@@ -169,7 +187,11 @@ async fn remote_to_local(
     'main: loop {
         match tokio::time::timeout(Duration::from_secs(120), remote.read_buf(&mut buffer)).await {
             Ok(Ok(0)) | Err(_) | Ok(Err(_)) => {
-                log::error!("{} read from remote failed", source);
+                log::error!(
+                    "{} read from remote:{:?} failed",
+                    source,
+                    remote.local_addr().await
+                );
                 break;
             }
             _ => {}
@@ -193,7 +215,11 @@ async fn remote_to_local(
                     buffer.advance(packet.offset);
                 }
                 UdpParseResultEndpoint::InvalidProtocol => {
-                    log::error!("invalid protocol for {}", source);
+                    log::error!(
+                        "invalid protocol from {:?} to {}",
+                        remote.local_addr().await,
+                        source
+                    );
                     break 'main;
                 }
             }

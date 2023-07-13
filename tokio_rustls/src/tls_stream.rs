@@ -63,6 +63,26 @@ pub struct TlsWriteHalf<T, D> {
     stream: Arc<Mutex<TlsStream<T, D>>>,
 }
 
+impl<T, D> TlsWriteHalf<T, D> {
+    pub async fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.stream.lock().await.stream.local_addr()
+    }
+
+    pub async fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+        self.stream.lock().await.stream.peer_addr()
+    }
+}
+
+impl<T, D> TlsReadHalf<T, D> {
+    pub async fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.stream.lock().await.stream.local_addr()
+    }
+
+    pub async fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+        self.stream.lock().await.stream.peer_addr()
+    }
+}
+
 impl<T, D> AsyncWrite for TlsWriteHalf<T, D>
 where
     T: DerefMut<Target = ConnectionCommon<D>>,
@@ -105,7 +125,8 @@ where
     T: DerefMut<Target = ConnectionCommon<D>>,
     T: Unpin,
 {
-    pub fn new(stream: TcpStream, session: T, buffer_size: usize) -> Self {
+    pub fn new(stream: TcpStream, mut session: T, buffer_size: usize) -> Self {
+        session.set_buffer_limit(None);
         Self {
             stream,
             session,
@@ -117,6 +138,10 @@ where
 
     pub fn peer_addr(&self) -> std::io::Result<SocketAddr> {
         self.stream.peer_addr()
+    }
+
+    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.stream.local_addr()
     }
 
     pub fn into_split(self) -> (TlsReadHalf<T, D>, TlsWriteHalf<T, D>) {
@@ -142,6 +167,9 @@ where
 
             if !self.send_buf.is_empty() {
                 match Pin::new(&mut self.stream).poll_write(cx, self.send_buf.as_ref()) {
+                    Poll::Ready(Ok(0)) => {
+                        return Poll::Ready(Err(ErrorKind::BrokenPipe.into()));
+                    }
                     Poll::Ready(Ok(n)) => {
                         self.send_buf.advance(n);
                     }
@@ -186,7 +214,21 @@ where
             Poll::Ready(Ok(_)) => {
                 if raw_buf.filled().is_empty() {
                     Poll::Ready(Ok(()))
-                } else if let Err(err) = pin.session.read_tls(&mut raw_buf.filled()) {
+                } else if let Err(err) = {
+                    let mut data = raw_buf.filled();
+                    loop {
+                        match pin.session.read_tls(&mut data) {
+                            Err(err) => break Err(err),
+                            Ok(0) => unreachable!(),
+                            Ok(_) => {
+                                if data.is_empty() {
+                                    break Ok(());
+                                }
+                                log::error!("data not flushed into tls once");
+                            }
+                        }
+                    }
+                } {
                     Poll::Ready(Err(err))
                 } else if pin.session.process_new_packets().is_err() {
                     Poll::Ready(Err(ErrorKind::InvalidData.into()))

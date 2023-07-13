@@ -143,7 +143,6 @@ async fn local_to_remote(
     let mut header = BytesMut::new();
     while let Some((target, data)) = local.recv().await {
         header.clear();
-        header.clear();
         UdpAssociate::generate(&mut header, &target, data.len() as u16);
         if remote.write_all(header.as_ref()).await.is_err()
             || remote.write_all(data.as_slice()).await.is_err()
