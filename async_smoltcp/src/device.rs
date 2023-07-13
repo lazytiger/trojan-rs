@@ -115,10 +115,10 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             udp_req_senders: Default::default(),
             interface: None,
             channel_buffer_size: channel_buffer,
-            tcp_tx_bufffer_size: mtu * 1024,
+            tcp_tx_bufffer_size: mtu * channel_buffer,
             tcp_rx_buffer_size: mtu * 128,
-            udp_tx_buffer_size: mtu * 128,
-            udp_rx_buffer_size: mtu * 64,
+            udp_tx_buffer_size: mtu * channel_buffer,
+            udp_rx_buffer_size: mtu * 128,
 
             tcp_response: Default::default(),
         };
