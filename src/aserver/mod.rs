@@ -81,10 +81,11 @@ async fn start_proxy(
                             match address {
                                 Sock5Address::Socket(addr) => addr,
                                 Sock5Address::Domain(domain, port) => {
-                                    let ip = *aresolve(domain.as_str(), "")
-                                        .await?
-                                        .get(0)
-                                        .ok_or(TrojanError::Resolve)?;
+                                    let ip =
+                                        *aresolve(domain.as_str(), OPTIONS.system_dns.as_str())
+                                            .await?
+                                            .get(0)
+                                            .ok_or(TrojanError::Resolve)?;
                                     SocketAddr::new(ip, port)
                                 }
                                 Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),

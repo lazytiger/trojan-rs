@@ -13,8 +13,9 @@ use tokio_rustls::{TlsServerStream, TlsServerWriteHalf};
 
 use crate::{
     config::OPTIONS,
-    proto::{UdpAssociate, UdpParseResult},
+    proto::{Sock5Address, UdpAssociate, UdpParseResult},
     types::Result,
+    utils::aresolve,
 };
 
 pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<()> {
@@ -22,18 +23,42 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
     let target = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let (mut source, source_write) = source.into_split();
     let (sender, receiver) = channel(1024);
+    let mut dns_cache_store = HashMap::new();
     spawn(target_to_source(target.clone(), source_write, receiver));
     let mut count = 0;
     'main: loop {
         loop {
             match UdpAssociate::parse(buffer.as_ref()) {
                 UdpParseResult::Packet(packet) => {
+                    let address = match packet.address {
+                        Sock5Address::Socket(addr) => addr,
+                        Sock5Address::Domain(domain, port) => {
+                            if let Some(ip) = dns_cache_store.get(&domain) {
+                                SocketAddr::new(*ip, port)
+                            } else {
+                                if let Ok(Some(ip)) =
+                                    aresolve(domain.as_str(), OPTIONS.system_dns.as_str())
+                                        .await
+                                        .map(|ips| ips.get(0).map(|ip| *ip))
+                                {
+                                    dns_cache_store.insert(domain, ip);
+                                    SocketAddr::new(ip, port)
+                                } else {
+                                    log::error!("query {} failed", domain);
+                                    continue;
+                                }
+                            }
+                        }
+                        _ => {
+                            unreachable!()
+                        }
+                    };
                     if OPTIONS.server_args().disable_udp_hole {
-                        let _ = sender.send(packet.address).await;
+                        let _ = sender.send(address).await;
                     }
-                    log::info!("udp request to {}", packet.address);
+                    log::info!("udp request to {}", address);
                     if let Err(err) = target
-                        .send_to(&packet.payload[..packet.length], packet.address)
+                        .send_to(&packet.payload[..packet.length], address)
                         .await
                     {
                         log::warn!("send request to target failed:{}", err);

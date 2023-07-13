@@ -1,5 +1,6 @@
 use std::{
-    io::{ErrorKind, Read, Write},
+    fs::File,
+    io::{BufRead, BufReader, ErrorKind, Read, Write},
     net::{IpAddr, SocketAddr},
     str::FromStr,
     time::Duration,
@@ -14,10 +15,13 @@ use trust_dns_proto::{
     serialize::binary::BinDecodable,
 };
 
-use crate::types::{
-    CopyResult,
-    CopyResult::{RxBlock, TxBlock},
-    Result, TrojanError,
+use crate::{
+    types,
+    types::{
+        CopyResult,
+        CopyResult::{RxBlock, TxBlock},
+        Result, TrojanError,
+    },
 };
 
 #[allow(dead_code)]
@@ -160,6 +164,23 @@ pub async fn aresolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> 
             .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
             .collect())
     }
+}
+
+pub fn get_system_dns() -> types::Result<String> {
+    let file = File::open("/etc/resolv.conf")?;
+    let mut data = String::new();
+    let mut reader = BufReader::new(file);
+    let key = "nameserver";
+    while let Ok(n) = reader.read_line(&mut data) {
+        if n == 0 {
+            break;
+        }
+        let line = data.trim();
+        if line.starts_with(key) {
+            return Ok(line[key.len()..].trim().to_string());
+        }
+    }
+    Ok("127.0.0.1".to_string())
 }
 
 mod test {

@@ -329,7 +329,7 @@ impl Connection {
                 }
                 UdpParseResult::Packet(packet) => {
                     let payload = &packet.payload[..packet.length];
-                    self.do_send_udp(packet.address, payload, udp_cache);
+                    self.do_send_udp(packet.address.as_socket().unwrap(), payload, udp_cache);
                     buffer = &packet.payload[packet.length..];
                 }
                 UdpParseResult::InvalidProtocol => {

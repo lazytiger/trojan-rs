@@ -177,7 +177,7 @@ async fn remote_to_local(
                         let payload = &packet.payload[..packet.length];
                         let _ = local.send_to(payload, src_addr).await;
                         log::info!(
-                            "{} - {} get one packet with size:{}",
+                            "{:?} - {} get one packet with size:{}",
                             packet.address,
                             src_addr,
                             payload.len()

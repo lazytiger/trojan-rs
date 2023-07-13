@@ -59,15 +59,25 @@ impl UdpBackend {
         loop {
             match UdpAssociate::parse(buffer) {
                 UdpParseResult::Packet(packet) => {
-                    if OPTIONS.server_args().disable_udp_hole {
-                        self.sources.insert(packet.address, Instant::now());
+                    if packet.address.as_socket().is_none() {
+                        log::error!("only socket address support for now, switch to async version");
+                        self.shutdown();
+                        return;
                     }
-                    match self
-                        .socket
-                        .send_to(&packet.payload[..packet.length], packet.address)
-                    {
+                    if OPTIONS.server_args().disable_udp_hole {
+                        self.sources
+                            .insert(packet.address.as_socket().unwrap(), Instant::now());
+                    }
+                    match self.socket.send_to(
+                        &packet.payload[..packet.length],
+                        packet.address.as_socket().unwrap(),
+                    ) {
                         Ok(size) => {
-                            stats.add_udp_rx(size, Some(packet.address.ip()), None);
+                            stats.add_udp_rx(
+                                size,
+                                Some(packet.address.as_socket().unwrap().ip()),
+                                None,
+                            );
                             self.bytes_sent += size;
                             if size != packet.length {
                                 log::error!(
@@ -80,7 +90,7 @@ impl UdpBackend {
                                 return;
                             }
                             log::debug!(
-                                "connection:{} write {} bytes to udp target:{}",
+                                "connection:{} write {} bytes to udp target:{:?}",
                                 self.index,
                                 size,
                                 packet.address
@@ -94,7 +104,7 @@ impl UdpBackend {
                         }
                         Err(err) => {
                             log::warn!(
-                                "connection:{} send_to {} failed:{}",
+                                "connection:{} send_to {:?} failed:{}",
                                 self.index,
                                 packet.address,
                                 err

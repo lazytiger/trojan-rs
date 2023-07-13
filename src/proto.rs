@@ -23,6 +23,7 @@ const DOMAIN: u8 = 0x03;
 pub const IPV6: u8 = 0x04;
 
 /// Trojan Socks5 address enum
+#[derive(Debug)]
 pub enum Sock5Address {
     Endpoint(IpEndpoint),
     Socket(SocketAddr),
@@ -30,6 +31,16 @@ pub enum Sock5Address {
     Domain(String, u16),
     // Domain type
     None, // Invalid
+}
+
+impl Sock5Address {
+    pub fn as_socket(&self) -> Option<SocketAddr> {
+        if let Sock5Address::Socket(addr) = self {
+            Some(*addr)
+        } else {
+            None
+        }
+    }
 }
 
 /// Trojan protocol for a request
@@ -263,7 +274,7 @@ fn parse_address_endpoint(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Addres
 }
 
 pub struct UdpAssociate<'a> {
-    pub address: SocketAddr,
+    pub address: Sock5Address,
     pub offset: usize,
     pub length: usize,
     pub payload: &'a [u8],
@@ -298,7 +309,7 @@ impl<'a> UdpAssociate<'a> {
         buffer = &buffer[1..];
         let mut offset = 1;
         match parse_address(atyp, buffer) {
-            AddressParseResult::Address((size, addr)) => {
+            AddressParseResult::Address((size, address)) => {
                 buffer = &buffer[size..];
                 offset += size;
                 if buffer.len() < 4 {
@@ -317,18 +328,12 @@ impl<'a> UdpAssociate<'a> {
                     return UdpParseResult::InvalidProtocol;
                 }
                 offset += 4 + length;
-                match addr {
-                    Sock5Address::Socket(address) => UdpParseResult::Packet(UdpAssociate {
-                        address,
-                        length,
-                        offset,
-                        payload: &buffer[4..],
-                    }),
-                    _ => {
-                        log::error!("udp packet only accept ip address");
-                        UdpParseResult::InvalidProtocol
-                    }
-                }
+                UdpParseResult::Packet(UdpAssociate {
+                    address,
+                    length,
+                    offset,
+                    payload: &buffer[4..],
+                })
             }
             AddressParseResult::InvalidProtocol => UdpParseResult::InvalidProtocol,
             AddressParseResult::Continue => UdpParseResult::Continued,

@@ -8,7 +8,10 @@ use std::{
 use clap::Parser;
 use sha2::{Digest, Sha224};
 
-use crate::{types::TrojanError, utils::resolve};
+use crate::{
+    types::TrojanError,
+    utils::{get_system_dns, resolve},
+};
 
 #[derive(Parser)]
 #[clap(
@@ -46,6 +49,8 @@ pub struct Opts {
 
     #[clap(skip)]
     sha_pass: String,
+    #[clap(skip)]
+    pub system_dns: String,
     #[clap(skip)]
     pub pass_len: usize,
     #[clap(skip)]
@@ -333,6 +338,7 @@ impl Opts {
             Mode::Server(ref args) | Mode::Aserver(ref args) => {
                 let back_addr: SocketAddr = args.remote_addr.parse().unwrap();
                 self.back_addr = Some(back_addr);
+                self.system_dns = get_system_dns().unwrap_or("127.0.0.53".to_string())
             }
             Mode::Proxy(ref args) | Mode::Aproxy(ref args) => {
                 let hostname = args.hostname.clone();
