@@ -143,7 +143,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         }
         let socket = TcpSocket::new(
             SocketBuffer::new(vec![0; 102400]),
-            SocketBuffer::new(vec![0; 102400]),
+            SocketBuffer::new(vec![0; 1024000]),
         );
         let handle = self.sockets.add(socket);
         let socket = self.sockets.get_mut::<TcpSocket>(handle);
@@ -162,7 +162,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             return;
         }
         let mut socket = UdpSocket::new(
-            PacketBuffer::new(vec![PacketMetadata::EMPTY; 200], vec![0; 10240]),
+            PacketBuffer::new(vec![PacketMetadata::EMPTY; 200], vec![0; 102400]),
             PacketBuffer::new(vec![PacketMetadata::EMPTY; 10000], vec![0; 1024000]),
         );
         socket.bind(dst_endpoint).unwrap();
@@ -334,7 +334,18 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             }
             log::info!("get tcp socket:{}", source);
             let socket = self.get_tcp_socket(source);
-            if data.is_empty() || socket.send_slice(data.as_slice()).is_err() {
+            if data.is_empty()
+                || !{
+                    if let Ok(n) = socket.send_slice(data.as_slice()) {
+                        if n != data.len() {
+                            log::error!("tcp socket is full, trying to adjust socket buffer size");
+                        }
+                        n == data.len()
+                    } else {
+                        false
+                    }
+                }
+            {
                 socket.close();
             }
         }

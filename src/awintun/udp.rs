@@ -79,7 +79,7 @@ pub async fn run_udp_dispatch(
                                 let _ = write_half.shutdown().await;
                                 continue;
                             }
-                            log::error!(
+                            log::info!(
                                 "remote:{:?} created for source:{}",
                                 read_half.local_addr().await,
                                 src_addr
@@ -156,7 +156,7 @@ async fn local_to_remote(
     let mut header = BytesMut::new();
     while let Some((target, data)) = receiver.recv().await {
         if data.len() == 0 {
-            log::error!("empty data found");
+            log::info!("empty data found");
             continue;
         }
         log::info!("send {} bytes data to {}", data.len(), target);
@@ -169,7 +169,7 @@ async fn local_to_remote(
         }
     }
     let _ = remote.shutdown().await;
-    log::error!(
+    log::info!(
         "remote:{:?} shutdown now for {}",
         remote.local_addr().await,
         src_addr
@@ -187,7 +187,7 @@ async fn remote_to_local(
     'main: loop {
         match tokio::time::timeout(Duration::from_secs(120), remote.read_buf(&mut buffer)).await {
             Ok(Ok(0)) | Err(_) | Ok(Err(_)) => {
-                log::error!(
+                log::info!(
                     "{} read from remote:{:?} failed",
                     source,
                     remote.local_addr().await
@@ -227,6 +227,6 @@ async fn remote_to_local(
     }
 
     if let Err(err) = sender.send((source, true)).await {
-        log::error!("udp channel send failed:{}", err);
+        log::info!("udp channel send failed:{}", err);
     }
 }
