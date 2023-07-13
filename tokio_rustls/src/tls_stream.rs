@@ -266,7 +266,10 @@ where
         }
         match pin.session.writer().write(buf) {
             // read actual data from session, drain the session.
-            Ok(n) => pin.poll_tls_flush(cx).map(|ret| ret.map(|_| n)),
+            Ok(n) => match pin.poll_tls_flush(cx) {
+                Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+                _ => Poll::Ready(Ok(n)),
+            },
             Err(err) => Poll::Ready(Err(err)),
         }
     }

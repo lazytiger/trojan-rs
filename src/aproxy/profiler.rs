@@ -313,6 +313,8 @@ pub async fn run_profiler(
     let mut reconnect = writer.write_all(request.as_ref()).await.is_err();
     if !reconnect {
         spawn(start_remote_response(reader, remote_resp_sender.clone()));
+    } else {
+        let _ = writer.shutdown().await;
     }
     loop {
         let ret = tokio::select! {
@@ -391,6 +393,8 @@ pub async fn run_profiler(
                 reconnect = writer.write_all(request.as_ref()).await.is_err();
                 if !reconnect {
                     spawn(start_remote_response(reader, remote_resp_sender.clone()));
+                } else {
+                    let _ = writer.shutdown().await;
                 }
             }
         }

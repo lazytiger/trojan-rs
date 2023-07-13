@@ -7,6 +7,7 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use tokio::net::UdpSocket;
 use trust_dns_proto::{
     op::{Message, Query},
     rr::{DNSClass, Name, RecordType},
@@ -118,6 +119,37 @@ pub fn resolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
     let mut response = vec![0u8; 1024];
     socket.set_read_timeout(Some(Duration::from_millis(3000)))?;
     let length = socket.read(response.as_mut_slice())?;
+    let message = Message::from_bytes(&response.as_slice()[..length])?;
+    if message.id() != 1 {
+        Err(TrojanError::Dummy(()))
+    } else {
+        Ok(message
+            .answers()
+            .iter()
+            .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
+            .collect())
+    }
+}
+
+pub async fn aresolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
+    let dns_server_addr: SocketAddr = dns_server_addr.parse()?;
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    let mut message = Message::new();
+    message.set_recursion_desired(true);
+    message.set_id(1);
+    let mut query = Query::new();
+    let name = Name::from_str(name)?;
+    query.set_name(name);
+    query.set_query_type(RecordType::A);
+    query.set_query_class(DNSClass::IN);
+    message.add_query(query);
+    let request = message.to_vec()?;
+    if request.len() != socket.send_to(request.as_slice(), &dns_server_addr).await? {
+        return Err(TrojanError::Dummy(()));
+    }
+    let mut response = vec![0u8; 1024];
+    let length = tokio::time::timeout(Duration::from_secs(3), socket.recv(response.as_mut_slice()))
+        .await??;
     let message = Message::from_bytes(&response.as_slice()[..length])?;
     if message.id() != 1 {
         Err(TrojanError::Dummy(()))

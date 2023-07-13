@@ -26,6 +26,7 @@ use crate::{
     proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     server::{init_config, ping_backend::PingResult},
     types::{Result, TrojanError},
+    utils::aresolve,
 };
 
 mod ping;
@@ -80,7 +81,8 @@ async fn start_proxy(
                             match address {
                                 Sock5Address::Socket(addr) => addr,
                                 Sock5Address::Domain(domain, port) => {
-                                    let ip = *dns_lookup::lookup_host(domain.as_str())?
+                                    let ip = *aresolve(domain.as_str(), "")
+                                        .await?
                                         .get(0)
                                         .ok_or(TrojanError::Resolve)?;
                                     SocketAddr::new(ip, port)
