@@ -31,7 +31,7 @@ pub async fn start_udp(
     buffer_size: usize,
     request: Arc<BytesMut>,
 ) {
-    if local.peer_addr().ip() == server_addr.ip() {
+    if local.peer_addr_std().ip() == server_addr.ip() {
         log::error!("ignore udp request to server");
         local.close().await;
         return;

@@ -188,7 +188,7 @@ pub async fn async_run(
         }
         for socket in udp_sockets {
             log::info!("accept udp to:{}", socket.peer_addr());
-            if socket.peer_addr() == dns_addr {
+            if socket.peer_addr_std() == dns_addr {
                 spawn(start_dns(
                     socket,
                     config.clone(),
