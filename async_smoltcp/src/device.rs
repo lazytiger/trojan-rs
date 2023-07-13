@@ -277,6 +277,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         let udp = self.accept_udp();
         self.process_ingress();
         self.process_egress();
+        self.tcp_response.shrink_to_fit();
         (tcp, udp)
     }
 
