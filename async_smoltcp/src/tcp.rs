@@ -1,10 +1,11 @@
 use std::{
-    io::{Error, ErrorKind},
+    io::Error,
     net::SocketAddr,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
+use bytes::{Buf, BytesMut};
 use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
@@ -15,8 +16,9 @@ use tokio_util::sync::PollSender;
 use crate::TypeConverter;
 
 pub struct TcpReadHalf {
-    receiver: Receiver<Vec<u8>>,
+    receiver: Receiver<BytesMut>,
     peer_addr: IpEndpoint,
+    buffer: BytesMut,
 }
 
 impl TcpReadHalf {
@@ -29,7 +31,7 @@ impl TcpReadHalf {
 }
 
 pub struct TcpWriteHalf {
-    sender: PollSender<(IpEndpoint, Vec<u8>)>,
+    sender: PollSender<(IpEndpoint, BytesMut)>,
     local_addr: IpEndpoint,
 }
 
@@ -42,8 +44,8 @@ pub struct TcpStream {
 
 impl TcpStream {
     pub(crate) fn new(
-        receiver: Receiver<Vec<u8>>,
-        sender: Sender<(IpEndpoint, Vec<u8>)>,
+        receiver: Receiver<BytesMut>,
+        sender: Sender<(IpEndpoint, BytesMut)>,
         local_addr: IpEndpoint,
         peer_addr: IpEndpoint,
     ) -> Self {
@@ -51,6 +53,7 @@ impl TcpStream {
             reader: TcpReadHalf {
                 receiver,
                 peer_addr,
+                buffer: BytesMut::new(),
             },
             writer: TcpWriteHalf {
                 sender: PollSender::new(sender),
@@ -81,20 +84,19 @@ impl AsyncRead for TcpReadHalf {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let pin = self.get_mut();
-        if let Some(data) = ready!(pin.receiver.poll_recv(cx)) {
-            if data.len() > buf.initialize_unfilled().len() {
-                log::error!(
-                    "received {} bytes, but available space is {}, capacity:{}",
-                    data.len(),
-                    buf.initialize_unfilled().len(),
-                    buf.capacity()
-                );
-                return Poll::Ready(Err(ErrorKind::OutOfMemory.into()));
-            }
-            let _ = &buf.initialize_unfilled()[..data.len()].copy_from_slice(data.as_slice());
-            buf.set_filled(buf.filled().len() + data.len());
+        if !pin.buffer.is_empty() {
+            let dst_buffer = buf.initialize_unfilled();
+            let len = dst_buffer.len().min(pin.buffer.len());
+            let _ = &dst_buffer[..len].copy_from_slice(&pin.buffer.as_ref()[..len]);
+            pin.buffer.advance(len);
+            buf.set_filled(buf.filled().len() + len);
+            Poll::Ready(Ok(()))
+        } else if let Some(data) = ready!(pin.receiver.poll_recv(cx)) {
+            pin.buffer = data;
+            Pin::new(pin).poll_read(cx, buf)
+        } else {
+            Poll::Ready(Ok(()))
         }
-        Poll::Ready(Ok(()))
     }
 }
 
@@ -106,10 +108,10 @@ impl AsyncWrite for TcpWriteHalf {
     ) -> Poll<Result<usize, Error>> {
         let pin = self.get_mut();
         if ready!(pin.sender.poll_reserve(cx)).is_ok() {
-            let buf = buf.to_vec();
-            let len = buf.len();
-            if pin.sender.send_item((pin.local_addr, buf)).is_ok() {
-                return Poll::Ready(Ok(len));
+            if pin.sender.send_item((pin.local_addr, buf.into())).is_ok() {
+                return Poll::Ready(Ok(buf.len()));
+            } else {
+                log::error!("tcp send response failed: trying to enlarge channel buffer size");
             }
         }
         Poll::Ready(Ok(0))

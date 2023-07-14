@@ -18,13 +18,13 @@ use crate::{
 };
 
 enum DispatchReturn {
-    Data(Option<(IpEndpoint, IpEndpoint, Vec<u8>)>),
+    Data(Option<(IpEndpoint, IpEndpoint, BytesMut)>),
     Socket(Option<Arc<UdpWriteHalf>>),
     Close(Option<(IpEndpoint, bool)>),
 }
 
 pub async fn run_udp_dispatch(
-    mut data_receiver: Receiver<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+    mut data_receiver: Receiver<(IpEndpoint, IpEndpoint, BytesMut)>,
     mut socket_receiver: Receiver<Arc<UdpWriteHalf>>,
     server_addr: SocketAddr,
     server_name: ServerName,
@@ -121,7 +121,7 @@ pub async fn run_udp_dispatch(
 
 pub async fn start_udp(
     mut local: UdpSocket,
-    data_sender: Sender<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+    data_sender: Sender<(IpEndpoint, IpEndpoint, BytesMut)>,
     close_sender: Sender<(IpEndpoint, bool)>,
 ) {
     let target: IpEndpoint = local.peer_addr();
@@ -144,7 +144,7 @@ pub async fn start_udp(
 }
 
 async fn local_to_remote(
-    mut receiver: Receiver<(IpEndpoint, Vec<u8>)>,
+    mut receiver: Receiver<(IpEndpoint, BytesMut)>,
     mut remote: TlsClientWriteHalf,
     src_addr: IpEndpoint,
 ) {
@@ -159,7 +159,7 @@ async fn local_to_remote(
         header.clear();
         UdpAssociate::generate_endpoint(&mut header, &target, data.len() as u16);
         if remote.write_all(header.as_ref()).await.is_err()
-            || remote.write_all(data.as_slice()).await.is_err()
+            || remote.write_all(data.as_ref()).await.is_err()
         {
             break;
         }

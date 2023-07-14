@@ -4,6 +4,7 @@ use std::{
     time::SystemTime,
 };
 
+use bytes::{Buf, BytesMut};
 use smoltcp::{
     iface::{Config, Interface, SocketHandle, SocketSet},
     phy::{Device, DeviceCapabilities, Medium},
@@ -52,16 +53,16 @@ pub struct TunDevice<'a, T: Tun> {
     black_ip_list: HashSet<IpAddress>,
     allow_private: bool,
     /// (source address, data)
-    tcp_receiver: Receiver<(IpEndpoint, Vec<u8>)>,
-    tcp_sender: Sender<(IpEndpoint, Vec<u8>)>,
+    tcp_receiver: Receiver<(IpEndpoint, BytesMut)>,
+    tcp_sender: Sender<(IpEndpoint, BytesMut)>,
     /// (source address, sender)
-    tcp_req_senders: HashMap<IpEndpoint, Sender<Vec<u8>>>,
+    tcp_req_senders: HashMap<IpEndpoint, Sender<BytesMut>>,
 
     /// (source address, target address, data)
-    udp_receiver: Receiver<(IpEndpoint, IpEndpoint, Vec<u8>)>,
-    udp_sender: Sender<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+    udp_receiver: Receiver<(IpEndpoint, IpEndpoint, BytesMut)>,
+    udp_sender: Sender<(IpEndpoint, IpEndpoint, BytesMut)>,
     /// (source address, sender)
-    udp_req_senders: HashMap<IpEndpoint, Sender<(IpEndpoint, Vec<u8>)>>,
+    udp_req_senders: HashMap<IpEndpoint, Sender<(IpEndpoint, BytesMut)>>,
 
     interface: Option<Interface>,
     channel_buffer_size: usize,
@@ -70,7 +71,7 @@ pub struct TunDevice<'a, T: Tun> {
     udp_tx_buffer_size: usize,
     udp_rx_buffer_size: usize,
 
-    tcp_response: HashMap<IpEndpoint, VecDeque<Vec<u8>>>,
+    tcp_response: HashMap<IpEndpoint, VecDeque<BytesMut>>,
 }
 
 fn is_private_v4(addr: IpAddress) -> bool {
@@ -299,7 +300,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                             log::info!("dispatch ingress tcp {} {}", source, socket.state());
                             if let Ok(n) = socket.recv_slice(buffer.as_mut_slice()) {
                                 log::info!("receive {} bytes from {}", n, source);
-                                if sender.try_send(buffer.as_slice()[..n].to_vec())
+                                if sender.try_send(buffer.as_slice()[..n].into())
                                     .is_err()
                                 {
                                     log::error!("tcp send request failed, trying to adjust request channel buffer size");
@@ -316,7 +317,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                                 .tcp_req_senders
                                 .get(&source)
                                 .unwrap()
-                                .try_send(Vec::new());
+                                .try_send(BytesMut::with_capacity(0));
                             socket.close();
                         }
                         if !socket.is_active() {
@@ -337,7 +338,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                     while socket.can_recv() && sender.capacity() > 0 {
                         log::info!("dispatch udp {}", target);
                         if let Ok((n, source)) = socket.recv_slice(buffer.as_mut_slice()) {
-                            if sender.try_send((source.endpoint, buffer.as_slice()[..n].to_vec())).is_err()
+                            if sender.try_send((source.endpoint, buffer.as_slice()[..n].into())).is_err()
                             {
                                 log::error!("send udp request failed, trying to adjust udp request channel buffer size");
                                 udp_endpoints.push(target);
@@ -376,20 +377,23 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             }
             log::info!("get tcp socket:{}", source);
             let socket = self.get_tcp_socket(*source);
-            while let Some(data) = packets.pop_front() {
-                if socket.send_queue() + data.len() > socket.send_capacity() {
-                    log::error!(
-                        "tcp socket is full {}, trying to adjust socket buffer size",
-                        socket.send_queue()
-                    );
-                    packets.push_front(data);
-                    break;
-                }
-                if data.is_empty() || socket.send_slice(data.as_slice()).is_err() {
-                    {
-                        socket.close();
+            while let Some(mut data) = packets.pop_front() {
+                if !data.is_empty() {
+                    if let Ok(n) = socket.send_slice(data.as_ref()) {
+                        data.advance(n);
+                        if data.is_empty() {
+                            continue;
+                        } else {
+                            log::error!(
+                                "tcp socket is full {}, trying to adjust socket buffer size",
+                                socket.send_queue()
+                            );
+                            packets.push_front(data);
+                            break;
+                        }
                     }
                 }
+                socket.close();
             }
             if packets.is_empty() {
                 packets.shrink_to_fit();
@@ -397,7 +401,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         }
         self.tcp_response = response;
 
-        let mut response: HashMap<IpEndpoint, Vec<(IpEndpoint, Vec<u8>)>> = HashMap::new();
+        let mut response: HashMap<IpEndpoint, Vec<(IpEndpoint, BytesMut)>> = HashMap::new();
         while let Ok((source, target, data)) = self.udp_receiver.try_recv() {
             response.entry(target).or_default().push((source, data));
         }
@@ -409,7 +413,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             let socket = self.get_udp_socket(target);
             let mut remove = false;
             for (source, data) in packets {
-                if data.is_empty() || socket.send_slice(data.as_slice(), source).is_err() {
+                if data.is_empty() || socket.send_slice(data.as_ref(), source).is_err() {
                     remove = true;
                     break;
                 }

@@ -1,5 +1,6 @@
 use std::{io::ErrorKind, net::SocketAddr};
 
+use bytes::BytesMut;
 use smoltcp::wire::IpEndpoint;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -7,15 +8,15 @@ use crate::TypeConverter;
 
 pub struct UdpSocket {
     peer_addr: IpEndpoint,
-    receiver: Receiver<(IpEndpoint, Vec<u8>)>,
+    receiver: Receiver<(IpEndpoint, BytesMut)>,
     write_half: UdpWriteHalf,
 }
 
 impl UdpSocket {
     pub(crate) fn new(
         peer_addr: IpEndpoint,
-        receiver: Receiver<(IpEndpoint, Vec<u8>)>,
-        sender: Sender<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+        receiver: Receiver<(IpEndpoint, BytesMut)>,
+        sender: Sender<(IpEndpoint, IpEndpoint, BytesMut)>,
     ) -> Self {
         Self {
             peer_addr,
@@ -31,7 +32,7 @@ impl UdpSocket {
     pub fn peer_addr_std(&self) -> SocketAddr {
         self.peer_addr.convert()
     }
-    pub async fn recv_from(&mut self) -> std::io::Result<(IpEndpoint, Vec<u8>)> {
+    pub async fn recv_from(&mut self) -> std::io::Result<(IpEndpoint, BytesMut)> {
         self.receiver
             .recv()
             .await
@@ -39,7 +40,7 @@ impl UdpSocket {
             .map(|(addr, data)| (addr, data))
     }
 
-    pub async fn recv_from_std(&mut self) -> std::io::Result<(SocketAddr, Vec<u8>)> {
+    pub async fn recv_from_std(&mut self) -> std::io::Result<(SocketAddr, BytesMut)> {
         self.recv_from()
             .await
             .map(|(addr, data)| (addr.convert(), data))
@@ -65,7 +66,7 @@ impl UdpSocket {
 
 #[derive(Clone)]
 pub struct UdpWriteHalf {
-    sender: Sender<(IpEndpoint, IpEndpoint, Vec<u8>)>,
+    sender: Sender<(IpEndpoint, IpEndpoint, BytesMut)>,
     peer_addr: IpEndpoint,
 }
 
@@ -76,11 +77,15 @@ impl UdpWriteHalf {
         from: impl Into<IpEndpoint>,
     ) -> std::io::Result<usize> {
         let len = data.len();
-        self.sender
-            .send((from.into(), self.peer_addr, data.to_vec()))
+        if self
+            .sender
+            .send((from.into(), self.peer_addr, data.into()))
             .await
-            .map(|_| len)
-            .map_err(|_| ErrorKind::BrokenPipe.into())
+            .is_err()
+        {
+            log::error!("send udp response failed, trying to enlarge channel buffer size");
+        }
+        Ok(len)
     }
 
     pub async fn send_to_std(&self, data: &[u8], from: SocketAddr) -> std::io::Result<usize> {
