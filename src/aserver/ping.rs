@@ -11,9 +11,15 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
+
 use tokio_rustls::TlsServerStream;
 
 use crate::{config::OPTIONS, proto, server::ping_backend::PingResult, types::Result};
+
+enum SelectResult {
+    Request(Option<(IpAddr, UnboundedSender<PingResult>)>),
+    Response(Option<PingResult>),
+}
 
 pub async fn start_check_routine(
     mut req_receiver: UnboundedReceiver<(IpAddr, UnboundedSender<PingResult>)>,
@@ -27,8 +33,18 @@ pub async fn start_check_routine(
     let mut cache_results: HashMap<IpAddr, PingResult> = HashMap::new();
     let mut cache_senders: HashMap<IpAddr, Vec<UnboundedSender<PingResult>>> = HashMap::new();
     loop {
-        tokio::select! {
+        let ret = tokio::select! {
             ret = req_receiver.recv() => {
+                SelectResult::Request(ret)
+
+            },
+            ret = resp_receiver.recv() => {
+                SelectResult::Response(ret)
+
+            }
+        };
+        match ret {
+            SelectResult::Request(ret) => {
                 let (ip, sender) = ret.unwrap();
                 if let Some(result) = cache_results.get(&ip) {
                     if result.time.elapsed().as_secs() < OPTIONS.server_args().cached_ping_timeout {
@@ -36,21 +52,22 @@ pub async fn start_check_routine(
                         continue;
                     }
                 }
-                cache_senders.entry(ip).or_insert_with(||Vec::new()).push(sender);
+                cache_senders.entry(ip).or_default().push(sender);
                 let client = match ip {
                     IpAddr::V4(_) => client4.clone(),
                     IpAddr::V6(_) => client6.clone(),
                 };
                 tokio::spawn(do_check(ip, id, client.clone(), resp_sender.clone()));
                 id = id.wrapping_add(1);
-            },
-            ret = resp_receiver.recv() => {
+            }
+            SelectResult::Response(ret) => {
                 let result = ret.unwrap();
-                if let Some(senders)  = cache_senders.remove(&result.ip) {
+                if let Some(senders) = cache_senders.remove(&result.ip) {
                     for sender in senders {
                         let _ = sender.send(result.clone());
                     }
                 }
+                cache_senders.shrink_to_fit();
                 cache_results.insert(result.ip, result);
             }
         }

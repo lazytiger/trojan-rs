@@ -60,7 +60,7 @@ async fn start_proxy(
     let mut buffer = BytesMut::new();
     let now = Instant::now();
     let ret = loop {
-        match timeout(Duration::from_secs(120), conn.read_buf(&mut buffer)).await {
+        match timeout(Duration::from_secs(10), conn.read_buf(&mut buffer)).await {
             Ok(Ok(0)) => {
                 log::error!("source:{} shutdown connection", src_addr);
                 break None;

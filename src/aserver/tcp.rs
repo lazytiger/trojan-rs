@@ -34,7 +34,7 @@ pub async fn start_tcp(
                     break;
                 }
                 _ => {
-                    if tokio::time::timeout(Duration::from_secs(60), source.read_buf(&mut buffer))
+                    if tokio::time::timeout(Duration::from_secs(10), source.read_buf(&mut buffer))
                         .await??
                         == 0
                     {
