@@ -128,7 +128,6 @@ async fn async_run() -> Result<()> {
                 config.clone(),
                 server_addr,
                 server_name.clone(),
-                mtu,
             ));
         }
         for socket in udp_sockets {
