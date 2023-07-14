@@ -12,7 +12,7 @@ use rustls::ServerConnection;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    runtime::Runtime,
+    runtime::{Handle, Runtime},
     spawn,
     sync::mpsc::{unbounded_channel, UnboundedSender},
     time::timeout,
@@ -60,7 +60,11 @@ async fn async_run() -> Result<()> {
             src_addr,
             task_count.clone(),
         ));
-        log::error!("current task count:{}", task_count.load(Ordering::Relaxed));
+        log::error!(
+            "connection count:{}, active task count:{}",
+            task_count.load(Ordering::Relaxed),
+            Handle::current().metrics().active_tasks_count()
+        );
     }
 }
 
