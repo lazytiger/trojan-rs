@@ -286,7 +286,6 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         let mut handles = Vec::new();
         let mut tcp_endpoints = Vec::new();
         let mut udp_endpoints = Vec::new();
-        let mut buffer = vec![0u8; self.mtu];
         self.sockets
             .iter_mut()
             .for_each(|(handle, socket)| match socket {
@@ -298,9 +297,19 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                             .unwrap();
                         while socket.can_recv() && sender.capacity() > 0 {
                             log::info!("dispatch ingress tcp {} {}", source, socket.state());
-                            if let Ok(n) = socket.recv_slice(buffer.as_mut_slice()) {
+                            let mut buffer = BytesMut::with_capacity(socket.recv_queue());
+                            unsafe {
+                                buffer.set_len(socket.recv_queue());
+                            }
+                            if let Ok(n) = socket.recv_slice(buffer.as_mut()) {
                                 log::info!("receive {} bytes from {}", n, source);
-                                if sender.try_send(buffer.as_slice()[..n].into())
+                                if n != buffer.len() {
+                                    log::error!("tcp recv_slice do not drain the buffer");
+                                    unsafe {
+                                        buffer.set_len(n);
+                                    }
+                                }
+                                if sender.try_send(buffer)
                                     .is_err()
                                 {
                                     log::error!("tcp send request failed, trying to adjust request channel buffer size");
@@ -337,8 +346,15 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                         .unwrap();
                     while socket.can_recv() && sender.capacity() > 0 {
                         log::info!("dispatch udp {}", target);
-                        if let Ok((n, source)) = socket.recv_slice(buffer.as_mut_slice()) {
-                            if sender.try_send((source.endpoint, buffer.as_slice()[..n].into())).is_err()
+                        let mut buffer = BytesMut::with_capacity(self.mtu);
+                        unsafe {
+                            buffer.set_len(self.mtu);
+                        }
+                        if let Ok((n, source)) = socket.recv_slice(buffer.as_mut()) {
+                            unsafe {
+                                buffer.set_len(n);
+                            }
+                            if sender.try_send((source.endpoint, buffer)).is_err()
                             {
                                 log::error!("send udp request failed, trying to adjust udp request channel buffer size");
                                 udp_endpoints.push(target);
