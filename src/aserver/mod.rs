@@ -1,5 +1,9 @@
 use std::{
     net::{IpAddr, SocketAddr},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -42,13 +46,21 @@ async fn async_run() -> Result<()> {
     let config = init_config()?;
     let listener = TcpListener::bind(OPTIONS.local_addr.as_str()).await?;
     let (req_sender, req_receiver) = unbounded_channel();
+    let task_count = Arc::new(AtomicU32::new(0));
     spawn(start_check_routine(req_receiver));
     loop {
         let (client, src_addr) = listener.accept().await?;
         log::info!("accept {}", src_addr);
         let session = ServerConnection::new(config.clone())?;
         let conn = TlsServerStream::new(client, session, 4096);
-        spawn(start_proxy(conn, req_sender.clone(), src_addr));
+        task_count.fetch_add(1, Ordering::Relaxed);
+        spawn(start_proxy(
+            conn,
+            req_sender.clone(),
+            src_addr,
+            task_count.clone(),
+        ));
+        log::error!("current task count:{}", task_count.load(Ordering::Relaxed));
     }
 }
 
@@ -56,6 +68,7 @@ async fn start_proxy(
     mut conn: TlsServerStream,
     sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
     src_addr: SocketAddr,
+    task_count: Arc<AtomicU32>,
 ) -> Result<()> {
     let mut buffer = BytesMut::new();
     let now = Instant::now();
@@ -121,17 +134,20 @@ async fn start_proxy(
             time
         );
         let _ = conn.shutdown().await;
+        task_count.fetch_sub(1, Ordering::Relaxed);
         return Ok(());
     }
     let (cmd, target_addr) = ret.unwrap();
 
     log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
-    match cmd {
+    let ret = match cmd {
         CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
         UDP_ASSOCIATE => start_udp(conn, buffer).await,
         PING => start_ping(conn, buffer, sender.clone()).await,
         _ => {
             unreachable!()
         }
-    }
+    };
+    task_count.fetch_sub(1, Ordering::Relaxed);
+    ret
 }
