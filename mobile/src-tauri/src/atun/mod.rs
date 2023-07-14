@@ -11,7 +11,7 @@ use std::{
 use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
 use sha2::{Digest, Sha224};
-use tokio::{net::UdpSocket, runtime::Builder, spawn};
+use tokio::{net::UdpSocket, runtime::Builder, spawn, sync::mpsc::channel};
 use trust_dns_proto::{
     op::{Message, Query},
     rr::{DNSClass, Name, RecordType},
@@ -26,7 +26,7 @@ use crate::{
         dns::start_dns,
         proto::{TrojanRequest, UDP_ASSOCIATE},
         tcp::start_tcp,
-        udp::start_udp,
+        udp::{run_udp_dispatch, start_udp},
     },
     emit_event, platform, types,
     types::{EventType, VpnError},
@@ -167,6 +167,20 @@ pub async fn async_run(
     TrojanRequest::generate(&mut header, UDP_ASSOCIATE, pass.as_bytes(), &empty);
     let udp_header = Arc::new(header);
 
+    let (data_sender, data_receiver) = channel(128);
+    let (socket_sender, socket_receiver) = channel(128);
+    let (close_sender, close_receiver) = channel(128);
+    spawn(run_udp_dispatch(
+        data_receiver,
+        socket_receiver,
+        server_addr,
+        server_name.clone(),
+        config.clone(),
+        udp_header.clone(),
+        close_receiver,
+        close_sender.clone(),
+    ));
+
     let mut last_speed_time = Instant::now();
     while running.load(Ordering::Relaxed) {
         let (tcp_streams, udp_sockets) = device.poll();
@@ -201,14 +215,10 @@ pub async fn async_run(
                     context.blocked_domains.clone(),
                 ));
             } else {
-                spawn(start_udp(
-                    socket,
-                    server_addr,
-                    server_name.clone(),
-                    config.clone(),
-                    4096,
-                    udp_header.clone(),
-                ));
+                log::info!("accept udp to:{}", socket.peer_addr());
+                let writer = Arc::new(socket.writer());
+                let _ = socket_sender.send(writer).await;
+                spawn(start_udp(socket, data_sender.clone(), close_sender.clone()));
             }
         }
 
