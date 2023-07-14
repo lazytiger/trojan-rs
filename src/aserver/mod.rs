@@ -125,7 +125,17 @@ async fn start_proxy(
             }
         }
     };
-    if ret.is_none() {
+    let ret = if let Some((cmd, target_addr)) = ret {
+        log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
+        match cmd {
+            CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
+            UDP_ASSOCIATE => start_udp(conn, buffer).await,
+            PING => start_ping(conn, buffer, sender.clone()).await,
+            _ => {
+                unreachable!()
+            }
+        }
+    } else {
         let time = now.elapsed().as_millis();
         log::error!(
             "read request from {} failed with {} bytes after {} ms",
@@ -134,19 +144,7 @@ async fn start_proxy(
             time
         );
         let _ = conn.shutdown().await;
-        task_count.fetch_sub(1, Ordering::Relaxed);
-        return Ok(());
-    }
-    let (cmd, target_addr) = ret.unwrap();
-
-    log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
-    let ret = match cmd {
-        CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
-        UDP_ASSOCIATE => start_udp(conn, buffer).await,
-        PING => start_ping(conn, buffer, sender.clone()).await,
-        _ => {
-            unreachable!()
-        }
+        Ok(())
     };
     task_count.fetch_sub(1, Ordering::Relaxed);
     ret
