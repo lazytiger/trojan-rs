@@ -277,6 +277,9 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         self.udp_ip2handle.shrink_to_fit();
         self.tcp_req_senders.shrink_to_fit();
         self.udp_req_senders.shrink_to_fit();
+        log::warn!("tcp_response:{}, tcp_ip2handle:{}, udp_ip2handle:{}, tcp_req_senders:{}, udp_req_senders:{}",
+            self.tcp_response.len(), self.tcp_ip2handle.len(),
+            self.udp_ip2handle.len(), self.tcp_req_senders.len(), self.udp_req_senders.len());
     }
 
     pub fn poll(&mut self) -> (Vec<TcpStream>, Vec<crate::udp::UdpSocket>) {
