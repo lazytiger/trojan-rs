@@ -71,6 +71,8 @@ pub struct TunDevice<'a, T: Tun> {
     udp_tx_buffer_size: usize,
     udp_rx_buffer_size: usize,
 
+    last_shrink: std::time::Instant,
+
     tcp_response: HashMap<IpEndpoint, VecDeque<BytesMut>>,
 }
 
@@ -120,6 +122,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             tcp_rx_buffer_size: mtu * 128,
             udp_tx_buffer_size: mtu * channel_buffer,
             udp_rx_buffer_size: mtu * 128,
+            last_shrink: std::time::Instant::now(),
 
             tcp_response: Default::default(),
         };
@@ -267,6 +270,15 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         (rx_speed, tx_speed)
     }
 
+    fn shrink_maps(&mut self) {
+        self.tcp_response.shrink_to_fit();
+        self.tcp_ip2handle.shrink_to_fit();
+        self.tcp_handle2ip.shrink_to_fit();
+        self.udp_ip2handle.shrink_to_fit();
+        self.tcp_req_senders.shrink_to_fit();
+        self.udp_req_senders.shrink_to_fit();
+    }
+
     pub fn poll(&mut self) -> (Vec<TcpStream>, Vec<crate::udp::UdpSocket>) {
         let mut interface = self.interface.take().unwrap();
         let sockets = &mut self.sockets as *mut SocketSet;
@@ -278,7 +290,10 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         let udp = self.accept_udp();
         self.process_ingress();
         self.process_egress();
-        self.tcp_response.shrink_to_fit();
+        if self.last_shrink.elapsed().as_secs() > 1 {
+            self.shrink_maps();
+            self.last_shrink = std::time::Instant::now();
+        }
         (tcp, udp)
     }
 

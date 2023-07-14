@@ -111,8 +111,10 @@ pub async fn run_udp_dispatch(
                 log::info!("close {} {}", addr, is_remote);
                 if is_remote {
                     req_senders.remove(&addr);
+                    req_senders.shrink_to_fit();
                 } else {
                     locals.remove(&addr);
+                    locals.shrink_to_fit();
                 }
             }
         }
