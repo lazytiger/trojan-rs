@@ -34,7 +34,7 @@ pub async fn start_tcp(
                     break;
                 }
                 _ => {
-                    if tokio::time::timeout(Duration::from_secs(10), source.read_buf(&mut buffer))
+                    if tokio::time::timeout(Duration::from_secs(1), source.read_buf(&mut buffer))
                         .await??
                         == 0
                     {
@@ -68,12 +68,13 @@ pub async fn start_tcp(
         format!("tcp {} to {}", src_addr, target_addr),
         OPTIONS.tcp_idle_timeout,
     ));
-    spawn(copy(
+    copy(
         target_read,
         source_write,
         format!("tcp {} to {}", target_addr, src_addr),
         OPTIONS.tcp_idle_timeout,
-    ));
+    )
+    .await;
     Ok(())
 }
 
@@ -84,19 +85,16 @@ async fn copy<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
     timeout: u64,
 ) {
     let mut buffer = vec![0u8; 4096];
-    loop {
-        if let Ok(Ok(n)) = tokio::time::timeout(
-            Duration::from_secs(timeout),
-            read.read(buffer.as_mut_slice()),
-        )
-        .await
-        {
-            if n > 0 {
-                if let Err(err) = write.write_all(&buffer.as_slice()[..n]).await {
-                    log::warn!("{} write failed:{}", message, err);
-                    break;
-                }
-            } else {
+
+    while let Ok(Ok(n)) = tokio::time::timeout(
+        Duration::from_secs(timeout),
+        read.read(buffer.as_mut_slice()),
+    )
+    .await
+    {
+        if n > 0 {
+            if let Err(err) = write.write_all(&buffer.as_slice()[..n]).await {
+                log::warn!("{} write failed:{}", message, err);
                 break;
             }
         } else {

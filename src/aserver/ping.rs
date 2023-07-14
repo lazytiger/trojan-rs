@@ -57,7 +57,7 @@ pub async fn start_check_routine(
                     IpAddr::V4(_) => client4.clone(),
                     IpAddr::V6(_) => client6.clone(),
                 };
-                tokio::spawn(do_check(ip, id, client.clone(), resp_sender.clone()));
+                tokio::spawn(do_check(ip, id, client, resp_sender.clone()));
                 id = id.wrapping_add(1);
             }
             SelectResult::Response(ret) => {

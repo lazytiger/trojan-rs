@@ -405,8 +405,10 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         while let Ok((source, data)) = self.tcp_receiver.try_recv() {
             response.entry(source).or_default().push_back(data);
         }
+        let mut to_be_removed = Vec::new();
         for (source, packets) in &mut response {
             if !self.tcp_ip2handle.contains_key(source) {
+                to_be_removed.push(*source);
                 continue;
             }
             log::info!("get tcp socket:{}", source);
@@ -432,6 +434,9 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             if packets.is_empty() {
                 packets.shrink_to_fit();
             }
+        }
+        for source in to_be_removed {
+            response.remove(&source);
         }
         self.tcp_response = response;
 

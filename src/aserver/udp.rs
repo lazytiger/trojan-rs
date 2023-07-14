@@ -35,18 +35,16 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
                         Sock5Address::Domain(domain, port) => {
                             if let Some(ip) = dns_cache_store.get(&domain) {
                                 SocketAddr::new(*ip, port)
+                            } else if let Ok(Some(ip)) =
+                                aresolve(domain.as_str(), OPTIONS.system_dns.as_str())
+                                    .await
+                                    .map(|ips| ips.get(0).copied())
+                            {
+                                dns_cache_store.insert(domain, ip);
+                                SocketAddr::new(ip, port)
                             } else {
-                                if let Ok(Some(ip)) =
-                                    aresolve(domain.as_str(), OPTIONS.system_dns.as_str())
-                                        .await
-                                        .map(|ips| ips.get(0).map(|ip| *ip))
-                                {
-                                    dns_cache_store.insert(domain, ip);
-                                    SocketAddr::new(ip, port)
-                                } else {
-                                    log::error!("query {} failed", domain);
-                                    continue;
-                                }
+                                log::error!("query {} failed", domain);
+                                continue;
                             }
                         }
                         _ => {
@@ -138,15 +136,13 @@ async fn target_to_source(
                     log::warn!("udp channel is closed");
                     break;
                 }
-                *sources
-                    .entry(ret.unwrap())
-                    .or_insert_with(|| Instant::now()) = Instant::now();
+                *sources.entry(ret.unwrap()).or_insert_with(Instant::now) = Instant::now();
             }
             SelectResult::RemoteRecv(ret) => {
                 if let Ok((n, target_addr)) = ret {
                     log::info!("get udp {} bytes response from {}", n, target_addr);
-                    if OPTIONS.server_args().disable_udp_hole {
-                        if let None = sources
+                    if OPTIONS.server_args().disable_udp_hole
+                        && sources
                             .get(&target_addr)
                             .map(|timeout| {
                                 if timeout.elapsed().as_secs() < 60 {
@@ -156,10 +152,10 @@ async fn target_to_source(
                                 }
                             })
                             .unwrap_or_default()
-                        {
-                            log::error!("skip udp packet from {}", target_addr);
-                            continue;
-                        }
+                            .is_none()
+                    {
+                        log::error!("skip udp packet from {}", target_addr);
+                        continue;
                     }
                     header.clear();
                     UdpAssociate::generate(&mut header, &target_addr, n as u16);
