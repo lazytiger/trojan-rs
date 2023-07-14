@@ -287,7 +287,6 @@ pub async fn run_profiler(
     let (req_sender, req_receiver) = mpsc::unbounded_channel();
     let (resp_sender, mut resp_receiver) = mpsc::unbounded_channel();
     let (ipset_sender, ipset_receiver) = mpsc::unbounded_channel();
-    let (remote_resp_sender, mut remote_resp_receiver) = mpsc::unbounded_channel();
     spawn(start_check_routine(
         req_receiver,
         resp_sender,
@@ -310,9 +309,10 @@ pub async fn run_profiler(
     let mut send_buffer = BytesMut::new();
     let mut next_check = Instant::now();
 
+    let (remote_resp_sender, mut remote_resp_receiver) = mpsc::unbounded_channel();
     let mut reconnect = writer.write_all(request.as_ref()).await.is_err();
     if !reconnect {
-        spawn(start_remote_response(reader, remote_resp_sender.clone()));
+        spawn(start_remote_response(reader, remote_resp_sender));
     } else {
         let _ = writer.shutdown().await;
     }
@@ -394,7 +394,9 @@ pub async fn run_profiler(
                 (reader, writer) = remote.into_split();
                 reconnect = writer.write_all(request.as_ref()).await.is_err();
                 if !reconnect {
-                    spawn(start_remote_response(reader, remote_resp_sender.clone()));
+                    let (sender, receiver) = mpsc::unbounded_channel();
+                    remote_resp_receiver = receiver;
+                    spawn(start_remote_response(reader, sender));
                 } else {
                     log::error!("reconnect send handshake to remote ping server failed");
                     let _ = writer.shutdown().await;
