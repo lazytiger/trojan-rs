@@ -1,4 +1,9 @@
-use std::{path::Path, thread, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    path::Path,
+    thread,
+    time::Duration,
+};
 
 use crossbeam::channel::{unbounded, Sender};
 use mio::{Events, Poll};
@@ -13,7 +18,11 @@ pub use wintool::adapter::{
     get_adapter_index, get_adapter_ip, get_main_adapter_gwif, set_dns_server,
 };
 
-use crate::{types::Result, OPTIONS};
+use crate::{
+    types::{Result, TrojanError},
+    wintun::route_add_with_if,
+    OPTIONS,
+};
 
 mod domain;
 mod server;
@@ -68,6 +77,22 @@ pub fn run() -> Result<()> {
 
     while get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).is_none() {
         thread::sleep(Duration::new(1, 0));
+    }
+
+    if let Some((main_gw, main_index)) = get_main_adapter_gwif() {
+        log::warn!(
+            "main adapter gateway is {}, main adapter index is :{}",
+            main_gw,
+            main_index
+        );
+        let gw: Ipv4Addr = OPTIONS.dns_args().poisoned_dns.parse()?;
+        if let Some(SocketAddr::V4(v4)) = &OPTIONS.back_addr {
+            let index: u32 = (*v4.ip()).into();
+            route_add_with_if(index, !0, gw.into(), main_index)?;
+        }
+    } else {
+        log::error!("main adapter gateway not found");
+        return Err(TrojanError::MainAdapterNotFound);
     }
     let index = get_adapter_index(OPTIONS.dns_args().tun_name.as_str()).unwrap();
 
