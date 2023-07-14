@@ -341,6 +341,7 @@ pub async fn run_profiler(
             SelectReturn::RemoteResponse(resp) => {
                 let (ip, ping, lost) = resp.unwrap();
                 if ip.is_unspecified() && ping == 0 && lost == 0 {
+                    log::error!("remote server connection is closed, reconnect now");
                     reconnect = true;
                 } else {
                     if let Some(pr) = set.get_mut(&ip) {
@@ -371,6 +372,7 @@ pub async fn run_profiler(
                 }
 
                 if writer.write_all(send_buffer.as_ref()).await.is_err() {
+                    log::error!("send ping request to server failed, reconnect now");
                     reconnect = true;
                 }
 
@@ -394,8 +396,11 @@ pub async fn run_profiler(
                 if !reconnect {
                     spawn(start_remote_response(reader, remote_resp_sender.clone()));
                 } else {
+                    log::error!("reconnect send handshake to remote ping server failed");
                     let _ = writer.shutdown().await;
                 }
+            } else {
+                log::error!("reconnect to remote ping server failed");
             }
         }
 

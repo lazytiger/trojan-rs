@@ -63,7 +63,7 @@ fn get_message_key(message: &Message) -> String {
 }
 
 enum SelectResult {
-    Socket(std::io::Result<(IpEndpoint, Vec<u8>)>),
+    Socket(std::io::Result<(IpEndpoint, BytesMut)>),
     Receiver(Option<Response>),
 }
 
@@ -105,7 +105,7 @@ pub async fn start_dns(
         match ret {
             SelectResult::Socket(req) => match req {
                 Ok((source, data)) => {
-                    if let Ok(message) = Message::from_bytes(&data.as_slice()) {
+                    if let Ok(message) = Message::from_bytes(&data.as_ref()) {
                         if message.query_count() != 1 {
                             continue;
                         }
@@ -125,12 +125,12 @@ pub async fn start_dns(
                                     data.len() as u16,
                                 );
                                 if trust.write_all(header.as_ref()).await.is_err()
-                                    || trust.write_all(data.as_slice()).await.is_err()
+                                    || trust.write_all(data.as_ref()).await.is_err()
                                 {
                                     let _ = trust.shutdown().await;
                                 }
                             } else {
-                                let _ = distrust.send_to(data.as_slice(), distrusted_addr).await;
+                                let _ = distrust.send_to(data.as_ref(), distrusted_addr).await;
                             }
                         }
                     }

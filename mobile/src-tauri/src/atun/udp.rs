@@ -19,7 +19,7 @@ use crate::atun::{
 
 enum SelectResult {
     Timeout,
-    Socket(std::io::Result<(IpEndpoint, Vec<u8>)>),
+    Socket(std::io::Result<(IpEndpoint, BytesMut)>),
     Receiver(Option<IpEndpoint>),
 }
 
@@ -97,7 +97,7 @@ pub async fn start_udp(
                     header.clear();
                     UdpAssociate::generate_endpoint(&mut header, &target, data.len() as u16);
                     let _ = remote.write_all(header.as_ref()).await;
-                    let _ = remote.write_all(data.as_slice()).await;
+                    let _ = remote.write_all(data.as_ref()).await;
                 }
                 Err(err) => {
                     log::info!("udp read from local failed:{}", err);
