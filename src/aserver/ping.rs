@@ -52,13 +52,15 @@ pub async fn start_check_routine(
                         continue;
                     }
                 }
+                if cache_senders.get(&ip).is_none() {
+                    let client = match ip {
+                        IpAddr::V4(_) => client4.clone(),
+                        IpAddr::V6(_) => client6.clone(),
+                    };
+                    tokio::spawn(do_check(ip, id, client, resp_sender.clone()));
+                    id = id.wrapping_add(1);
+                }
                 cache_senders.entry(ip).or_default().push(sender);
-                let client = match ip {
-                    IpAddr::V4(_) => client4.clone(),
-                    IpAddr::V6(_) => client6.clone(),
-                };
-                tokio::spawn(do_check(ip, id, client, resp_sender.clone()));
-                id = id.wrapping_add(1);
             }
             SelectResult::Response(ret) => {
                 let result = ret.unwrap();
@@ -126,7 +128,7 @@ pub async fn start_ping(
             }
         } else {
             while !recv_buffer.is_empty() {
-                let addr: IpAddr = match *recv_buffer.get(0).unwrap() {
+                let addr: IpAddr = match *recv_buffer.first().unwrap() {
                     proto::IPV4 => {
                         if recv_buffer.len() < 5 {
                             break;
