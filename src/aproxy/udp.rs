@@ -83,30 +83,35 @@ pub async fn run_udp(
                     None => {
                         log::info!("remote not found for {}", src_addr);
                         let session = ClientConnection::new(config.clone(), server_name.clone())?;
-                        let remote =
-                            TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
-                        let mut remote = TlsClientStream::new(remote, session, 4096);
-                        if let Err(err) = remote.write_all(request.as_ref()).await {
-                            log::error!("send handshake to remote failed:{}", err);
-                            continue;
-                        }
                         let local = locals.entry(dst_addr).or_insert_with(|| {
                             log::info!("local not found for {}", dst_addr);
                             let local = new_socket(dst_addr, true).unwrap();
                             let local = UdpSocket::from_std(local.into()).unwrap();
                             Arc::new(local)
                         });
-                        let (read_half, write_half) = remote.into_split();
-                        let (req_sender, req_receiver) = channel(1024);
-                        remotes.insert(src_addr, req_sender);
-                        spawn(local_to_remote(req_receiver, write_half));
-                        spawn(remote_to_local(
-                            read_half,
-                            local.clone(),
-                            src_addr,
-                            sender.clone(),
-                        ));
-                        remotes.get(&src_addr).unwrap()
+                        if let Ok(remote) =
+                            TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await
+                        {
+                            let mut remote = TlsClientStream::new(remote, session, 4096);
+                            if let Err(err) = remote.write_all(request.as_ref()).await {
+                                log::error!("send handshake to remote failed:{}", err);
+                                continue;
+                            }
+                            let (read_half, write_half) = remote.into_split();
+                            let (req_sender, req_receiver) = channel(1024);
+                            remotes.insert(src_addr, req_sender);
+                            spawn(local_to_remote(req_receiver, write_half));
+                            spawn(remote_to_local(
+                                read_half,
+                                local.clone(),
+                                src_addr,
+                                sender.clone(),
+                            ));
+                            remotes.get(&src_addr).unwrap()
+                        } else {
+                            log::error!("connect to remote server failed");
+                            continue;
+                        }
                     }
                 };
                 let _ = remote.send((dst_addr, recv_buffer)).await;

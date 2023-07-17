@@ -69,10 +69,21 @@ async fn async_run() -> Result<()> {
 }
 
 async fn start_proxy(
-    mut conn: TlsServerStream,
+    conn: TlsServerStream,
     sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
     src_addr: SocketAddr,
     task_count: Arc<AtomicU32>,
+) {
+    if let Err(err) = start_proxy_internal(conn, sender, src_addr).await {
+        log::error!("run proxy failed:{:?}", err);
+    }
+    task_count.fetch_sub(1, Ordering::Relaxed);
+}
+
+async fn start_proxy_internal(
+    mut conn: TlsServerStream,
+    sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
+    src_addr: SocketAddr,
 ) -> Result<()> {
     let mut buffer = BytesMut::new();
     let now = Instant::now();
@@ -129,7 +140,7 @@ async fn start_proxy(
             }
         }
     };
-    let ret = if let Some((cmd, target_addr)) = ret {
+    if let Some((cmd, target_addr)) = ret {
         log::info!("cmd:{} {} - {}", cmd, src_addr, target_addr);
         match cmd {
             CONNECT => start_tcp(conn, target_addr, buffer, src_addr).await,
@@ -149,7 +160,5 @@ async fn start_proxy(
         );
         let _ = conn.shutdown().await;
         Ok(())
-    };
-    task_count.fetch_sub(1, Ordering::Relaxed);
-    ret
+    }
 }
