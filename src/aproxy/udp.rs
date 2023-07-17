@@ -16,7 +16,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender, UnboundedSender},
 };
 
-use tokio_rustls::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf};
+use tokio_rustls::{TlsClientReadHalf, TlsClientStream};
 
 use crate::{
     aproxy::new_socket,
@@ -42,6 +42,7 @@ pub async fn run_udp(
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let mut request = BytesMut::new();
     TrojanRequest::generate(&mut request, UDP_ASSOCIATE, &empty);
+    let request = Arc::new(request);
     let last_check = Instant::now();
     let (sender, mut receiver) = channel(1024);
     loop {
@@ -89,29 +90,17 @@ pub async fn run_udp(
                             let local = UdpSocket::from_std(local.into()).unwrap();
                             Arc::new(local)
                         });
-                        if let Ok(remote) =
-                            TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await
-                        {
-                            let mut remote = TlsClientStream::new(remote, session, 4096);
-                            if let Err(err) = remote.write_all(request.as_ref()).await {
-                                log::error!("send handshake to remote failed:{}", err);
-                                continue;
-                            }
-                            let (read_half, write_half) = remote.into_split();
-                            let (req_sender, req_receiver) = channel(1024);
-                            remotes.insert(src_addr, req_sender);
-                            spawn(local_to_remote(req_receiver, write_half));
-                            spawn(remote_to_local(
-                                read_half,
-                                local.clone(),
-                                src_addr,
-                                sender.clone(),
-                            ));
-                            remotes.get(&src_addr).unwrap()
-                        } else {
-                            log::error!("connect to remote server failed");
-                            continue;
-                        }
+                        let (req_sender, req_receiver) = channel(1024);
+                        remotes.insert(src_addr, req_sender);
+                        spawn(local_to_remote(
+                            req_receiver,
+                            local.clone(),
+                            session,
+                            request.clone(),
+                            src_addr,
+                            sender.clone(),
+                        ));
+                        remotes.get(&src_addr).unwrap()
                     }
                 };
                 let _ = remote.send((dst_addr, recv_buffer)).await;
@@ -143,8 +132,27 @@ pub async fn run_udp(
 
 async fn local_to_remote(
     mut local: Receiver<(SocketAddr, Vec<u8>)>,
-    mut remote: TlsClientWriteHalf,
+    socket: Arc<UdpSocket>,
+    session: ClientConnection,
+    request: Arc<BytesMut>,
+    src_addr: SocketAddr,
+    sender: Sender<SocketAddr>,
 ) {
+    let mut remote =
+        if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
+            let mut remote = TlsClientStream::new(remote, session, 4096);
+            if let Err(err) = remote.write_all(request.as_ref()).await {
+                log::error!("send handshake to remote failed:{}", err);
+                return;
+            }
+            let (read_half, write_half) = remote.into_split();
+            spawn(remote_to_local(read_half, socket, src_addr, sender));
+            write_half
+        } else {
+            log::error!("connect to remote server failed");
+            return;
+        };
+
     let mut header = BytesMut::new();
     while let Some((target, data)) = local.recv().await {
         header.clear();
