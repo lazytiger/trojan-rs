@@ -40,13 +40,12 @@ mod udp;
 
 pub async fn init_tls_conn(
     config: Arc<ClientConfig>,
-    buffer_size: usize,
     server_addr: SocketAddr,
     server_name: ServerName,
 ) -> types::Result<TlsClientStream> {
     let stream = tokio::net::TcpStream::connect(server_addr).await?;
     let session = ClientConnection::new(config, server_name)?;
-    Ok(TlsClientStream::new(stream, session, buffer_size))
+    Ok(TlsClientStream::new(stream, session))
 }
 
 fn digest_pass(pass: &String) -> String {
@@ -196,7 +195,6 @@ pub async fn async_run(
                 config.clone(),
                 server_addr,
                 server_name.clone(),
-                4096,
                 pass.clone(),
             ));
         }
@@ -208,7 +206,6 @@ pub async fn async_run(
                     config.clone(),
                     server_addr,
                     server_name.clone(),
-                    4096,
                     udp_header.clone(),
                     trusted_addr,
                     distrusted_addr,

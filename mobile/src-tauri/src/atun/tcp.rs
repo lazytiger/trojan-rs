@@ -17,7 +17,6 @@ pub async fn start_tcp(
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
     server_name: ServerName,
-    buffer_size: usize,
     pass: String,
 ) {
     if local.peer_addr().ip() == server_addr.ip() {
@@ -37,7 +36,7 @@ pub async fn start_tcp(
             let _ = local.shutdown().await;
         }
     } else {
-        let client = init_tls_conn(config.clone(), buffer_size, server_addr, server_name).await;
+        let client = init_tls_conn(config.clone(), server_addr, server_name).await;
         if let Ok(client) = client {
             let (read_half, write_half) = client.into_split();
             let (reader, writer) = local.into_split();

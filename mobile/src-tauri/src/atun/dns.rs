@@ -28,10 +28,9 @@ pub async fn start_trust_response(
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
     server_name: ServerName,
-    buffer_size: usize,
     request: Arc<BytesMut>,
 ) -> Option<TlsClientWriteHalf> {
-    if let Ok(client) = init_tls_conn(config, buffer_size, server_addr, server_name).await {
+    if let Ok(client) = init_tls_conn(config, server_addr, server_name).await {
         let (read_half, mut write_half) = client.into_split();
         if let Err(err) = write_half.write_all(request.as_ref()).await {
             log::error!("send handshake to remote server failed:{}", err);
@@ -72,7 +71,6 @@ pub async fn start_dns(
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
     server_name: ServerName,
-    buffer_size: usize,
     request: Arc<BytesMut>,
     trusted_addr: SocketAddr,
     distrusted_addr: SocketAddr,
@@ -85,7 +83,6 @@ pub async fn start_dns(
         config.clone(),
         server_addr,
         server_name.clone(),
-        buffer_size,
         request.clone(),
     )
     .await
@@ -158,7 +155,6 @@ pub async fn start_dns(
                         config.clone(),
                         server_addr,
                         server_name.clone(),
-                        buffer_size,
                         request.clone(),
                     )
                     .await
