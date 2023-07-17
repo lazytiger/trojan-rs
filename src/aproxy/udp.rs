@@ -140,7 +140,7 @@ async fn local_to_remote(
 ) {
     let mut remote =
         if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
-            let mut remote = TlsClientStream::new(remote, session, 4096);
+            let mut remote = TlsClientStream::new(remote, session);
             if let Err(err) = remote.write_all(request.as_ref()).await {
                 log::error!("send handshake to remote failed:{}", err);
                 return;

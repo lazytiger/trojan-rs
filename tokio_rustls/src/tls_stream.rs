@@ -125,12 +125,12 @@ where
     T: DerefMut<Target = ConnectionCommon<D>>,
     T: Unpin,
 {
-    pub fn new(stream: TcpStream, mut session: T, buffer_size: usize) -> Self {
+    pub fn new(stream: TcpStream, mut session: T) -> Self {
         session.set_buffer_limit(None);
         Self {
             stream,
             session,
-            recv_buf: vec![0u8; buffer_size],
+            recv_buf: vec![0u8; 4096],
             send_buf: BytesMut::new(),
             _phantom: Default::default(),
         }

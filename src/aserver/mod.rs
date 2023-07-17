@@ -52,7 +52,7 @@ async fn async_run() -> Result<()> {
         let (client, src_addr) = listener.accept().await?;
         log::info!("accept {}", src_addr);
         let session = ServerConnection::new(config.clone())?;
-        let conn = TlsServerStream::new(client, session, 4096);
+        let conn = TlsServerStream::new(client, session);
         task_count.fetch_add(1, Ordering::Relaxed);
         spawn(start_proxy(
             conn,

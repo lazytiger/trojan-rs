@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use async_smoltcp::{UdpSocket, UdpWriteHalf};
-use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
+use tokio_rustls::TlsClientReadHalf;
 
 use crate::{
     awintun::init_tls_conn,
@@ -65,38 +65,21 @@ pub async fn run_udp_dispatch(
                     Some(sender) => sender,
                     None => {
                         log::info!("remote for {} not found", src_addr);
-                        if let Ok(client) =
-                            init_tls_conn(config.clone(), mtu, server_addr, server_name.clone())
-                                .await
-                        {
-                            let (read_half, mut write_half) = client.into_split();
-                            if let Err(err) = write_half.write_all(request.as_ref()).await {
-                                log::error!("udp send handshake failed:{}", err);
-                                let _ = write_half.shutdown().await;
-                                continue;
-                            }
-                            log::info!(
-                                "remote:{:?} created for source:{}",
-                                read_half.local_addr().await,
-                                src_addr
-                            );
+                        let local = locals.get(&dst_addr).unwrap().clone();
+                        let (req_sender, req_receiver) = channel(mtu);
+                        req_senders.insert(src_addr, req_sender);
 
-                            let local = locals.get(&dst_addr).unwrap().clone();
-
-                            let (req_sender, req_receiver) = channel(mtu);
-                            req_senders.insert(src_addr, req_sender);
-                            spawn(local_to_remote(req_receiver, write_half, src_addr));
-                            spawn(remote_to_local(
-                                read_half,
-                                local,
-                                src_addr,
-                                close_sender.clone(),
-                            ));
-                            req_senders.get(&src_addr).unwrap()
-                        } else {
-                            log::error!("{} connect to remote server failed", src_addr);
-                            continue;
-                        }
+                        spawn(local_to_remote(
+                            req_receiver,
+                            config.clone(),
+                            server_addr,
+                            server_name.clone(),
+                            src_addr,
+                            local,
+                            close_sender.clone(),
+                            request.clone(),
+                        ));
+                        req_senders.get(&src_addr).unwrap()
                     }
                 };
                 let _ = sender.send((dst_addr, data)).await;
@@ -147,9 +130,35 @@ pub async fn start_udp(
 
 async fn local_to_remote(
     mut receiver: Receiver<(IpEndpoint, BytesMut)>,
-    mut remote: TlsClientWriteHalf,
+    config: Arc<ClientConfig>,
+    server_addr: SocketAddr,
+    server_name: ServerName,
     src_addr: IpEndpoint,
+    local: Arc<UdpWriteHalf>,
+    sender: Sender<(IpEndpoint, bool)>,
+    request: Arc<BytesMut>,
 ) {
+    let mut remote =
+        if let Ok(client) = init_tls_conn(config, server_addr, server_name.clone()).await {
+            let (read_half, mut write_half) = client.into_split();
+            if let Err(err) = write_half.write_all(request.as_ref()).await {
+                log::error!("udp send handshake failed:{}", err);
+                let _ = write_half.shutdown().await;
+                return;
+            }
+            log::info!(
+                "remote:{:?} created for source:{}",
+                read_half.local_addr().await,
+                src_addr
+            );
+
+            spawn(remote_to_local(read_half, local, src_addr, sender));
+            write_half
+        } else {
+            log::error!("{} connect to remote server failed", src_addr);
+            return;
+        };
+
     log::info!("local to remote started");
     let mut header = BytesMut::new();
     while let Some((target, data)) = receiver.recv().await {

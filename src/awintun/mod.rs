@@ -33,13 +33,12 @@ mod udp;
 
 pub async fn init_tls_conn(
     config: Arc<ClientConfig>,
-    buffer_size: usize,
     server_addr: SocketAddr,
     server_name: ServerName,
 ) -> types::Result<TlsClientStream> {
     let stream = tokio::net::TcpStream::connect(server_addr).await?;
     let session = ClientConnection::new(config, server_name)?;
-    Ok(TlsClientStream::new(stream, session, buffer_size))
+    Ok(TlsClientStream::new(stream, session))
 }
 
 pub fn run() -> Result<()> {

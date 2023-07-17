@@ -303,7 +303,7 @@ pub async fn run_profiler(
 
     let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
     let session = ClientConnection::new(config.clone(), server_name.clone())?;
-    let remote = TlsClientStream::new(remote, session, 4096);
+    let remote = TlsClientStream::new(remote, session);
     let (mut reader, mut writer) = remote.into_split();
 
     let mut send_buffer = BytesMut::new();
@@ -390,7 +390,7 @@ pub async fn run_profiler(
             let _ = writer.shutdown().await;
             if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
                 let session = ClientConnection::new(config.clone(), server_name.clone())?;
-                let remote = TlsClientStream::new(remote, session, 4096);
+                let remote = TlsClientStream::new(remote, session);
                 (reader, writer) = remote.into_split();
                 reconnect = writer.write_all(request.as_ref()).await.is_err();
                 if !reconnect {

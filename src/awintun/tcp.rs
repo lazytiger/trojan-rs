@@ -22,7 +22,7 @@ pub async fn start_tcp(
     server_addr: SocketAddr,
     server_name: ServerName,
 ) {
-    let client = init_tls_conn(config.clone(), 4096, server_addr, server_name).await;
+    let client = init_tls_conn(config.clone(), server_addr, server_name).await;
     if let Ok(client) = client {
         let (read_half, write_half) = client.into_split();
         let (reader, writer) = local.into_split();
