@@ -144,6 +144,7 @@ async fn local_to_remote(
             if let Err(err) = write_half.write_all(request.as_ref()).await {
                 log::error!("udp send handshake failed:{}", err);
                 let _ = write_half.shutdown().await;
+                let _ = sender.send((src_addr, true)).await;
                 return;
             }
             log::info!(
@@ -156,6 +157,7 @@ async fn local_to_remote(
             write_half
         } else {
             log::error!("{} connect to remote server failed", src_addr);
+            let _ = sender.send((src_addr, true)).await;
             return;
         };
 
