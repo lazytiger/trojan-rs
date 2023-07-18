@@ -39,19 +39,31 @@ pub async fn local_to_remote(mut local: TcpReadHalf, mut remote: TlsClientWriteH
         let _ = remote.shutdown().await;
         return;
     }
-    let _ = copy_stream(&mut local, &mut remote).await;
+    let dst_addr = local.peer_addr();
+    let _ = copy_stream(
+        &mut local,
+        &mut remote,
+        format!("local to remote:{}", dst_addr),
+    )
+    .await;
     local.close();
     let _ = remote.shutdown().await;
     log::info!("local to remote closed");
 }
 
 pub async fn remote_to_local(mut remote: TlsClientReadHalf, mut local: TcpWriteHalf) {
-    let _ = copy_stream(&mut remote, &mut local).await;
+    let dst_addr = remote.peer_addr().await;
+    let _ = copy_stream(
+        &mut remote,
+        &mut local,
+        format!("remote:{:?} to local", dst_addr),
+    )
+    .await;
     log::info!("remote to local closed");
     let _ = local.shutdown().await;
 }
 
-async fn copy_stream<R, W>(reader: &mut R, writer: &mut W)
+async fn copy_stream<R, W>(reader: &mut R, writer: &mut W, message: String)
 where
     R: AsyncReadExt + Unpin,
     W: AsyncWriteExt + Unpin,
@@ -64,9 +76,11 @@ where
     .await
     {
         if n == 0 {
+            log::warn!("tcp {} failed, read shutdown", message);
             break;
         }
-        if let Err(_) = writer.write_all(&buffer.as_slice()[..n]).await {
+        if writer.write_all(&buffer.as_slice()[..n]).await.is_err() {
+            log::warn!("tcp {} failed, write shutdown", message);
             break;
         }
     }

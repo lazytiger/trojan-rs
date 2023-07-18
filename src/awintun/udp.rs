@@ -138,6 +138,7 @@ async fn local_to_remote(
     sender: Sender<(IpEndpoint, bool)>,
     request: Arc<BytesMut>,
 ) {
+    let dst_addr = local.peer_addr();
     let mut remote =
         if let Ok(client) = init_tls_conn(config, server_addr, server_name.clone()).await {
             let (read_half, mut write_half) = client.into_split();
@@ -164,8 +165,8 @@ async fn local_to_remote(
     log::info!("local to remote started");
     let mut header = BytesMut::new();
     while let Some((target, data)) = receiver.recv().await {
-        if data.len() == 0 {
-            log::info!("empty data found");
+        if data.is_empty() {
+            log::warn!("empty data found");
             continue;
         }
         log::info!("send {} bytes data to {}", data.len(), target);
@@ -174,6 +175,7 @@ async fn local_to_remote(
         if remote.write_all(header.as_ref()).await.is_err()
             || remote.write_all(data.as_ref()).await.is_err()
         {
+            log::warn!("udp write to {} failed", dst_addr);
             break;
         }
     }
@@ -196,7 +198,7 @@ async fn remote_to_local(
     'main: loop {
         match tokio::time::timeout(Duration::from_secs(120), remote.read_buf(&mut buffer)).await {
             Ok(Ok(0)) | Err(_) | Ok(Err(_)) => {
-                log::info!(
+                log::warn!(
                     "{} read from remote:{:?} failed",
                     source,
                     remote.local_addr().await
