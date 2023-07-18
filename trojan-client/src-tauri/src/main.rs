@@ -362,17 +362,17 @@ fn init(state: State<TrojanState>) -> Config {
 fn update_speed(state: State<TrojanState>, window: Window<Wry>) {
     let mut state = state.lock().unwrap();
     let (mut rx_speed, mut tx_speed) = state.get_speed().unwrap_or_default();
-    let rx_unit = if rx_speed < 1.0 {
-        rx_speed *= 1024.0;
-        "KB"
-    } else {
+    let rx_unit = if rx_speed > 1024.0 {
+        rx_speed /= 1024.0;
         "MB"
+    } else {
+        "KB"
     };
-    let tx_unit = if tx_speed < 1.0 {
-        tx_speed *= 1024.0;
-        "KB"
-    } else {
+    let tx_unit = if tx_speed > 1024.0 {
+        tx_speed /= 1024.0;
         "MB"
+    } else {
+        "KB"
     };
     window
         .set_title(

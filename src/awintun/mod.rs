@@ -1,7 +1,9 @@
 use std::{
+    fs::OpenOptions,
+    io::Write,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use bytes::BytesMut;
@@ -113,6 +115,7 @@ async fn async_run() -> Result<()> {
         close_receiver,
         close_sender.clone(),
     ));
+    let mut last_speed_time = Instant::now();
 
     loop {
         let (tcp_streams, udp_sockets) = device.poll();
@@ -134,6 +137,21 @@ async fn async_run() -> Result<()> {
             let writer = Arc::new(socket.writer());
             let _ = socket_sender.send(writer).await;
             spawn(start_udp(socket, data_sender.clone(), close_sender.clone()));
+        }
+        if last_speed_time.elapsed().as_millis() > 1000 {
+            let (rx_speed, tx_speed) = device.calculate_speed();
+            log::info!(
+                "current speed - rx:{:.4}KB/s, tx:{:.4}/KB/s",
+                rx_speed,
+                tx_speed
+            );
+            let mut file = OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(OPTIONS.wintun_args().status_file.as_str())?;
+            write!(&mut file, "{:.4} {:.4}", rx_speed, tx_speed)?;
+            last_speed_time = Instant::now();
         }
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
