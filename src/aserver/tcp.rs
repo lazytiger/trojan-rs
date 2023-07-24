@@ -101,7 +101,7 @@ async fn copy<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
             {
                 continue;
             } else {
-                log::warn!("{} write failed", message);
+                log::error!("{} write failed", message);
             }
         }
         break;
