@@ -93,13 +93,18 @@ async fn copy<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
     .await
     {
         if n > 0 {
-            if let Err(err) = write.write_all(&buffer.as_slice()[..n]).await {
-                log::warn!("{} write failed:{}", message, err);
-                break;
+            if let Ok(Ok(())) = tokio::time::timeout(
+                Duration::from_secs(10),
+                write.write_all(&buffer.as_slice()[..n]),
+            )
+            .await
+            {
+                continue;
+            } else {
+                log::warn!("{} write failed", message);
             }
-        } else {
-            break;
         }
+        break;
     }
     log::warn!("{} read failed", message);
     let _ = write.shutdown().await;
