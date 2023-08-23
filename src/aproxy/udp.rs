@@ -4,7 +4,7 @@ use std::{
     io::ErrorKind,
     net::{IpAddr, SocketAddr},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytes::{Buf, BytesMut};
@@ -178,12 +178,13 @@ async fn remote_to_local(
 ) {
     let mut buffer = BytesMut::new();
     'main: loop {
-        match remote.read_buf(&mut buffer).await {
-            Err(_) | Ok(0) => {
-                log::error!("udp remote to local:{} failed, remote closed", src_addr);
-                break;
-            }
-            Ok(_) => loop {
+        match tokio::time::timeout(
+            Duration::from_secs(OPTIONS.udp_idle_timeout),
+            remote.read_buf(&mut buffer),
+        )
+        .await
+        {
+            Ok(Ok(n)) if n > 0 => loop {
                 match UdpAssociate::parse(buffer.as_ref()) {
                     UdpParseResult::Continued => {
                         log::info!("udp continue parsing with {} bytes left", buffer.len());
@@ -206,6 +207,10 @@ async fn remote_to_local(
                     }
                 }
             },
+            _ => {
+                log::error!("udp remote to local:{} failed, remote closed", src_addr);
+                break;
+            }
         }
     }
     let _ = sender.send(src_addr).await;

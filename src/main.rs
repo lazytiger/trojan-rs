@@ -18,6 +18,7 @@ cfg_if::cfg_if! {
 }
 mod aproxy;
 mod aserver;
+mod async_utils;
 mod idle_pool;
 mod proto;
 mod proxy;

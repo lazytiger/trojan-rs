@@ -7,17 +7,15 @@ use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, ServerName};
 use tokio::{
     io::AsyncWriteExt,
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpListener, TcpStream,
-    },
+    net::{TcpListener, TcpStream},
     spawn,
     sync::mpsc::UnboundedSender,
 };
 
-use tokio_rustls::{TlsClientReadHalf, TlsClientStream, TlsClientWriteHalf};
+use tokio_rustls::TlsClientStream;
 
 use crate::{
+    async_utils::copy,
     config::OPTIONS,
     proto::{TrojanRequest, CONNECT},
     sys,
@@ -64,24 +62,18 @@ async fn start_tcp_proxy(
     } else {
         let (remote_read, remote_write) = remote.into_split();
         let (local_read, local_write) = local.into_split();
-        spawn(local_to_remote(local_read, remote_write));
-        spawn(remote_to_local(remote_read, local_write));
+        spawn(copy(
+            local_read,
+            remote_write,
+            format!("tcp local to remote:{}", dst_addr),
+            OPTIONS.tcp_idle_timeout,
+        ));
+        spawn(copy(
+            remote_read,
+            local_write,
+            format!("tcp remote:{} to local", dst_addr),
+            OPTIONS.tcp_idle_timeout,
+        ));
     }
     Ok(())
-}
-
-async fn remote_to_local(mut remote: TlsClientReadHalf, mut local: OwnedWriteHalf) {
-    if let Err(err) = tokio::io::copy(&mut remote, &mut local).await {
-        log::error!("transfer from remote to local failed:{}", err);
-    }
-    let _ = local.shutdown().await;
-    log::info!("tcp remote to local exit");
-}
-
-async fn local_to_remote(mut local: OwnedReadHalf, mut remote: TlsClientWriteHalf) {
-    if let Err(err) = tokio::io::copy(&mut local, &mut remote).await {
-        log::error!("transfer from local to remote failed:{}", err);
-    }
-    let _ = remote.shutdown().await;
-    log::info!("tcp local to remote exit");
 }
