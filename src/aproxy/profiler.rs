@@ -11,7 +11,7 @@ use itertools::Itertools;
 use rand::random;
 use ringbuf::{HeapRb, Rb};
 use rustls::{ClientConfig, ClientConnection, ServerName};
-use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
+use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, SurgeError, ICMP};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -196,11 +196,11 @@ async fn do_check(
 
 async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
     let config = ConfigBuilder::default().kind(ICMP::V4).build();
-    let client = Client::new(&config).unwrap();
+    let mut client = Client::new(&config).unwrap();
     let mut interval = tokio::time::interval(Duration::from_secs(timeout));
     let size = (ip_timeout / timeout + 1) as usize;
     let mut rb = HeapRb::new(size);
-    loop {
+    'Main: loop {
         interval.tick().await;
         let ip = if let Ok(Some(ip)) =
             lookup_host(host.as_str()).map(|data| data.iter().find(|ip| ip.is_ipv4()).cloned())
@@ -216,13 +216,23 @@ async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         for i in 0..100u128 {
             tick.tick().await;
-            if let Ok((_, cost)) = pinger.ping(PingSequence(i as u16), &[]).await {
-                avg_cost = ((avg_cost * received) + cost.as_millis()) / (received + 1);
-                received += 1;
+            match pinger.ping(PingSequence(i as u16), &[]).await {
+                Ok((_, cost)) => {
+                    avg_cost = ((avg_cost * received) + cost.as_millis()) / (received + 1);
+                    received += 1;
+                }
+                Err(SurgeError::NetworkError) => {
+                    log::error!("pinger network failed, reset pinger client now");
+                    client = Client::new(&config).unwrap();
+                    continue 'Main;
+                }
+                _ => {
+                    continue;
+                }
             }
         }
         log::error!(
-            "proxy server status, ip:{} ping:{}, lost:{}",
+            "current proxy server status, ip:{} ping:{}, lost:{}",
             ip,
             avg_cost,
             100 - received
@@ -239,6 +249,12 @@ async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
         }
         let avg_ping = total_ping / rb.len();
         let avg_lost = total_lost / rb.len();
+        log::error!(
+            "average proxy server status, ip:{} ping:{}, lost:{}",
+            ip,
+            avg_ping,
+            avg_lost,
+        );
 
         if let Err(err) = CONDITION.write().map(|mut cond| {
             cond.lost = avg_lost as u8;
