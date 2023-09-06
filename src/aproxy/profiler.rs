@@ -222,6 +222,7 @@ async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
             }
         }
         if received != 100 {
+            // recreate a client if any error occur, otherwise pinger would stuck for the error, maybe some error in surge
             client = Client::new(&config).unwrap();
         }
         log::error!(
