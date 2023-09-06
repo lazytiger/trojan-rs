@@ -11,7 +11,7 @@ use itertools::Itertools;
 use rand::random;
 use ringbuf::{HeapRb, Rb};
 use rustls::{ClientConfig, ClientConnection, ServerName};
-use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, SurgeError, ICMP};
+use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -200,7 +200,7 @@ async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
     let mut interval = tokio::time::interval(Duration::from_secs(timeout));
     let size = (ip_timeout / timeout + 1) as usize;
     let mut rb = HeapRb::new(size);
-    'Main: loop {
+    loop {
         interval.tick().await;
         let ip = if let Ok(Some(ip)) =
             lookup_host(host.as_str()).map(|data| data.iter().find(|ip| ip.is_ipv4()).cloned())
@@ -216,20 +216,13 @@ async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         for i in 0..100u128 {
             tick.tick().await;
-            match pinger.ping(PingSequence(i as u16), &[]).await {
-                Ok((_, cost)) => {
-                    avg_cost = ((avg_cost * received) + cost.as_millis()) / (received + 1);
-                    received += 1;
-                }
-                Err(SurgeError::NetworkError) => {
-                    log::error!("pinger network failed, reset pinger client now");
-                    client = Client::new(&config).unwrap();
-                    continue 'Main;
-                }
-                _ => {
-                    continue;
-                }
+            if let Ok((_, cost)) = pinger.ping(PingSequence(i as u16), &[]).await {
+                avg_cost = ((avg_cost * received) + cost.as_millis()) / (received + 1);
+                received += 1;
             }
+        }
+        if received != 100 {
+            client = Client::new(&config).unwrap();
         }
         log::error!(
             "current proxy server status, ip:{} ping:{}, lost:{}",
