@@ -66,7 +66,7 @@ pub struct TunDevice<'a, T: Tun> {
 
     interface: Option<Interface>,
     channel_buffer_size: usize,
-    tcp_tx_bufffer_size: usize,
+    tcp_tx_buffer_size: usize,
     tcp_rx_buffer_size: usize,
     udp_tx_buffer_size: usize,
     udp_rx_buffer_size: usize,
@@ -118,7 +118,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             udp_req_senders: Default::default(),
             interface: None,
             channel_buffer_size: channel_buffer,
-            tcp_tx_bufffer_size: mtu * channel_buffer,
+            tcp_tx_buffer_size: mtu * channel_buffer,
             tcp_rx_buffer_size: mtu * 128,
             udp_tx_buffer_size: mtu * channel_buffer,
             udp_rx_buffer_size: mtu * 128,
@@ -145,12 +145,12 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
 
     pub fn set_tcp_buffer_size(&mut self, rx: usize, tx: usize) {
         self.tcp_rx_buffer_size = rx.max(self.mtu * 128);
-        self.tcp_tx_bufffer_size = tx.max(self.mtu * self.channel_buffer_size);
+        self.tcp_tx_buffer_size = tx.max(self.mtu * self.channel_buffer_size);
     }
 
     pub fn set_channel_buffer_size(&mut self, channel: usize) {
         self.channel_buffer_size = channel.max(self.channel_buffer_size);
-        self.set_tcp_buffer_size(self.tcp_rx_buffer_size, self.tcp_tx_bufffer_size);
+        self.set_tcp_buffer_size(self.tcp_rx_buffer_size, self.tcp_tx_buffer_size);
         self.set_udp_buffer_size(self.udp_rx_buffer_size, self.udp_tx_buffer_size);
     }
 
@@ -178,7 +178,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         }
         let socket = TcpSocket::new(
             SocketBuffer::new(vec![0; self.tcp_rx_buffer_size]),
-            SocketBuffer::new(vec![0; self.tcp_tx_bufffer_size]),
+            SocketBuffer::new(vec![0; self.tcp_tx_buffer_size]),
         );
         let handle = self.sockets.add(socket);
         let socket = self.sockets.get_mut::<TcpSocket>(handle);
