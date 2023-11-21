@@ -161,9 +161,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
 
     fn allowed(&self, endpoint: impl Into<IpEndpoint>) -> bool {
         let endpoint = endpoint.into();
-        if endpoint.port == 0 {
-            false
-        } else if self.black_ip_list.contains(&endpoint.addr) {
+        if endpoint.port == 0 || self.black_ip_list.contains(&endpoint.addr) {
             false
         } else if self.white_ip_list.contains(&endpoint.addr) {
             true

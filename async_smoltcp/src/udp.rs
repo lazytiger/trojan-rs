@@ -37,7 +37,6 @@ impl UdpSocket {
             .recv()
             .await
             .ok_or(ErrorKind::BrokenPipe.into())
-            .map(|(addr, data)| (addr, data))
     }
 
     pub async fn recv_from_std(&mut self) -> std::io::Result<(SocketAddr, BytesMut)> {
