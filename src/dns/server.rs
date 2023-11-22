@@ -218,7 +218,9 @@ impl DnsServer {
         record.set_record_type(RecordType::PTR);
         record.set_dns_class(DNSClass::IN);
         record.set_ttl(20567);
-        record.set_data(Some(RData::PTR(Name::from_str("trojan.dns").unwrap())));
+        record.set_data(Some(RData::PTR(trust_dns_proto::rr::rdata::PTR(
+            Name::from_str("trojan.dns").unwrap(),
+        ))));
         message.add_answer(record);
         self.arp_data = message.to_vec().unwrap();
     }
@@ -271,10 +273,14 @@ impl DnsServer {
                                     record.set_dns_class(DNSClass::IN);
                                     match ip {
                                         IpAddr::V4(ip) => {
-                                            record.set_data(Some(RData::A(ip.clone())));
+                                            record.set_data(Some(RData::A(
+                                                trust_dns_proto::rr::rdata::A(ip.clone()),
+                                            )));
                                         }
                                         IpAddr::V6(ip) => {
-                                            record.set_data(Some(RData::AAAA(ip.clone())));
+                                            record.set_data(Some(RData::AAAA(
+                                                trust_dns_proto::rr::rdata::AAAA(ip.clone()),
+                                            )));
                                         }
                                     }
                                     message.add_answer(record);
@@ -410,8 +416,7 @@ impl DnsServer {
                             let mut timeout = 0;
                             for record in message.answers() {
                                 timeout = record.ttl();
-                                if let Some(addr) = record.data().and_then(|data| data.to_ip_addr())
-                                {
+                                if let Some(addr) = record.data().and_then(|data| data.ip_addr()) {
                                     if OPTIONS.dns_args().add_route && blocked && addr.is_ipv4() {
                                         if let IpAddr::V4(addr) = addr {
                                             let addr: u32 = addr.into();

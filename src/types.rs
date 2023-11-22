@@ -9,7 +9,7 @@ pub enum TrojanError {
     StdIo(std::io::Error),
     Rustls(rustls::Error),
     #[cfg(target_os = "windows")]
-    Wintun(wintun::WintunError),
+    Wintun(wintun::Error),
     LibLoading(libloading::Error),
     Dummy(()),
     AddrParse(std::net::AddrParseError),

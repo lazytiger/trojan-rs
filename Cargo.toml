@@ -17,18 +17,18 @@ sha2 = "0.10"
 bytes = "1.2"
 dns-lookup = "2.0"
 cfg-if = "1.0"
-webpki-roots = "0.23"
+webpki-roots = "0.25.2"
 webpki = "0.22"
 socket2 = "0.5"
 rayon = "1.5"
 rustls-pemfile = "1.0"
 lazy_static = "1.4"
 derive_more = "0.99"
-libloading = "0.7"
+libloading = "0.8.1"
 crossbeam = "0.8"
-trust-dns-proto = "0.22"
+trust-dns-proto = "0.23.2"
 widestring = "1.0"
-itertools = "0.10"
+itertools = "0.12.0"
 smoltcp = { version = "0.10" }
 backtrace = "0.3"
 hex = "0.4"
@@ -46,13 +46,13 @@ async_smoltcp = { path = "async_smoltcp" }
 env_logger = "0.10"
 
 [target.'cfg(windows)'.dependencies]
-wintun = "0.2"
+wintun = "0.3.2"
 wintool = { path = "wintool" }
 winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons"] }
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.3"
-ipset = { version = "0.4" }
+ipset = { version = "0.5.0" }
 
 [dependencies.fern]
 version = "0.6"
