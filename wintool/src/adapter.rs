@@ -6,7 +6,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     ptr,
 };
-
 use widestring::{U16CStr, U16Str};
 use winapi::{
     shared::{
@@ -251,9 +250,10 @@ pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
     ret
 }
 
+/// # Safety
 pub unsafe fn get_adapters_addresses<F>(mut callback: F) -> bool
-where
-    F: FnMut(&AdapterAddresses) -> bool,
+    where
+        F: FnMut(&AdapterAddresses) -> bool,
 {
     let mut buffer_length: u32 = 0;
     let status = iphlpapi::GetAdaptersAddresses(
