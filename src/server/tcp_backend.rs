@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytes::BytesMut;
-use mio::{net::TcpStream, Interest, Poll, Token};
+use mio::{Interest, net::TcpStream, Poll, Token};
 
 use crate::{
     config::OPTIONS,
@@ -86,7 +86,7 @@ impl Backend for TcpBackend {
     }
 
     fn dst_ip(&self) -> Option<IpAddr> {
-        self.dst_ip.clone()
+        self.dst_ip
     }
 }
 

@@ -6,7 +6,7 @@ use tokio::{
     net::UdpSocket,
     spawn,
     sync::mpsc::{channel, Receiver},
-    time::{timeout, Instant},
+    time::{Instant, timeout},
 };
 
 use tokio_rustls::{TlsServerStream, TlsServerWriteHalf};
@@ -15,7 +15,7 @@ use crate::{
     config::OPTIONS,
     proto::{Sock5Address, UdpAssociate, UdpParseResult},
     types::Result,
-    utils::aresolve,
+    utils::{aresolve, is_private},
 };
 
 pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<()> {
@@ -51,6 +51,11 @@ pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<
                             unreachable!()
                         }
                     };
+                    if !OPTIONS.server_args().allow_private && is_private(&address) {
+                        log::error!("address:{} is private which is not allowed", address);
+                        break 'main;
+                    }
+
                     if OPTIONS.server_args().disable_udp_hole {
                         let _ = sender.send(address).await;
                     }

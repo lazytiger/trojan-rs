@@ -272,6 +272,9 @@ pub struct ServerArgs {
     /// Timeout for cached result.
     #[clap(long, default_value = "600")]
     pub cached_ping_timeout: u64,
+
+    #[clap(short = 'p', long, default_value = "false")]
+    pub allow_private: bool,
 }
 
 impl Opts {

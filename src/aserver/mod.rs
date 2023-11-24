@@ -112,7 +112,7 @@ async fn start_proxy_internal(
                                     let ip =
                                         *aresolve(domain.as_str(), OPTIONS.system_dns.as_str())
                                             .await?
-                                            .get(0)
+                                            .first()
                                             .ok_or(TrojanError::Resolve)?;
                                     SocketAddr::new(ip, port)
                                 }

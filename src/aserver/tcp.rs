@@ -9,7 +9,7 @@ use tokio::{
 
 use tokio_rustls::TlsServerStream;
 
-use crate::{async_utils::copy, config::OPTIONS, types::Result};
+use crate::{async_utils::copy, config::OPTIONS, types::Result, utils::is_private};
 
 pub async fn start_tcp(
     mut source: TlsServerStream,
@@ -39,6 +39,7 @@ pub async fn start_tcp(
                         == 0
                     {
                         log::error!("read http header failed");
+                        let _ = source.shutdown().await;
                         return Ok(());
                     }
                 }
@@ -50,6 +51,10 @@ pub async fn start_tcp(
                 String::from_utf8_lossy(buffer.as_ref())
             );
         }
+    } else if !OPTIONS.server_args().allow_private && is_private(&target_addr) {
+        log::error!("address:{} is private which is not allowed", target_addr);
+        let _ = source.shutdown().await;
+        return Ok(());
     }
 
     log::info!("tcp backend:{}", target_addr);

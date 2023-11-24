@@ -183,6 +183,13 @@ pub fn get_system_dns() -> types::Result<String> {
     Ok("127.0.0.1".to_string())
 }
 
+pub fn is_private(addr: &SocketAddr) -> bool {
+    match addr.ip() {
+        IpAddr::V4(v4) => v4.is_private(),
+        IpAddr::V6(_v6) => false,
+    }
+}
+
 mod test {
     #[test]
     fn test_resolve() {
