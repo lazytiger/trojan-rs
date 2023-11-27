@@ -42,6 +42,7 @@ impl ServerCertVerifier for InsecureAuth {
         _ocsp_response: &[u8],
         _now: SystemTime,
     ) -> std::result::Result<ServerCertVerified, Error> {
+        log::info!("insecure verify server cert now");
         Ok(ServerCertVerified::assertion())
     }
 }
@@ -60,6 +61,7 @@ fn prepare_tls_config() -> Arc<ClientConfig> {
         .with_root_certificates(root_store)
         .with_no_client_auth();
     if OPTIONS.proxy_args().insecure {
+        log::info!("insecure settings");
         config
             .dangerous()
             .set_certificate_verifier(Arc::new(InsecureAuth));
