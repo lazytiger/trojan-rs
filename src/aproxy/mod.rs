@@ -1,8 +1,9 @@
 use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 
 use rustls::{
-    client::{ServerCertVerified, ServerCertVerifier},
-    Certificate, ClientConfig, Error, OwnedTrustAnchor, RootCertStore, ServerName,
+    client::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    Certificate, ClientConfig, DigitallySignedStruct, Error, OwnedTrustAnchor, RootCertStore,
+    ServerName,
 };
 use tokio::{
     net::{TcpListener, UdpSocket},
@@ -42,8 +43,18 @@ impl ServerCertVerifier for InsecureAuth {
         _ocsp_response: &[u8],
         _now: SystemTime,
     ) -> std::result::Result<ServerCertVerified, Error> {
-        log::info!("insecure verify server cert now");
+        log::info!("insecure verify server cert ok");
         Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &Certificate,
+        _dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, Error> {
+        log::info!("insecure verify tls13 signature ok");
+        Ok(HandshakeSignatureValid::assertion())
     }
 }
 
