@@ -195,6 +195,10 @@ pub struct ProxyArgs {
     /// ping time below this should be considered in proxy side
     #[clap(long, default_value = "70")]
     pub ping_threshold: u16,
+
+    /// allow insecure connections.
+    #[clap(long)]
+    pub insecure: bool,
 }
 
 #[derive(Parser)]
@@ -273,7 +277,7 @@ pub struct ServerArgs {
     #[clap(long, default_value = "600")]
     pub cached_ping_timeout: u64,
 
-    #[clap(short = 'p', long, default_value = "false")]
+    #[clap(short = 'p', long)]
     pub allow_private: bool,
 }
 
