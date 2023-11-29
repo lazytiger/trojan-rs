@@ -7,8 +7,8 @@ use tokio::{
     spawn,
 };
 
+use async_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
 use async_smoltcp::{TcpReadHalf, TcpStream, TcpWriteHalf};
-use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
 
 use crate::{
     awintun::init_tls_conn,

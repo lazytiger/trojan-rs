@@ -16,7 +16,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender, UnboundedSender},
 };
 
-use tokio_rustls::{TlsClientReadHalf, TlsClientStream};
+use async_rustls::{TlsClientReadHalf, TlsClientStream};
 
 use crate::{
     aproxy::new_socket,

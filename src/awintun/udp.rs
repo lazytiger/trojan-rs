@@ -9,8 +9,8 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
+use async_rustls::TlsClientReadHalf;
 use async_smoltcp::{UdpSocket, UdpWriteHalf};
-use tokio_rustls::TlsClientReadHalf;
 
 use crate::{
     awintun::init_tls_conn,

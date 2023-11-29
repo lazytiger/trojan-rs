@@ -4,8 +4,8 @@ use bytes::BytesMut;
 use rustls::{ClientConfig, ServerName};
 use tokio::{io::AsyncWriteExt, spawn};
 
+use async_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
 use async_smoltcp::{TcpReadHalf, TcpStream, TcpWriteHalf};
-use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
 
 use crate::atun::{
     init_tls_conn,

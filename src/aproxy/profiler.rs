@@ -19,7 +19,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 
-use tokio_rustls::{TlsClientReadHalf, TlsClientStream};
+use async_rustls::{TlsClientReadHalf, TlsClientStream};
 
 use crate::{config::OPTIONS, proto, proto::TrojanRequest, types};
 

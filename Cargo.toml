@@ -39,7 +39,7 @@ test-log = "0.2"
 notify = "6.1"
 ringbuf = "0.3"
 httparse = "1.8"
-tokio_rustls = { path = "tokio_rustls" }
+async_rustls = { path = "tokio_rustls" }
 async_smoltcp = { path = "async_smoltcp" }
 
 [dev-dependencies]

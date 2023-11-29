@@ -11,8 +11,8 @@ use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, Se
 use tokio::{runtime::Runtime, spawn, sync::mpsc::channel};
 use wintun::Adapter;
 
+use async_rustls::TlsClientStream;
 use async_smoltcp::TunDevice;
-use tokio_rustls::TlsClientStream;
 use types::Result;
 use wintool::adapter::get_main_adapter_gwif;
 

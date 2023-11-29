@@ -12,7 +12,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
 
-use tokio_rustls::TlsServerStream;
+use async_rustls::TlsServerStream;
 
 use crate::{config::OPTIONS, proto, server::ping_backend::PingResult, types::Result};
 

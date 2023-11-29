@@ -7,7 +7,7 @@ use tokio::{
     spawn,
 };
 
-use tokio_rustls::TlsServerStream;
+use async_rustls::TlsServerStream;
 
 use crate::{async_utils::copy, config::OPTIONS, types::Result, utils::is_private};
 

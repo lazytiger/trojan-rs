@@ -18,8 +18,8 @@ use trust_dns_proto::{
     serialize::binary::BinDecodable,
 };
 
+use async_rustls::TlsClientStream;
 use async_smoltcp::TunDevice;
-use tokio_rustls::TlsClientStream;
 
 use crate::{
     atun::{

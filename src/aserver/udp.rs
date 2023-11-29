@@ -6,10 +6,10 @@ use tokio::{
     net::UdpSocket,
     spawn,
     sync::mpsc::{channel, Receiver},
-    time::{Instant, timeout},
+    time::{timeout, Instant},
 };
 
-use tokio_rustls::{TlsServerStream, TlsServerWriteHalf};
+use async_rustls::{TlsServerStream, TlsServerWriteHalf};
 
 use crate::{
     config::OPTIONS,

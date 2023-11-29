@@ -12,7 +12,7 @@ use tokio::{
     sync::mpsc::UnboundedSender,
 };
 
-use tokio_rustls::TlsClientStream;
+use async_rustls::TlsClientStream;
 
 use crate::{
     async_utils::copy,

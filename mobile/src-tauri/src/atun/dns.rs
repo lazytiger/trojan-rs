@@ -16,7 +16,7 @@ use tokio::{
 };
 use trust_dns_proto::{op::Message, serialize::binary::BinDecodable};
 
-use tokio_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
+use async_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
 
 use crate::atun::{
     init_tls_conn,

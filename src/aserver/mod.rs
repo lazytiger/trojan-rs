@@ -1,8 +1,8 @@
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -18,7 +18,7 @@ use tokio::{
     time::timeout,
 };
 
-use tokio_rustls::TlsServerStream;
+use async_rustls::TlsServerStream;
 
 use crate::{
     aserver::{
@@ -27,7 +27,7 @@ use crate::{
         udp::start_udp,
     },
     config::OPTIONS,
-    proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
+    proto::{CONNECT, PING, RequestParseResult, Sock5Address, TrojanRequest, UDP_ASSOCIATE},
     server::{init_config, ping_backend::PingResult},
     types::{Result, TrojanError},
     utils::aresolve,
