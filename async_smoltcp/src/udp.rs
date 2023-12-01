@@ -76,13 +76,12 @@ impl UdpWriteHalf {
         from: impl Into<IpEndpoint>,
     ) -> std::io::Result<usize> {
         let len = data.len();
-        if self
+        if let Err(err) = self
             .sender
             .send((from.into(), self.peer_addr, data.into()))
             .await
-            .is_err()
         {
-            log::error!("send udp response failed, trying to enlarge channel buffer size");
+            log::error!("send udp response failed:{}", err);
         }
         Ok(len)
     }

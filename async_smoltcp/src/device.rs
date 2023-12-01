@@ -306,11 +306,11 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             .iter_mut()
             .for_each(|(handle, socket)| match socket {
                 Socket::Tcp(socket) => {
+                    if !socket.can_recv() {
+                        return;
+                    }
                     if let Some(source) = socket.remote_endpoint() {
-                        let sender = self
-                            .tcp_req_senders
-                            .get(&source)
-                            .unwrap();
+                        let sender = self.tcp_req_senders.get(&source).unwrap();
                         while socket.can_recv() && sender.capacity() > 0 {
                             log::info!("dispatch ingress tcp {} {}", source, socket.state());
                             let mut buffer = BytesMut::with_capacity(socket.recv_queue());
@@ -325,10 +325,8 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                                         buffer.set_len(n);
                                     }
                                 }
-                                if sender.try_send(buffer)
-                                    .is_err()
-                                {
-                                    log::error!("tcp send request failed, trying to adjust request channel buffer size");
+                                if sender.try_send(buffer).is_err() {
+                                    log::error!("tcp send request failed, receiver closed");
                                     socket.close();
                                     break;
                                 }
@@ -338,11 +336,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                             }
                         }
                         if socket.state() == State::CloseWait && socket.send_queue() == 0 {
-                            let _ = self
-                                .tcp_req_senders
-                                .get(&source)
-                                .unwrap()
-                                .try_send(BytesMut::with_capacity(0));
+                            let _ = sender.try_send(BytesMut::with_capacity(0));
                             socket.close();
                         }
                         if !socket.is_active() {
@@ -355,11 +349,11 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                     }
                 }
                 Socket::Udp(socket) => {
+                    if !socket.can_recv() {
+                        return;
+                    }
                     let target: IpEndpoint = socket.endpoint().convert();
-                    let sender = self
-                        .udp_req_senders
-                        .get(&target)
-                        .unwrap();
+                    let sender = self.udp_req_senders.get(&target).unwrap();
                     while socket.can_recv() && sender.capacity() > 0 {
                         log::info!("dispatch udp {}", target);
                         let mut buffer = BytesMut::with_capacity(self.mtu);
@@ -370,9 +364,8 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                             unsafe {
                                 buffer.set_len(n);
                             }
-                            if sender.try_send((source.endpoint, buffer)).is_err()
-                            {
-                                log::error!("send udp request failed, trying to adjust udp request channel buffer size");
+                            if sender.try_send((source.endpoint, buffer)).is_err() {
+                                log::error!("send udp request failed, receiver closed");
                                 udp_endpoints.push(target);
                                 break;
                             }
@@ -418,7 +411,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                         if data.is_empty() {
                             continue;
                         } else {
-                            log::error!(
+                            log::warn!(
                                 "tcp socket is full {}, trying to adjust socket buffer size",
                                 socket.send_queue()
                             );
@@ -545,12 +538,12 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         };
 
         let dst_endpoint = IpEndpoint::new(dst_addr, dst_port);
-        let src_endpoint = IpEndpoint::new(src_addr, src_port);
         if !self.allowed(dst_endpoint) {
             log::info!("ignore packet to {}", dst_endpoint);
             return;
         }
 
+        let src_endpoint = IpEndpoint::new(src_addr, src_port);
         log::info!("got packet from {} to {}", src_endpoint, dst_endpoint);
         match connect {
             Some(true) => {

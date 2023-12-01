@@ -108,10 +108,10 @@ impl AsyncWrite for TcpWriteHalf {
     ) -> Poll<Result<usize, Error>> {
         let pin = self.get_mut();
         if ready!(pin.sender.poll_reserve(cx)).is_ok() {
-            if pin.sender.send_item((pin.local_addr, buf.into())).is_ok() {
-                return Poll::Ready(Ok(buf.len()));
+            if let Err(err) = pin.sender.send_item((pin.local_addr, buf.into())) {
+                log::error!("tcp send response failed: {}", err);
             } else {
-                log::error!("tcp send response failed: trying to enlarge channel buffer size");
+                return Poll::Ready(Ok(buf.len()));
             }
         }
         Poll::Ready(Ok(0))
