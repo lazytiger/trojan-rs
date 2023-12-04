@@ -1,15 +1,15 @@
-use std::{net::SocketAddr, sync::Arc, time::SystemTime};
-
 use rustls::{
-    client::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    Certificate, ClientConfig, DigitallySignedStruct, Error, OwnedTrustAnchor, RootCertStore,
+    Certificate,
+    client::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier}, ClientConfig, DigitallySignedStruct, Error, OwnedTrustAnchor, RootCertStore,
     ServerName,
 };
+use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime::Runtime,
     sync::mpsc::unbounded_channel,
 };
+use tokio_rustls::TlsConnector;
 
 use crate::{
     aproxy::{
@@ -39,7 +39,7 @@ impl ServerCertVerifier for InsecureAuth {
         _end_entity: &Certificate,
         _intermediates: &[Certificate],
         _server_name: &ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
+        _scts: &mut dyn Iterator<Item=&[u8]>,
         _ocsp_response: &[u8],
         _now: SystemTime,
     ) -> std::result::Result<ServerCertVerified, Error> {
@@ -87,6 +87,7 @@ async fn async_run() -> Result<()> {
     let udp_listener = UdpSocket::from_std(new_socket(addr, true)?.into())?;
     let server_name: ServerName = OPTIONS.proxy_args().hostname.as_str().try_into()?;
     let config = prepare_tls_config();
+    let connector = TlsConnector::from(config);
     start_check_server(
         OPTIONS.proxy_args().hostname.clone(),
         150,
@@ -102,22 +103,22 @@ async fn async_run() -> Result<()> {
 
     if sender.is_none() {
         tokio::select! {
-            ret = run_tcp(tcp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+            ret = run_tcp(tcp_listener, server_name.clone(), connector.clone(), sender.clone()) => {
                 log::error!("tcp routine exit with:{:?}", ret);
             },
-            ret = run_udp(udp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+            ret = run_udp(udp_listener, server_name.clone(), connector.clone(), sender.clone()) => {
                 log::error!("udp routine exit with:{:?}", ret);
             }
         }
     } else {
         tokio::select! {
-            ret = run_tcp(tcp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+            ret = run_tcp(tcp_listener, server_name.clone(), connector.clone(), sender.clone()) => {
                 log::error!("tcp routine exit with:{:?}", ret);
             },
-            ret = run_udp(udp_listener, server_name.clone(), config.clone(), sender.clone()) => {
+            ret = run_udp(udp_listener, server_name.clone(), connector.clone(), sender.clone()) => {
                 log::error!("udp routine exit with:{:?}", ret);
             }
-            ret = run_profiler(receiver, sender, server_name.clone(), config) => {
+            ret = run_profiler(receiver, sender, server_name.clone(), connector) => {
                 log::error!("profiler routine exit with:{:?}", ret);
             }
         }

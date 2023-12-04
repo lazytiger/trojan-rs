@@ -1,25 +1,23 @@
+use bytes::{Buf, BufMut, BytesMut};
+use dns_lookup::lookup_host;
+use itertools::Itertools;
+use rand::random;
+use ringbuf::{HeapRb, Rb};
+use rustls::ServerName;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4},
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
-
-use bytes::{Buf, BufMut, BytesMut};
-use dns_lookup::lookup_host;
-use itertools::Itertools;
-use rand::random;
-use ringbuf::{HeapRb, Rb};
-use rustls::{ClientConfig, ClientConnection, ServerName};
-use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
+use surge_ping::{Client, ConfigBuilder, ICMP, PingIdentifier, PingSequence};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
     net::TcpStream,
     spawn,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
-
-use async_rustls::{TlsClientReadHalf, TlsClientStream};
+use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use crate::{config::OPTIONS, proto, proto::TrojanRequest, types};
 
@@ -283,7 +281,7 @@ pub async fn run_profiler(
     receiver: Option<UnboundedReceiver<IpAddr>>,
     sender: Option<UnboundedSender<IpAddr>>,
     server_name: ServerName,
-    config: Arc<ClientConfig>,
+    connector: TlsConnector,
 ) -> types::Result<()> {
     if receiver.is_none() {
         return Ok(());
@@ -312,9 +310,8 @@ pub async fn run_profiler(
     let mut set = HashMap::<IpAddr, PingResult>::new();
 
     let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
-    let session = ClientConnection::new(config.clone(), server_name.clone())?;
-    let remote = TlsClientStream::new(remote, session);
-    let (mut reader, mut writer) = remote.into_split();
+    let remote = connector.connect(server_name.clone(), remote).await?;
+    let (mut reader, mut writer) = split(remote);
 
     let mut send_buffer = BytesMut::new();
     let mut next_check = Instant::now();
@@ -399,9 +396,8 @@ pub async fn run_profiler(
         if reconnect {
             let _ = writer.shutdown().await;
             if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
-                let session = ClientConnection::new(config.clone(), server_name.clone())?;
-                let remote = TlsClientStream::new(remote, session);
-                (reader, writer) = remote.into_split();
+                let remote = connector.connect(server_name.clone(), remote).await?;
+                (reader, writer) = split(remote);
                 reconnect = writer.write_all(request.as_ref()).await.is_err();
                 if !reconnect {
                     let (sender, receiver) = mpsc::unbounded_channel();
@@ -519,7 +515,7 @@ pub async fn run_profiler(
 }
 
 async fn start_remote_response(
-    mut reader: TlsClientReadHalf,
+    mut reader: ReadHalf<TlsStream<TcpStream>>,
     sender: UnboundedSender<(IpAddr, u16, u8)>,
 ) -> types::Result<()> {
     log::error!("remote check routine started");

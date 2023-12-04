@@ -1,23 +1,18 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-};
-
 use bytes::BytesMut;
-use rustls::{ClientConfig, ClientConnection, ServerName};
+use rustls::ServerName;
+use std::net::{IpAddr, SocketAddr};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncWriteExt, split},
     net::{TcpListener, TcpStream},
     spawn,
     sync::mpsc::UnboundedSender,
 };
-
-use async_rustls::TlsClientStream;
+use tokio_rustls::TlsConnector;
 
 use crate::{
     async_utils::copy,
     config::OPTIONS,
-    proto::{TrojanRequest, CONNECT},
+    proto::{CONNECT, TrojanRequest},
     sys,
     types::Result,
 };
@@ -25,7 +20,7 @@ use crate::{
 pub async fn run_tcp(
     listener: TcpListener,
     server_name: ServerName,
-    config: Arc<ClientConfig>,
+    connector: TlsConnector,
     sender: Option<UnboundedSender<IpAddr>>,
 ) -> Result<()> {
     loop {
@@ -38,7 +33,7 @@ pub async fn run_tcp(
         spawn(start_tcp_proxy(
             client,
             server_name.clone(),
-            config.clone(),
+            connector.clone(),
             dst_addr,
         ));
     }
@@ -47,12 +42,11 @@ pub async fn run_tcp(
 async fn start_tcp_proxy(
     mut local: TcpStream,
     server_name: ServerName,
-    config: Arc<ClientConfig>,
+    connector: TlsConnector,
     dst_addr: SocketAddr,
 ) -> Result<()> {
     let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
-    let session = ClientConnection::new(config, server_name)?;
-    let mut remote = TlsClientStream::new(remote, session);
+    let mut remote = connector.connect(server_name, remote).await?;
     let mut request = BytesMut::new();
     TrojanRequest::generate(&mut request, CONNECT, &dst_addr);
     if let Err(err) = remote.write_all(request.as_ref()).await {
@@ -60,7 +54,7 @@ async fn start_tcp_proxy(
         let _ = remote.shutdown().await;
         let _ = local.shutdown().await;
     } else {
-        let (remote_read, remote_write) = remote.into_split();
+        let (remote_read, remote_write) = split(remote);
         let (local_read, local_write) = local.into_split();
         spawn(copy(
             local_read,

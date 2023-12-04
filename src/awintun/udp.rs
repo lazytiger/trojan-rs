@@ -1,16 +1,15 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
-
+use async_smoltcp::{UdpSocket, UdpWriteHalf};
 use bytes::{Buf, BytesMut};
-use rustls::{ClientConfig, ServerName};
+use rustls::ServerName;
 use smoltcp::wire::IpEndpoint;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
+    net::TcpStream,
     spawn,
     sync::mpsc::{channel, Receiver, Sender},
 };
-
-use async_rustls::TlsClientReadHalf;
-use async_smoltcp::{UdpSocket, UdpWriteHalf};
+use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use crate::{
     awintun::init_tls_conn,
@@ -28,7 +27,7 @@ pub async fn run_udp_dispatch(
     mut socket_receiver: Receiver<Arc<UdpWriteHalf>>,
     server_addr: SocketAddr,
     server_name: ServerName,
-    config: Arc<ClientConfig>,
+    connector: TlsConnector,
     mtu: usize,
     request: Arc<BytesMut>,
     mut close_receiver: Receiver<(IpEndpoint, bool)>,
@@ -71,7 +70,7 @@ pub async fn run_udp_dispatch(
 
                         spawn(local_to_remote(
                             req_receiver,
-                            config.clone(),
+                            connector.clone(),
                             server_addr,
                             server_name.clone(),
                             src_addr,
@@ -130,7 +129,7 @@ pub async fn start_udp(
 
 async fn local_to_remote(
     mut receiver: Receiver<(IpEndpoint, BytesMut)>,
-    config: Arc<ClientConfig>,
+    connector: TlsConnector,
     server_addr: SocketAddr,
     server_name: ServerName,
     src_addr: IpEndpoint,
@@ -139,23 +138,22 @@ async fn local_to_remote(
     request: Arc<BytesMut>,
 ) {
     let dst_addr = local.peer_addr();
-    let mut remote =
-        if let Ok(client) = init_tls_conn(config, server_addr, server_name.clone()).await {
-            let (read_half, mut write_half) = client.into_split();
+    let (mut remote, remote_local_addr) =
+        if let Ok(client) = init_tls_conn(connector, server_addr, server_name.clone()).await {
+            let local_addr = client.get_ref().0.local_addr().unwrap();
+            let (read_half, mut write_half) = split(client);
             if let Err(err) = write_half.write_all(request.as_ref()).await {
                 log::error!("udp send handshake failed:{}", err);
                 let _ = write_half.shutdown().await;
                 let _ = sender.send((src_addr, true)).await;
                 return;
             }
-            log::info!(
-                "remote:{:?} created for source:{}",
-                read_half.local_addr().await,
-                src_addr
-            );
+            log::info!("remote:{:?} created for source:{}", local_addr, src_addr);
 
-            spawn(remote_to_local(read_half, local, src_addr, sender));
-            write_half
+            spawn(remote_to_local(
+                read_half, local_addr, local, src_addr, sender,
+            ));
+            (write_half, local_addr)
         } else {
             log::error!("{} connect to remote server failed", src_addr);
             let _ = sender.send((src_addr, true)).await;
@@ -182,13 +180,14 @@ async fn local_to_remote(
     let _ = remote.shutdown().await;
     log::info!(
         "remote:{:?} shutdown now for {}",
-        remote.local_addr().await,
+        remote_local_addr,
         src_addr
     );
 }
 
 async fn remote_to_local(
-    mut remote: TlsClientReadHalf,
+    mut remote: ReadHalf<TlsStream<TcpStream>>,
+    remote_local_addr: SocketAddr,
     local: Arc<UdpWriteHalf>,
     source: IpEndpoint,
     sender: Sender<(IpEndpoint, bool)>,
@@ -198,11 +197,7 @@ async fn remote_to_local(
     'main: loop {
         match tokio::time::timeout(Duration::from_secs(120), remote.read_buf(&mut buffer)).await {
             Ok(Ok(0)) | Err(_) | Ok(Err(_)) => {
-                log::warn!(
-                    "{} read from remote:{:?} failed",
-                    source,
-                    remote.local_addr().await
-                );
+                log::warn!("{} read from remote:{:?} failed", source, remote_local_addr,);
                 break;
             }
             _ => {}
@@ -228,7 +223,7 @@ async fn remote_to_local(
                 UdpParseResultEndpoint::InvalidProtocol => {
                     log::error!(
                         "invalid protocol from {:?} to {}",
-                        remote.local_addr().await,
+                        remote_local_addr,
                         source
                     );
                     break 'main;

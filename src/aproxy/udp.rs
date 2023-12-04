@@ -1,3 +1,5 @@
+use bytes::{Buf, BytesMut};
+use rustls::ServerName;
 use std::{
     collections::HashMap,
     io,
@@ -6,22 +8,18 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
-use bytes::{Buf, BytesMut};
-use rustls::{ClientConfig, ClientConnection, ServerName};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
     net::{TcpStream, UdpSocket},
     spawn,
     sync::mpsc::{channel, Receiver, Sender, UnboundedSender},
 };
-
-use async_rustls::{TlsClientReadHalf, TlsClientStream};
+use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use crate::{
     aproxy::new_socket,
     config::OPTIONS,
-    proto::{TrojanRequest, UdpAssociate, UdpParseResult, UDP_ASSOCIATE},
+    proto::{TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult},
     sys,
     types::Result,
 };
@@ -34,7 +32,7 @@ enum SelectResult {
 pub async fn run_udp(
     listener: UdpSocket,
     server_name: ServerName,
-    config: Arc<ClientConfig>,
+    connector: TlsConnector,
     profiler_sender: Option<UnboundedSender<IpAddr>>,
 ) -> Result<()> {
     let mut remotes = HashMap::new();
@@ -83,7 +81,6 @@ pub async fn run_udp(
                     Some(ret) => ret,
                     None => {
                         log::info!("remote not found for {}", src_addr);
-                        let session = ClientConnection::new(config.clone(), server_name.clone())?;
                         let local = locals.entry(dst_addr).or_insert_with(|| {
                             log::info!("local not found for {}", dst_addr);
                             let local = new_socket(dst_addr, true).unwrap();
@@ -95,7 +92,8 @@ pub async fn run_udp(
                         spawn(local_to_remote(
                             req_receiver,
                             local.clone(),
-                            session,
+                            server_name.clone(),
+                            connector.clone(),
                             request.clone(),
                             src_addr,
                             sender.clone(),
@@ -133,21 +131,22 @@ pub async fn run_udp(
 async fn local_to_remote(
     mut local: Receiver<(SocketAddr, Vec<u8>)>,
     socket: Arc<UdpSocket>,
-    session: ClientConnection,
+    server_name: ServerName,
+    connector: TlsConnector,
     request: Arc<BytesMut>,
     src_addr: SocketAddr,
     sender: Sender<SocketAddr>,
 ) {
     let mut remote =
         if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
-            let mut remote = TlsClientStream::new(remote, session);
+            let mut remote = connector.connect(server_name, remote).await.unwrap();
             if let Err(err) = remote.write_all(request.as_ref()).await {
                 let _ = remote.shutdown().await;
                 let _ = sender.send(src_addr).await;
                 log::error!("send handshake to remote failed:{}", err);
                 return;
             }
-            let (read_half, write_half) = remote.into_split();
+            let (read_half, write_half) = split(remote);
             spawn(remote_to_local(read_half, socket, src_addr, sender));
             write_half
         } else {
@@ -171,7 +170,7 @@ async fn local_to_remote(
 }
 
 async fn remote_to_local(
-    mut remote: TlsClientReadHalf,
+    mut remote: ReadHalf<TlsStream<TcpStream>>,
     local: Arc<UdpSocket>,
     src_addr: SocketAddr,
     sender: Sender<SocketAddr>,
@@ -182,7 +181,7 @@ async fn remote_to_local(
             Duration::from_secs(OPTIONS.udp_idle_timeout),
             remote.read_buf(&mut buffer),
         )
-        .await
+            .await
         {
             Ok(Ok(n)) if n > 0 => loop {
                 match UdpAssociate::parse(buffer.as_ref()) {

@@ -1,3 +1,6 @@
+use async_smoltcp::TunDevice;
+use bytes::BytesMut;
+use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
 use std::{
     fs::OpenOptions,
     io::Write,
@@ -5,16 +8,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
-use bytes::BytesMut;
-use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
-use tokio::{runtime::Runtime, spawn, sync::mpsc::channel};
-use wintun::Adapter;
-
-use async_rustls::TlsClientStream;
-use async_smoltcp::TunDevice;
+use tokio::{net::TcpStream, runtime::Runtime, spawn, sync::mpsc::channel};
+use tokio_rustls::{client::TlsStream, TlsConnector};
 use types::Result;
 use wintool::adapter::get_main_adapter_gwif;
+use wintun::Adapter;
 
 use crate::{
     awintun::{
@@ -34,13 +32,13 @@ mod tun;
 mod udp;
 
 pub async fn init_tls_conn(
-    config: Arc<ClientConfig>,
+    connector: TlsConnector,
     server_addr: SocketAddr,
     server_name: ServerName,
-) -> types::Result<TlsClientStream> {
+) -> types::Result<TlsStream<TcpStream>> {
     let stream = tokio::net::TcpStream::connect(server_addr).await?;
-    let session = ClientConnection::new(config, server_name)?;
-    Ok(TlsClientStream::new(stream, session))
+    let conn = connector.connect(server_name, stream).await?;
+    Ok(conn)
 }
 
 pub fn run() -> Result<()> {
@@ -104,12 +102,13 @@ async fn async_run() -> Result<()> {
     let (data_sender, data_receiver) = channel(128);
     let (socket_sender, socket_receiver) = channel(128);
     let (close_sender, close_receiver) = channel(128);
+    let connector = TlsConnector::from(config);
     spawn(run_udp_dispatch(
         data_receiver,
         socket_receiver,
         server_addr,
         server_name.clone(),
-        config.clone(),
+        connector.clone(),
         mtu,
         udp_header.clone(),
         close_receiver,
@@ -127,7 +126,7 @@ async fn async_run() -> Result<()> {
             );
             spawn(start_tcp(
                 stream,
-                config.clone(),
+                connector.clone(),
                 server_addr,
                 server_name.clone(),
             ));

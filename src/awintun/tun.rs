@@ -1,8 +1,6 @@
-use std::{io::ErrorKind, sync::Arc};
-
-use wintun::Session;
-
 use async_smoltcp::{Packet, Tun};
+use std::{io::ErrorKind, sync::Arc};
+use wintun::Session;
 
 #[derive(Clone)]
 pub struct Wintun {
@@ -21,7 +19,7 @@ impl Tun for Wintun {
     fn receive(&self) -> std::io::Result<Option<Self::Packet>> {
         self.session
             .try_receive()
-            .map(|packet| packet.map(|packet| TunPacket(packet)))
+            .map(|packet| packet.map(TunPacket))
             .map_err(|_| ErrorKind::OutOfMemory.into())
     }
 
@@ -33,7 +31,7 @@ impl Tun for Wintun {
     fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet> {
         self.session
             .allocate_send_packet(len as u16)
-            .map(|packet| TunPacket(packet))
+            .map(TunPacket)
             .map_err(|_| ErrorKind::OutOfMemory.into())
     }
 }
