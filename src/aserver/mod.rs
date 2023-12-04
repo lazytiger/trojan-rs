@@ -1,24 +1,22 @@
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
-        Arc,
         atomic::{AtomicU32, Ordering},
+        Arc,
     },
     time::{Duration, Instant},
 };
 
 use bytes::{Buf, BytesMut};
-use rustls::ServerConnection;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     runtime::{Handle, Runtime},
     spawn,
     sync::mpsc::{unbounded_channel, UnboundedSender},
     time::timeout,
 };
-
-use async_rustls::TlsServerStream;
+use tokio_rustls::TlsAcceptor;
 
 use crate::{
     aserver::{
@@ -27,7 +25,7 @@ use crate::{
         udp::start_udp,
     },
     config::OPTIONS,
-    proto::{CONNECT, PING, RequestParseResult, Sock5Address, TrojanRequest, UDP_ASSOCIATE},
+    proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     server::{init_config, ping_backend::PingResult},
     types::{Result, TrojanError},
     utils::aresolve,
@@ -44,6 +42,7 @@ pub fn run() -> Result<()> {
 
 async fn async_run() -> Result<()> {
     let config = init_config()?;
+    let acceptor = TlsAcceptor::from(config);
     let listener = TcpListener::bind(OPTIONS.local_addr.as_str()).await?;
     let (req_sender, req_receiver) = unbounded_channel();
     let task_count = Arc::new(AtomicU32::new(0));
@@ -51,11 +50,10 @@ async fn async_run() -> Result<()> {
     loop {
         let (client, src_addr) = listener.accept().await?;
         log::info!("accept {}", src_addr);
-        let session = ServerConnection::new(config.clone())?;
-        let conn = TlsServerStream::new(client, session);
         task_count.fetch_add(1, Ordering::Relaxed);
         spawn(start_proxy(
-            conn,
+            client,
+            acceptor.clone(),
             req_sender.clone(),
             src_addr,
             task_count.clone(),
@@ -69,22 +67,25 @@ async fn async_run() -> Result<()> {
 }
 
 async fn start_proxy(
-    conn: TlsServerStream,
+    conn: TcpStream,
+    acceptor: TlsAcceptor,
     sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
     src_addr: SocketAddr,
     task_count: Arc<AtomicU32>,
 ) {
-    if let Err(err) = start_proxy_internal(conn, sender, src_addr).await {
+    if let Err(err) = start_proxy_internal(conn, acceptor, sender, src_addr).await {
         log::error!("run proxy failed:{:?}", err);
     }
     task_count.fetch_sub(1, Ordering::Relaxed);
 }
 
 async fn start_proxy_internal(
-    mut conn: TlsServerStream,
+    conn: TcpStream,
+    acceptor: TlsAcceptor,
     sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
     src_addr: SocketAddr,
 ) -> Result<()> {
+    let mut conn = acceptor.accept(conn).await?;
     let mut buffer = BytesMut::new();
     let now = Instant::now();
     let ret = loop {

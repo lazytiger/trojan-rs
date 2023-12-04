@@ -9,10 +9,10 @@ use bytes::{Buf, BufMut, BytesMut};
 use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
-
-use async_rustls::TlsServerStream;
+use tokio_rustls::server::TlsStream;
 
 use crate::{config::OPTIONS, proto, server::ping_backend::PingResult, types::Result};
 
@@ -100,7 +100,7 @@ async fn do_check(ip: IpAddr, id: u16, client: Arc<Client>, sender: UnboundedSen
 }
 
 pub async fn start_ping(
-    mut source: TlsServerStream,
+    mut source: TlsStream<TcpStream>,
     mut recv_buffer: BytesMut,
     req_sender: UnboundedSender<(IpAddr, UnboundedSender<PingResult>)>,
 ) -> Result<()> {

@@ -2,14 +2,13 @@ use std::{collections::HashMap, io, net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::{Buf, BytesMut};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::UdpSocket,
+    io::{split, AsyncReadExt, AsyncWriteExt, WriteHalf},
+    net::{TcpStream, UdpSocket},
     spawn,
     sync::mpsc::{channel, Receiver},
     time::{timeout, Instant},
 };
-
-use async_rustls::{TlsServerStream, TlsServerWriteHalf};
+use tokio_rustls::server::TlsStream;
 
 use crate::{
     config::OPTIONS,
@@ -18,10 +17,10 @@ use crate::{
     utils::{aresolve, is_private},
 };
 
-pub async fn start_udp(source: TlsServerStream, mut buffer: BytesMut) -> Result<()> {
-    let src_addr = source.peer_addr();
+pub async fn start_udp(source: TlsStream<TcpStream>, mut buffer: BytesMut) -> Result<()> {
+    let src_addr = source.get_ref().0.peer_addr()?;
     let target = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
-    let (mut source, source_write) = source.into_split();
+    let (mut source, source_write) = split(source);
     let (sender, receiver) = channel(1024);
     let mut dns_cache_store = HashMap::new();
     spawn(target_to_source(target.clone(), source_write, receiver));
@@ -113,7 +112,7 @@ enum SelectResult {
 
 async fn target_to_source(
     target: Arc<UdpSocket>,
-    mut source: TlsServerWriteHalf,
+    mut source: WriteHalf<TlsStream<TcpStream>>,
     mut receiver: Receiver<SocketAddr>,
 ) -> Result<()> {
     let mut header = BytesMut::new();

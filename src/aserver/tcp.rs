@@ -2,17 +2,16 @@ use std::{net::SocketAddr, time::Duration};
 
 use bytes::BytesMut;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{split, AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     spawn,
 };
-
-use async_rustls::TlsServerStream;
+use tokio_rustls::server::TlsStream;
 
 use crate::{async_utils::copy, config::OPTIONS, types::Result, utils::is_private};
 
 pub async fn start_tcp(
-    mut source: TlsServerStream,
+    mut source: TlsStream<TcpStream>,
     target_addr: SocketAddr,
     mut buffer: BytesMut,
     src_addr: SocketAddr,
@@ -65,7 +64,7 @@ pub async fn start_tcp(
         log::error!("tcp send data to target:{} failed:{}", target_addr, err);
         return Ok(());
     }
-    let (source_read, source_write) = source.into_split();
+    let (source_read, source_write) = split(source);
     let (target_read, target_write) = target.into_split();
     spawn(copy(
         source_read,
