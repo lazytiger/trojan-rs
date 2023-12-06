@@ -13,7 +13,8 @@ pub enum TrojanError {
     LibLoading(libloading::Error),
     Dummy(()),
     AddrParse(std::net::AddrParseError),
-    InvalidDnsName(rustls::client::InvalidDnsNameError),
+    DnsName(rustls_pki_types::InvalidDnsNameError),
+    VerifiedBuilder(rustls::client::VerifierBuilderError),
     Webpki(webpki::Error),
     CrossbeamRecv(crossbeam::channel::RecvError),
     #[from(ignore)]

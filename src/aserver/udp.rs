@@ -163,8 +163,12 @@ async fn target_to_source(
                     }
                     header.clear();
                     UdpAssociate::generate(&mut header, &target_addr, n as u16);
-                    let _ = source.write_all(header.as_ref()).await;
-                    let _ = source.write_all(&body.as_slice()[..n]).await;
+                    if source.write_all(header.as_ref()).await.is_err()
+                        || source.write_all(&body.as_slice()[..n]).await.is_err()
+                    {
+                        log::error!("write to source from:{} failed", target_addr);
+                        break;
+                    }
                 } else {
                     log::warn!("receive from target failed");
                     break;

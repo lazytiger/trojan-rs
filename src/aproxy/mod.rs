@@ -1,9 +1,11 @@
+use std::{net::SocketAddr, sync::Arc};
+
 use rustls::{
-    Certificate,
-    client::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier}, ClientConfig, DigitallySignedStruct, Error, OwnedTrustAnchor, RootCertStore,
-    ServerName,
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    crypto::ring::default_provider,
+    ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme,
 };
-use std::{net::SocketAddr, sync::Arc, time::SystemTime};
+use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime::Runtime,
@@ -31,44 +33,50 @@ pub fn run() -> Result<()> {
     runtime.block_on(async_run())
 }
 
+#[derive(Debug)]
 pub struct InsecureAuth;
 
 impl ServerCertVerifier for InsecureAuth {
     fn verify_server_cert(
         &self,
-        _end_entity: &Certificate,
-        _intermediates: &[Certificate],
-        _server_name: &ServerName,
-        _scts: &mut dyn Iterator<Item=&[u8]>,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
-        _now: SystemTime,
+        _now: UnixTime,
     ) -> std::result::Result<ServerCertVerified, Error> {
-        log::info!("insecure verify server cert ok");
         Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, Error> {
+        Ok(HandshakeSignatureValid::assertion())
     }
 
     fn verify_tls13_signature(
         &self,
         _message: &[u8],
-        _cert: &Certificate,
+        _cert: &CertificateDer<'_>,
         _dss: &DigitallySignedStruct,
     ) -> std::result::Result<HandshakeSignatureValid, Error> {
-        log::info!("insecure verify tls13 signature ok");
         Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
 fn prepare_tls_config() -> Arc<ClientConfig> {
     let mut root_store = RootCertStore::empty();
-    root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
-        )
-    }));
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let mut config = ClientConfig::builder()
-        .with_safe_defaults()
         .with_root_certificates(root_store)
         .with_no_client_auth();
     if OPTIONS.proxy_args().insecure {

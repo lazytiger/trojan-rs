@@ -1,18 +1,19 @@
-use bytes::{Buf, BufMut, BytesMut};
-use dns_lookup::lookup_host;
-use itertools::Itertools;
-use rand::random;
-use ringbuf::{HeapRb, Rb};
-use rustls::ServerName;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4},
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
-use surge_ping::{Client, ConfigBuilder, ICMP, PingIdentifier, PingSequence};
+
+use bytes::{Buf, BufMut, BytesMut};
+use dns_lookup::lookup_host;
+use itertools::Itertools;
+use rand::random;
+use ringbuf::{HeapRb, Rb};
+use rustls_pki_types::ServerName;
+use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
+    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf},
     net::TcpStream,
     spawn,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -280,7 +281,7 @@ impl SelectReturn {
 pub async fn run_profiler(
     receiver: Option<UnboundedReceiver<IpAddr>>,
     sender: Option<UnboundedSender<IpAddr>>,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     connector: TlsConnector,
 ) -> types::Result<()> {
     if receiver.is_none() {

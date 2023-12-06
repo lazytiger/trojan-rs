@@ -9,7 +9,7 @@ use std::{
 };
 
 use mio::{Events, Poll, Token, Waker};
-use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
+use rustls::{ClientConfig, RootCertStore};
 use smoltcp::{
     iface::{Config, Interface, SocketSet},
     socket::Socket,
@@ -61,18 +61,8 @@ pub fn apply_ipset(file: &str, index: u32, inverse: bool) -> Result<()> {
 fn prepare_idle_pool(poll: &Poll, resolver: &DnsResolver) -> Result<IdlePool> {
     let hostname = OPTIONS.wintun_args().hostname.as_str().try_into()?;
     let mut root_store = RootCertStore::empty();
-    root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
-        )
-    }));
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = ClientConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
-        .with_safe_default_protocol_versions()
-        .unwrap()
         .with_root_certificates(root_store)
         .with_no_client_auth();
     let config = Arc::new(config);

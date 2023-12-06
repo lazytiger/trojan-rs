@@ -12,16 +12,16 @@ mio = { version = "0.8", features = ["net", "os-poll"] }
 log = "0.4"
 chrono = "0.4"
 libc = "0.2"
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
+rustls = { version = "0.22", features = [] }
 sha2 = "0.10"
 bytes = "1.5"
 dns-lookup = "2.0"
 cfg-if = "1.0"
-webpki-roots = "0.25.2"
+webpki-roots = "0.26"
 webpki = "0.22"
 socket2 = "0.5"
 rayon = "1.8"
-rustls-pemfile = "1.0"
+rustls-pemfile = "2.0"
 lazy_static = "1.4"
 derive_more = "0.99"
 libloading = "0.8.1"
@@ -41,7 +41,8 @@ ringbuf = "0.3"
 httparse = "1.8"
 async_rustls = { path = "tokio_rustls" }
 async_smoltcp = { path = "async_smoltcp" }
-tokio-rustls = "0.24"
+tokio-rustls = "0.25"
+rustls-pki-types = "1.0"
 
 [dev-dependencies]
 env_logger = "0.10"

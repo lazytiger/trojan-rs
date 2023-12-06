@@ -1,8 +1,9 @@
-use bytes::BytesMut;
-use rustls::ServerName;
 use std::net::{IpAddr, SocketAddr};
+
+use bytes::BytesMut;
+use rustls_pki_types::ServerName;
 use tokio::{
-    io::{AsyncWriteExt, split},
+    io::{split, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     spawn,
     sync::mpsc::UnboundedSender,
@@ -12,14 +13,14 @@ use tokio_rustls::TlsConnector;
 use crate::{
     async_utils::copy,
     config::OPTIONS,
-    proto::{CONNECT, TrojanRequest},
+    proto::{TrojanRequest, CONNECT},
     sys,
     types::Result,
 };
 
 pub async fn run_tcp(
     listener: TcpListener,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     connector: TlsConnector,
     sender: Option<UnboundedSender<IpAddr>>,
 ) -> Result<()> {
@@ -41,7 +42,7 @@ pub async fn run_tcp(
 
 async fn start_tcp_proxy(
     mut local: TcpStream,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     connector: TlsConnector,
     dst_addr: SocketAddr,
 ) -> Result<()> {

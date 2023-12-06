@@ -5,7 +5,8 @@ use std::{
 
 use itertools::Itertools;
 use mio::{event::Event, net::TcpStream, Poll, Token};
-use rustls::{ClientConfig, ClientConnection, Connection, ServerName};
+use rustls::{ClientConfig, ClientConnection, Connection};
+use rustls_pki_types::ServerName;
 
 use crate::{
     config::OPTIONS, resolver::DnsResolver, status::StatusProvider, tls_conn::TlsConn,
@@ -20,7 +21,7 @@ pub struct IdlePool {
     domain: String,
     port: u16,
     config: Arc<ClientConfig>,
-    hostname: ServerName,
+    hostname: ServerName<'static>,
     channel_cnt: usize,
     channel_idle: usize,
     min_index: usize,
@@ -30,7 +31,7 @@ pub struct IdlePool {
 impl IdlePool {
     pub fn new(
         config: Arc<ClientConfig>,
-        hostname: ServerName,
+        hostname: ServerName<'static>,
         size: usize,
         port: u16,
         domain: String,

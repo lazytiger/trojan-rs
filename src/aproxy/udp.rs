@@ -1,5 +1,3 @@
-use bytes::{Buf, BytesMut};
-use rustls::ServerName;
 use std::{
     collections::HashMap,
     io,
@@ -8,8 +6,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+
+use bytes::{Buf, BytesMut};
+use rustls_pki_types::ServerName;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
+    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf},
     net::{TcpStream, UdpSocket},
     spawn,
     sync::mpsc::{channel, Receiver, Sender, UnboundedSender},
@@ -19,7 +20,7 @@ use tokio_rustls::{client::TlsStream, TlsConnector};
 use crate::{
     aproxy::new_socket,
     config::OPTIONS,
-    proto::{TrojanRequest, UDP_ASSOCIATE, UdpAssociate, UdpParseResult},
+    proto::{TrojanRequest, UdpAssociate, UdpParseResult, UDP_ASSOCIATE},
     sys,
     types::Result,
 };
@@ -31,7 +32,7 @@ enum SelectResult {
 
 pub async fn run_udp(
     listener: UdpSocket,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     connector: TlsConnector,
     profiler_sender: Option<UnboundedSender<IpAddr>>,
 ) -> Result<()> {
@@ -131,7 +132,7 @@ pub async fn run_udp(
 async fn local_to_remote(
     mut local: Receiver<(SocketAddr, Vec<u8>)>,
     socket: Arc<UdpSocket>,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     connector: TlsConnector,
     request: Arc<BytesMut>,
     src_addr: SocketAddr,
@@ -162,6 +163,11 @@ async fn local_to_remote(
         if remote.write_all(header.as_ref()).await.is_err()
             || remote.write_all(data.as_slice()).await.is_err()
         {
+            log::error!(
+                "local:{} to remote:{} send failed, remote closed",
+                src_addr,
+                target
+            );
             break;
         }
     }
@@ -181,7 +187,7 @@ async fn remote_to_local(
             Duration::from_secs(OPTIONS.udp_idle_timeout),
             remote.read_buf(&mut buffer),
         )
-            .await
+        .await
         {
             Ok(Ok(n)) if n > 0 => loop {
                 match UdpAssociate::parse(buffer.as_ref()) {
@@ -206,8 +212,15 @@ async fn remote_to_local(
                     }
                 }
             },
+            Err(e) => {
+                log::warn!("udp remote to local:{} timeout:{}", src_addr, e);
+                break;
+            }
             _ => {
-                log::error!("udp remote to local:{} failed, remote closed", src_addr);
+                log::warn!(
+                    "udp remote to local:{} read failed, remote closed",
+                    src_addr
+                );
                 break;
             }
         }

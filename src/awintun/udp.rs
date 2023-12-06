@@ -1,15 +1,17 @@
-use async_smoltcp::{UdpSocket, UdpWriteHalf};
-use bytes::{Buf, BytesMut};
-use rustls::ServerName;
-use smoltcp::wire::IpEndpoint;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+
+use bytes::{Buf, BytesMut};
+use rustls_pki_types::ServerName;
+use smoltcp::wire::IpEndpoint;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
+    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf},
     net::TcpStream,
     spawn,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_rustls::{client::TlsStream, TlsConnector};
+
+use async_smoltcp::{UdpSocket, UdpWriteHalf};
 
 use crate::{
     awintun::init_tls_conn,
@@ -26,7 +28,7 @@ pub async fn run_udp_dispatch(
     mut data_receiver: Receiver<(IpEndpoint, IpEndpoint, BytesMut)>,
     mut socket_receiver: Receiver<Arc<UdpWriteHalf>>,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     connector: TlsConnector,
     mtu: usize,
     request: Arc<BytesMut>,
@@ -131,7 +133,7 @@ async fn local_to_remote(
     mut receiver: Receiver<(IpEndpoint, BytesMut)>,
     connector: TlsConnector,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     src_addr: IpEndpoint,
     local: Arc<UdpWriteHalf>,
     sender: Sender<(IpEndpoint, bool)>,

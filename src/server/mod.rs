@@ -6,11 +6,9 @@ use std::{
 };
 
 use mio::{net::TcpListener, Events, Interest, Poll, Token, Waker};
-use rustls::{
-    server::{AllowAnyAnonymousOrAuthenticatedClient, NoClientAuth},
-    KeyLogFile, RootCertStore, ServerConfig,
-};
+use rustls::{server::WebPkiClientVerifier, KeyLogFile, RootCertStore, ServerConfig};
 use rustls_pemfile::{certs, read_one, Item};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 
 pub use tls_server::TlsServer;
 
@@ -36,23 +34,21 @@ const CHANNEL_BACKEND: usize = 1;
 const RESOLVER: usize = 2;
 const LISTENER: usize = 1;
 
-fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
+fn load_certs(filename: &str) -> Vec<CertificateDer<'static>> {
     let cert_file = File::open(filename).unwrap();
     let mut buff_reader = BufReader::new(cert_file);
     certs(&mut buff_reader)
-        .unwrap()
-        .iter()
-        .map(|v| rustls::Certificate(v.clone()))
+        .filter_map(|v| v.ok().map(|v| v.into_owned()))
         .collect()
 }
 
-fn load_private_key(filename: &str) -> rustls::PrivateKey {
+fn load_private_key(filename: &str) -> PrivateKeyDer {
     let key_file = File::open(filename).unwrap();
     let mut buff_reader = BufReader::new(key_file);
     loop {
         match read_one(&mut buff_reader).unwrap() {
-            Some(Item::RSAKey(key)) => return rustls::PrivateKey(key),
-            Some(Item::PKCS8Key(key)) => return rustls::PrivateKey(key),
+            Some(Item::Pkcs8Key(key)) => return PrivateKeyDer::Pkcs8(key),
+            Some(Item::Pkcs1Key(key)) => return PrivateKeyDer::Pkcs1(key),
             None => break,
             _ => {}
         }
@@ -64,23 +60,23 @@ fn load_private_key(filename: &str) -> rustls::PrivateKey {
 }
 
 pub fn init_config() -> Result<Arc<ServerConfig>> {
-    let client_auth = if OPTIONS.server_args().check_auth {
-        let roots = load_certs(OPTIONS.server_args().cert.as_str());
-        let mut client_auth_roots = RootCertStore::empty();
-        for root in roots {
-            client_auth_roots.add(&root)?;
-        }
-        AllowAnyAnonymousOrAuthenticatedClient::new(client_auth_roots).boxed()
-    } else {
-        NoClientAuth::boxed()
-    };
-
     let certs = load_certs(OPTIONS.server_args().cert.as_str());
+    let mut root_store = RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    for cert in &certs {
+        root_store.add(cert.clone())?;
+    }
+    let verifier = if OPTIONS.server_args().check_auth {
+        WebPkiClientVerifier::builder(Arc::new(root_store))
+            .allow_unauthenticated()
+            .build()?
+    } else {
+        WebPkiClientVerifier::no_client_auth()
+    };
     let private_key = load_private_key(OPTIONS.server_args().key.as_str());
     let mut config = ServerConfig::builder()
-        .with_safe_defaults()
-        .with_client_cert_verifier(client_auth)
-        .with_single_cert_with_ocsp_and_sct(certs, private_key, vec![], vec![])?;
+        .with_client_cert_verifier(verifier)
+        .with_single_cert_with_ocsp(certs, private_key, vec![])?;
     config.key_log = Arc::new(KeyLogFile::new());
 
     let mut protocols: Vec<Vec<u8>> = Vec::new();

@@ -1,6 +1,3 @@
-use async_smoltcp::TunDevice;
-use bytes::BytesMut;
-use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
 use std::{
     fs::OpenOptions,
     io::Write,
@@ -8,11 +5,17 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+
+use bytes::BytesMut;
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pki_types::ServerName;
 use tokio::{net::TcpStream, runtime::Runtime, spawn, sync::mpsc::channel};
 use tokio_rustls::{client::TlsStream, TlsConnector};
+use wintun::Adapter;
+
+use async_smoltcp::TunDevice;
 use types::Result;
 use wintool::adapter::get_main_adapter_gwif;
-use wintun::Adapter;
 
 use crate::{
     awintun::{
@@ -34,7 +37,7 @@ mod udp;
 pub async fn init_tls_conn(
     connector: TlsConnector,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
 ) -> types::Result<TlsStream<TcpStream>> {
     let stream = tokio::net::TcpStream::connect(server_addr).await?;
     let conn = connector.connect(server_name, stream).await?;
@@ -74,17 +77,10 @@ async fn async_run() -> Result<()> {
     let server_name: ServerName = OPTIONS.wintun_args().hostname.as_str().try_into()?;
 
     let mut root_store = RootCertStore::empty();
-    root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
-        )
-    }));
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
     let config = Arc::new(
         ClientConfig::builder()
-            .with_safe_defaults()
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
