@@ -1,4 +1,11 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -132,4 +139,41 @@ async fn async_run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn wait_until_stop(running: Arc<AtomicBool>) {}
+
+#[cfg(not(target_os = "windows"))]
+async fn wait_until_stop(running: Arc<AtomicBool>, ip: IpAddr) {
+    let timeout = OPTIONS.proxy_args().ipset_timeout;
+    if timeout == 0 {
+        return;
+    }
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut counter = 0;
+    while running.load(Ordering::SeqCst) {
+        tick.tick().await;
+        counter += 1;
+        if counter % timeout != 1 {
+            continue;
+        }
+        let mut session = OPTIONS
+            .proxy_args()
+            .session
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap();
+        match session.add(ip, Some(timeout as u32 + 5)) {
+            Ok(ret) => {
+                if !ret {
+                    log::error!("add ip:{} to ipset failed", ip);
+                }
+            }
+            Err(err) => {
+                log::error!("add ip:{} to ipset failed:{}", ip, err);
+            }
+        }
+    }
 }

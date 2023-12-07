@@ -54,7 +54,7 @@ winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default"
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.3"
-ipset = { version = "0.5.0" }
+ipset = { version = "0.6" }
 
 [dependencies.fern]
 version = "0.6"

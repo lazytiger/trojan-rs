@@ -3,7 +3,10 @@ use std::{
     io,
     io::ErrorKind,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -18,7 +21,7 @@ use tokio::{
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use crate::{
-    aproxy::new_socket,
+    aproxy::{new_socket, wait_until_stop},
     config::OPTIONS,
     proto::{TrojanRequest, UdpAssociate, UdpParseResult, UDP_ASSOCIATE},
     sys,
@@ -148,7 +151,9 @@ async fn local_to_remote(
                 return;
             }
             let (read_half, write_half) = split(remote);
-            spawn(remote_to_local(read_half, socket, src_addr, sender));
+            spawn(remote_to_local_with_wait(
+                read_half, socket, src_addr, sender,
+            ));
             write_half
         } else {
             log::error!("connect to remote server failed");
@@ -180,6 +185,7 @@ async fn remote_to_local(
     local: Arc<UdpSocket>,
     src_addr: SocketAddr,
     sender: Sender<SocketAddr>,
+    running: Arc<AtomicBool>,
 ) {
     let mut buffer = BytesMut::new();
     'main: loop {
@@ -226,4 +232,23 @@ async fn remote_to_local(
         }
     }
     let _ = sender.send(src_addr).await;
+    running.store(false, Ordering::SeqCst);
+}
+
+async fn remote_to_local_with_wait(
+    read_half: ReadHalf<TlsStream<TcpStream>>,
+    socket: Arc<UdpSocket>,
+    src_addr: SocketAddr,
+    sender: Sender<SocketAddr>,
+) {
+    let addr = socket.local_addr().unwrap();
+    let running = Arc::new(AtomicBool::new(true));
+    spawn(remote_to_local(
+        read_half,
+        socket,
+        src_addr,
+        sender,
+        running.clone(),
+    ));
+    wait_until_stop(running, addr.ip()).await;
 }
