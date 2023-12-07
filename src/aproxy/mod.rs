@@ -1,10 +1,6 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use rustls::{
@@ -142,17 +138,17 @@ async fn async_run() -> Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn wait_until_stop(running: Arc<AtomicBool>) {}
+async fn wait_until_stop(_running: Arc<AtomicBool>, _ip: IpAddr) {}
 
 #[cfg(not(target_os = "windows"))]
 async fn wait_until_stop(running: Arc<AtomicBool>, ip: IpAddr) {
     let timeout = OPTIONS.proxy_args().ipset_timeout;
-    if timeout == 0 {
+    if timeout == 0 || OPTIONS.proxy_args().skip_dns_ip == Some(ip) {
         return;
     }
-    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
     let mut counter = 0;
-    while running.load(Ordering::SeqCst) {
+    while running.load(std::sync::atomic::Ordering::SeqCst) {
         tick.tick().await;
         counter += 1;
         if counter % timeout != 1 {

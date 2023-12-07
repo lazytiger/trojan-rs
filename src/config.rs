@@ -1,17 +1,18 @@
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::Path,
-    sync::Mutex,
     thread::sleep,
     time::Duration,
 };
 
 use clap::Parser;
+use sha2::{Digest, Sha224};
+
+#[cfg(not(target_os = "windows"))]
 use ipset::{
     types::{EnvOption, HashIp},
     Session,
 };
-use sha2::{Digest, Sha224};
 
 use crate::{
     types::TrojanError,
@@ -209,9 +210,18 @@ pub struct ProxyArgs {
     #[clap(short = 'r', long, default_value = "0")]
     pub ipset_timeout: u64,
 
+    /// the dns address to be skipped from timeout setting
+    #[clap(short = 'd', long, default_value = "8.8.8.8")]
+    pub skip_dns: String,
+
+    /// skip_dns in IpAddr
+    #[clap(skip)]
+    pub skip_dns_ip: Option<IpAddr>,
+
     /// session used for ipset
     #[clap(skip)]
-    pub session: Option<Mutex<Session<HashIp>>>,
+    #[cfg(not(target_os = "windows"))]
+    pub session: Option<std::sync::Mutex<Session<HashIp>>>,
 }
 
 #[derive(Parser)]
@@ -363,9 +373,14 @@ impl Opts {
             }
             Mode::Proxy(ref mut args) | Mode::Aproxy(ref mut args) => {
                 if args.ipset_timeout > 0 {
-                    let session = Session::new(args.no_bypass_ipset.clone());
-                    session.set_option(EnvOption::Exist);
-                    args.session = Some(Mutex::new(session));
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        let ip: Option<IpAddr> = args.skip_dns.as_str().parse().ok();
+                        args.skip_dns_ip = ip;
+                        let session = Session::new(args.no_bypass_ipset.clone());
+                        session.set_option(EnvOption::Exist);
+                        args.session = Some(std::sync::Mutex::new(session));
+                    }
                 }
                 let hostname = args.hostname.clone();
                 let port = args.port;
