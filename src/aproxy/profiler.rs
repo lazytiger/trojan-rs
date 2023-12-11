@@ -310,7 +310,11 @@ pub async fn run_profiler(
 
     let mut set = HashMap::<IpAddr, PingResult>::new();
 
-    let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
+    let remote = TcpStream::connect((
+        OPTIONS.proxy_args().hostname.as_str(),
+        OPTIONS.proxy_args().port,
+    ))
+    .await?;
     let remote = connector.connect(server_name.clone(), remote).await?;
     let (mut reader, mut writer) = split(remote);
 
@@ -396,7 +400,12 @@ pub async fn run_profiler(
 
         if reconnect {
             let _ = writer.shutdown().await;
-            if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
+            if let Ok(remote) = TcpStream::connect((
+                OPTIONS.proxy_args().hostname.as_str(),
+                OPTIONS.proxy_args().port,
+            ))
+            .await
+            {
                 let remote = connector.connect(server_name.clone(), remote).await?;
                 (reader, writer) = split(remote);
                 reconnect = writer.write_all(request.as_ref()).await.is_err();

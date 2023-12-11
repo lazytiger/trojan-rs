@@ -141,25 +141,29 @@ async fn local_to_remote(
     src_addr: SocketAddr,
     sender: Sender<SocketAddr>,
 ) {
-    let mut remote =
-        if let Ok(remote) = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await {
-            let mut remote = connector.connect(server_name, remote).await.unwrap();
-            if let Err(err) = remote.write_all(request.as_ref()).await {
-                let _ = remote.shutdown().await;
-                let _ = sender.send(src_addr).await;
-                log::error!("send handshake to remote failed:{}", err);
-                return;
-            }
-            let (read_half, write_half) = split(remote);
-            spawn(remote_to_local_with_wait(
-                read_half, socket, src_addr, sender,
-            ));
-            write_half
-        } else {
-            log::error!("connect to remote server failed");
+    let mut remote = if let Ok(remote) = TcpStream::connect((
+        OPTIONS.proxy_args().hostname.as_str(),
+        OPTIONS.proxy_args().port,
+    ))
+    .await
+    {
+        let mut remote = connector.connect(server_name, remote).await.unwrap();
+        if let Err(err) = remote.write_all(request.as_ref()).await {
+            let _ = remote.shutdown().await;
             let _ = sender.send(src_addr).await;
+            log::error!("send handshake to remote failed:{}", err);
             return;
-        };
+        }
+        let (read_half, write_half) = split(remote);
+        spawn(remote_to_local_with_wait(
+            read_half, socket, src_addr, sender,
+        ));
+        write_half
+    } else {
+        log::error!("connect to remote server failed");
+        let _ = sender.send(src_addr).await;
+        return;
+    };
 
     let mut header = BytesMut::new();
     while let Some((target, data)) = local.recv().await {

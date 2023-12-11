@@ -53,7 +53,11 @@ async fn start_tcp_proxy(
     connector: TlsConnector,
     dst_addr: SocketAddr,
 ) -> Result<()> {
-    let remote = TcpStream::connect(OPTIONS.back_addr.as_ref().unwrap()).await?;
+    let remote = TcpStream::connect((
+        OPTIONS.proxy_args().hostname.as_str(),
+        OPTIONS.proxy_args().port,
+    ))
+    .await?;
     let mut remote = connector.connect(server_name, remote).await?;
     let mut request = BytesMut::new();
     TrojanRequest::generate(&mut request, CONNECT, &dst_addr);
