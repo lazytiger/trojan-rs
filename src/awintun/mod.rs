@@ -36,10 +36,13 @@ mod udp;
 
 pub async fn init_tls_conn(
     connector: TlsConnector,
-    server_addr: SocketAddr,
     server_name: ServerName<'static>,
 ) -> types::Result<TlsStream<TcpStream>> {
-    let stream = tokio::net::TcpStream::connect(server_addr).await?;
+    let stream = tokio::net::TcpStream::connect((
+        OPTIONS.wintun_args().hostname.as_str(),
+        OPTIONS.wintun_args().port,
+    ))
+    .await?;
     let conn = connector.connect(server_name, stream).await?;
     Ok(conn)
 }
@@ -102,7 +105,6 @@ async fn async_run() -> Result<()> {
     spawn(run_udp_dispatch(
         data_receiver,
         socket_receiver,
-        server_addr,
         server_name.clone(),
         connector.clone(),
         mtu,
@@ -120,12 +122,7 @@ async fn async_run() -> Result<()> {
                 stream.local_addr(),
                 stream.peer_addr()
             );
-            spawn(start_tcp(
-                stream,
-                connector.clone(),
-                server_addr,
-                server_name.clone(),
-            ));
+            spawn(start_tcp(stream, connector.clone(), server_name.clone()));
         }
         for socket in udp_sockets {
             log::info!("accept udp to:{}", socket.peer_addr());

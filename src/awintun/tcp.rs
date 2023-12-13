@@ -19,10 +19,9 @@ use crate::{
 pub async fn start_tcp(
     local: TcpStream,
     connector: TlsConnector,
-    server_addr: SocketAddr,
     server_name: ServerName<'static>,
 ) {
-    let client = init_tls_conn(connector, server_addr, server_name).await;
+    let client = init_tls_conn(connector, server_name).await;
     if let Ok(client) = client {
         let dst_addr = client.get_ref().0.peer_addr().unwrap();
         let (read_half, write_half) = split(client);

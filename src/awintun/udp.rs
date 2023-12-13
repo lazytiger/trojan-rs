@@ -27,7 +27,6 @@ enum DispatchReturn {
 pub async fn run_udp_dispatch(
     mut data_receiver: Receiver<(IpEndpoint, IpEndpoint, BytesMut)>,
     mut socket_receiver: Receiver<Arc<UdpWriteHalf>>,
-    server_addr: SocketAddr,
     server_name: ServerName<'static>,
     connector: TlsConnector,
     mtu: usize,
@@ -73,7 +72,6 @@ pub async fn run_udp_dispatch(
                         spawn(local_to_remote(
                             req_receiver,
                             connector.clone(),
-                            server_addr,
                             server_name.clone(),
                             src_addr,
                             local,
@@ -132,7 +130,6 @@ pub async fn start_udp(
 async fn local_to_remote(
     mut receiver: Receiver<(IpEndpoint, BytesMut)>,
     connector: TlsConnector,
-    server_addr: SocketAddr,
     server_name: ServerName<'static>,
     src_addr: IpEndpoint,
     local: Arc<UdpWriteHalf>,
@@ -141,7 +138,7 @@ async fn local_to_remote(
 ) {
     let dst_addr = local.peer_addr();
     let (mut remote, remote_local_addr) =
-        if let Ok(client) = init_tls_conn(connector, server_addr, server_name.clone()).await {
+        if let Ok(client) = init_tls_conn(connector, server_name.clone()).await {
             let local_addr = client.get_ref().0.local_addr().unwrap();
             let (read_half, mut write_half) = split(client);
             if let Err(err) = write_half.write_all(request.as_ref()).await {
