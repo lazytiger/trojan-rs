@@ -1,0 +1,42 @@
+[build]
+target = "x86_64-pc-windows-msvc"
+
+[target.aarch64-linux-android]
+linker = 'C:\Program Files\Android\android-ndk-r25c\toolchains/llvm/prebuilt/windows-x86_64\bin\aarch64-linux-android24-clang.cmd'
+rustflags = [
+    "-L",
+    'D:\github.com\lazytiger\trojan-rs\mobile2\backend2\.cargo',
+    "-Clink-arg=-landroid",
+    "-Clink-arg=-llog",
+    "-Clink-arg=-lOpenSLES",
+]
+
+[target.armv7-linux-androideabi]
+linker = 'C:\Program Files\Android\android-ndk-r25c\toolchains/llvm/prebuilt/windows-x86_64\bin\armv7a-linux-androideabi24-clang.cmd'
+rustflags = [
+    "-L",
+    'D:\github.com\lazytiger\trojan-rs\mobile2\backend2\.cargo',
+    "-Clink-arg=-landroid",
+    "-Clink-arg=-llog",
+    "-Clink-arg=-lOpenSLES",
+]
+
+[target.i686-linux-android]
+linker = 'C:\Program Files\Android\android-ndk-r25c\toolchains/llvm/prebuilt/windows-x86_64\bin\i686-linux-android24-clang.cmd'
+rustflags = [
+    "-L",
+    'D:\github.com\lazytiger\trojan-rs\mobile2\backend2\.cargo',
+    "-Clink-arg=-landroid",
+    "-Clink-arg=-llog",
+    "-Clink-arg=-lOpenSLES",
+]
+
+[target.x86_64-linux-android]
+linker = 'C:\Program Files\Android\android-ndk-r25c\toolchains/llvm/prebuilt/windows-x86_64\bin\x86_64-linux-android24-clang.cmd'
+rustflags = [
+    "-L",
+    'D:\github.com\lazytiger\trojan-rs\mobile2\backend2\.cargo',
+    "-Clink-arg=-landroid",
+    "-Clink-arg=-llog",
+    "-Clink-arg=-lOpenSLES",
+]
