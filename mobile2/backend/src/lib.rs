@@ -1,7 +1,7 @@
-mod platform;
+use std::sync::RwLock;
 
-use crate::platform::{init_builder, init_logging};
 use anyhow::Result;
+use lazy_static::lazy_static;
 use wry::{
     application::{
         event::{Event, StartCause, WindowEvent},
@@ -11,9 +11,20 @@ use wry::{
     webview::{WebView, WebViewBuilder},
 };
 
+use crate::{
+    platform::{init_builder, init_logging},
+    types::{Error, IPCRequest, MobileTrojanLoop},
+};
+
+mod platform;
+mod types;
+
+lazy_static! {
+    pub static ref LOOPER: RwLock<MobileTrojanLoop> = MobileTrojanLoop::new();
+}
 pub fn main() -> Result<()> {
     init_logging();
-    let event_loop = EventLoop::new();
+    let event_loop = LOOPER.write().unwrap().looper.take().unwrap();
 
     let mut webview = None;
     event_loop.run(move |event, event_loop, control_flow| {
@@ -30,16 +41,31 @@ pub fn main() -> Result<()> {
                 webview.take();
                 *control_flow = ControlFlow::Exit;
             }
+            Event::UserEvent(code) => {
+                if let Some(webview) = &webview {
+                    if let Err(err) = webview.evaluate_script(&code) {
+                        log::error!("run code:{} failed:{}", code, err);
+                    }
+                }
+            }
             _ => (),
         }
     });
 }
 
-fn handle_ipc(s: &String) -> Result<()> {
+fn handle_ipc(s: &String) -> Result<(), types::Error> {
+    let request: IPCRequest = serde_json::from_str(s.as_str())?;
+    match request.method.as_str() {
+        "startInit" => {
+            log::info!("start init now");
+            set_config("".to_string())?;
+        }
+        _ => {}
+    }
     Ok(())
 }
 
-fn build_webview(event_loop: &EventLoopWindowTarget<()>) -> Result<WebView> {
+fn build_webview(event_loop: &EventLoopWindowTarget<String>) -> Result<WebView> {
     let window = WindowBuilder::new()
         .with_title("Trojan Mobile App")
         .build(event_loop)?;
@@ -48,7 +74,6 @@ fn build_webview(event_loop: &EventLoopWindowTarget<()>) -> Result<WebView> {
         // If you want to use custom protocol, set url like this and add files like index.html to assets directory.
         .with_url("wry://assets/index.html")?
         .with_devtools(true)
-        .with_initialization_script("console.log('hello world from init script');")
         .with_ipc_handler(|_, s| {
             if let Err(err) = handle_ipc(&s) {
                 log::error!("call ipc:{} failed:{:?}", s, err);
@@ -58,4 +83,21 @@ fn build_webview(event_loop: &EventLoopWindowTarget<()>) -> Result<WebView> {
     let webview = builder.build()?;
 
     Ok(webview)
+}
+
+fn call_js(code: String) -> Result<(), Error> {
+    LOOPER
+        .read()
+        .map_err(|err| Error::Lock(err.to_string()))?
+        .proxy
+        .send_event(code)?;
+    Ok(())
+}
+
+pub fn set_config(data: String) -> Result<(), Error> {
+    call_js(format!("window.setConfig('{}');", data))
+}
+
+pub fn set_app_list(data: String) -> Result<(), Error> {
+    call_js(format!("window.setAppList('{}');", data))
 }
