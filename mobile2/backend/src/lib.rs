@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use std::sync::{atomic::AtomicBool, Arc, RwLock};
 
 use anyhow::Result;
 use lazy_static::lazy_static;
@@ -100,4 +100,35 @@ pub fn set_config(data: String) -> Result<(), Error> {
 
 pub fn set_app_list(data: String) -> Result<(), Error> {
     call_js(format!("window.setAppList('{}');", data))
+}
+
+pub fn set_error(message: String) -> Result<(), Error> {
+    call_js(format!("window.setError('{}');", message))
+}
+
+pub fn on_start(fd: i32) {
+    let mut looper = LOOPER.write().unwrap();
+    looper.running = Arc::new(AtomicBool::new(true));
+    let running = looper.running.clone();
+    std::thread::spawn(move || {
+        if let Err(err) = std::panic::catch_unwind(|| {
+            if let Err(err) = crate::tun::start_vpn(fd, running) {
+                log::error!("vpn service exit with:{:?}", err);
+            }
+        }) {
+            log::error!("vpn service exit with:{:?}", err);
+        }
+        if let Err(err) = stop_vpn() {
+            log::error!("stop vpn failed:{:?}", err);
+        }
+    });
+}
+
+pub fn on_stop() {
+    let looper = LOOPER.read().unwrap();
+    looper.running.store(false, Ordering::Relaxed);
+}
+
+pub fn on_network_changed(enable: bool) {
+    log::info!("network status changed:{}", enable);
 }

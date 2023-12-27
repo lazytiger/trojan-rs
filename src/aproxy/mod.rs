@@ -10,11 +10,11 @@ use rustls::{
 };
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio::{
-    net::{TcpListener, UdpSocket},
+    net::{lookup_host, TcpListener, TcpStream, UdpSocket},
     runtime::Runtime,
     sync::mpsc::unbounded_channel,
 };
-use tokio_rustls::TlsConnector;
+use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use crate::{
     aproxy::{
@@ -24,6 +24,7 @@ use crate::{
     },
     config::OPTIONS,
     proxy::new_socket,
+    types,
     types::Result,
 };
 
@@ -172,4 +173,29 @@ async fn wait_until_stop(running: Arc<AtomicBool>, ip: IpAddr) {
             }
         }
     }
+}
+
+pub async fn init_tls_conn(
+    connector: TlsConnector,
+    server_name: ServerName<'static>,
+) -> types::Result<TlsStream<TcpStream>> {
+    let ips: Vec<_> = lookup_host((
+        OPTIONS.proxy_args().hostname.as_str(),
+        OPTIONS.proxy_args().port,
+    ))
+    .await?
+    .collect();
+    #[cfg(target_os = "linux")]
+    {
+        let mut proxy_data = OPTIONS.proxy_args().proxy_data.as_ref().unwrap().lock();
+        for ip in &ips {
+            if (!proxy_data.ips.contains(ip)) {
+                proxy_data.ips.push(ip.clone());
+                proxy_data.bypass_session.add(ip);
+            }
+        }
+    }
+    let stream = tokio::net::TcpStream::connect(ips.as_slice()).await?;
+    let conn = connector.connect(server_name, stream).await?;
+    Ok(conn)
 }

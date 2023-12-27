@@ -20,7 +20,7 @@ use tokio::{
 };
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
-use crate::{config::OPTIONS, proto, proto::TrojanRequest, types};
+use crate::{aproxy::init_tls_conn, config::OPTIONS, proto, proto::TrojanRequest, types};
 
 #[derive(Debug)]
 struct PingResult {
@@ -310,12 +310,7 @@ pub async fn run_profiler(
 
     let mut set = HashMap::<IpAddr, PingResult>::new();
 
-    let remote = TcpStream::connect((
-        OPTIONS.proxy_args().hostname.as_str(),
-        OPTIONS.proxy_args().port,
-    ))
-    .await?;
-    let remote = connector.connect(server_name.clone(), remote).await?;
+    let remote = init_tls_conn(connector.clone(), server_name.clone()).await?;
     let (mut reader, mut writer) = split(remote);
 
     let mut send_buffer = BytesMut::new();
@@ -400,13 +395,7 @@ pub async fn run_profiler(
 
         if reconnect {
             let _ = writer.shutdown().await;
-            if let Ok(remote) = TcpStream::connect((
-                OPTIONS.proxy_args().hostname.as_str(),
-                OPTIONS.proxy_args().port,
-            ))
-            .await
-            {
-                let remote = connector.connect(server_name.clone(), remote).await?;
+            if let Ok(remote) = init_tls_conn(connector.clone(), server_name.clone()).await {
                 (reader, writer) = split(remote);
                 reconnect = writer.write_all(request.as_ref()).await.is_err();
                 if !reconnect {

@@ -14,6 +14,11 @@ const routes = [
         // which is lazy-loaded when the route is visited.
         component: () => import('@/views/Home.vue'),
       },
+      {
+        path:'domain',
+        name:'Domain',
+        component:() => import('@/views/Domain.vue'),
+      },
     ],
   },
 ]

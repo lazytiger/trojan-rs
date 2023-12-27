@@ -21,7 +21,7 @@ use tokio::{
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use crate::{
-    aproxy::{new_socket, wait_until_stop},
+    aproxy::{init_tls_conn, new_socket, wait_until_stop},
     config::OPTIONS,
     proto::{TrojanRequest, UdpAssociate, UdpParseResult, UDP_ASSOCIATE},
     sys,
@@ -141,13 +141,7 @@ async fn local_to_remote(
     src_addr: SocketAddr,
     sender: Sender<SocketAddr>,
 ) {
-    let mut remote = if let Ok(remote) = TcpStream::connect((
-        OPTIONS.proxy_args().hostname.as_str(),
-        OPTIONS.proxy_args().port,
-    ))
-    .await
-    {
-        let mut remote = connector.connect(server_name, remote).await.unwrap();
+    let mut remote = if let Ok(mut remote) = init_tls_conn(connector, server_name).await {
         if let Err(err) = remote.write_all(request.as_ref()).await {
             let _ = remote.shutdown().await;
             let _ = sender.send(src_addr).await;

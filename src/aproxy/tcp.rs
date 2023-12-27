@@ -17,7 +17,7 @@ use tokio::{
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use crate::{
-    aproxy::wait_until_stop,
+    aproxy::{init_tls_conn, wait_until_stop},
     async_utils::copy,
     config::OPTIONS,
     proto::{TrojanRequest, CONNECT},
@@ -53,12 +53,7 @@ async fn start_tcp_proxy(
     connector: TlsConnector,
     dst_addr: SocketAddr,
 ) -> Result<()> {
-    let remote = TcpStream::connect((
-        OPTIONS.proxy_args().hostname.as_str(),
-        OPTIONS.proxy_args().port,
-    ))
-    .await?;
-    let mut remote = connector.connect(server_name, remote).await?;
+    let mut remote = init_tls_conn(connector, server_name).await?;
     let mut request = BytesMut::new();
     TrojanRequest::generate(&mut request, CONNECT, &dst_addr);
     if let Err(err) = remote.write_all(request.as_ref()).await {

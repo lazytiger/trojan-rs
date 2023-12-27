@@ -1,11 +1,15 @@
 use derive_more::From;
 use serde::Deserialize;
-use std::{env::JoinPathsError, sync::RwLock};
+use std::{
+    env::JoinPathsError,
+    sync::{atomic::AtomicBool, Arc, RwLock},
+};
 use wry::application::event_loop::{EventLoop, EventLoopBuilder, EventLoopClosed, EventLoopProxy};
 
 pub struct MobileTrojanLoop {
     pub looper: Option<EventLoop<String>>,
     pub proxy: EventLoopProxy<String>,
+    pub running: Arc<AtomicBool>,
 }
 
 unsafe impl Sync for MobileTrojanLoop {}
@@ -17,6 +21,7 @@ impl MobileTrojanLoop {
         let proxy = looper.create_proxy();
         RwLock::new(Self {
             looper: Some(looper),
+            running: Arc::new(AtomicBool::new(false)),
             proxy,
         })
     }
@@ -26,6 +31,12 @@ impl MobileTrojanLoop {
 pub struct IPCRequest {
     pub method: String,
     pub payload: String,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct InitDataResponse {
+    pub path: String,
+    pub pnames: Vec<String>,
 }
 
 #[derive(From, Debug)]
