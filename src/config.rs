@@ -8,12 +8,6 @@ use std::{
 use clap::Parser;
 use sha2::{Digest, Sha224};
 
-#[cfg(target_os = "linux")]
-use ipset::{
-    types::{EnvOption, HashIp},
-    Session,
-};
-
 use crate::{
     types::TrojanError,
     utils::{get_system_dns, resolve},
@@ -214,14 +208,10 @@ pub struct ProxyArgs {
     #[clap(short = 'd', long, default_value = "8.8.8.8")]
     pub skip_dns: String,
 
-    /// skip_dns in IpAddr
-    #[clap(skip)]
-    pub skip_dns_ip: Option<IpAddr>,
-
     /// session used for no bypass ipset
     #[clap(skip)]
     #[cfg(target_os = "linux")]
-    pub proxy_data: Option<std::sync::Mutex<ProxyData>>,
+    pub proxy_data: Option<tokio::sync::Mutex<crate::types::ProxyData>>,
 }
 
 #[derive(Parser)]
@@ -374,13 +364,13 @@ impl Opts {
             Mode::Proxy(ref mut args) | Mode::Aproxy(ref mut args) => {
                 #[cfg(target_os = "linux")]
                 {
-                    let proxy_data = crate::types::ProxyData::new(
-                        args.no_bypass_ipset.as_str(),
-                        args.bypass_ipset.as_str(),
+                    let mut proxy_data = crate::types::ProxyData::new(
+                        args.no_bypass_ipset.clone(),
+                        args.bypass_ipset.clone(),
                     );
                     if args.ipset_timeout > 0 {
                         let ip: Option<IpAddr> = args.skip_dns.as_str().parse().ok();
-                        args.skip_dns_ip = ip;
+                        proxy_data.skip_dns = ip;
                     }
                     args.proxy_data = Some(tokio::sync::Mutex::new(proxy_data));
                 }
