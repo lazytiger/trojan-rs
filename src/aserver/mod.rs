@@ -10,7 +10,7 @@ use std::{
 use bytes::{Buf, BytesMut};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::{lookup_host, TcpListener, TcpStream},
     runtime::{Handle, Runtime},
     spawn,
     sync::mpsc::{unbounded_channel, UnboundedSender},
@@ -28,7 +28,6 @@ use crate::{
     proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     server::{init_config, ping_backend::PingResult},
     types::{Result, TrojanError},
-    utils::aresolve,
 };
 
 mod ping;
@@ -109,14 +108,10 @@ async fn start_proxy_internal(
                             cmd,
                             match address {
                                 Sock5Address::Socket(addr) => addr,
-                                Sock5Address::Domain(domain, port) => {
-                                    let ip =
-                                        *aresolve(domain.as_str(), OPTIONS.system_dns.as_str())
-                                            .await?
-                                            .first()
-                                            .ok_or(TrojanError::Resolve)?;
-                                    SocketAddr::new(ip, port)
-                                }
+                                Sock5Address::Domain(domain, port) => lookup_host((domain, port))
+                                    .await?
+                                    .next()
+                                    .ok_or(TrojanError::Resolve)?,
                                 Sock5Address::None => *OPTIONS.back_addr.as_ref().unwrap(),
                                 _ => unreachable!(),
                             },

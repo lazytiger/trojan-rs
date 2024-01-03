@@ -3,7 +3,7 @@ use std::{collections::HashMap, io, net::SocketAddr, sync::Arc, time::Duration};
 use bytes::{Buf, BytesMut};
 use tokio::{
     io::{split, AsyncReadExt, AsyncWriteExt, WriteHalf},
-    net::{TcpStream, UdpSocket},
+    net::{lookup_host, TcpStream, UdpSocket},
     spawn,
     sync::mpsc::{channel, Receiver},
     time::{timeout, Instant},
@@ -14,7 +14,7 @@ use crate::{
     config::OPTIONS,
     proto::{Sock5Address, UdpAssociate, UdpParseResult},
     types::Result,
-    utils::{aresolve, is_private},
+    utils::is_private,
 };
 
 pub async fn start_udp(source: TlsStream<TcpStream>, mut buffer: BytesMut) -> Result<()> {
@@ -34,13 +34,14 @@ pub async fn start_udp(source: TlsStream<TcpStream>, mut buffer: BytesMut) -> Re
                         Sock5Address::Domain(domain, port) => {
                             if let Some(ip) = dns_cache_store.get(&domain) {
                                 SocketAddr::new(*ip, port)
-                            } else if let Ok(Some(ip)) =
-                                aresolve(domain.as_str(), OPTIONS.system_dns.as_str())
-                                    .await
-                                    .map(|ips| ips.get(0).copied())
-                            {
-                                dns_cache_store.insert(domain, ip);
-                                SocketAddr::new(ip, port)
+                            } else if let Ok(mut ret) = lookup_host((domain.clone(), port)).await {
+                                if let Some(addr) = ret.next() {
+                                    dns_cache_store.insert(domain, addr.ip());
+                                    addr
+                                } else {
+                                    log::error!("query {} failed", domain);
+                                    continue;
+                                }
                             } else {
                                 log::error!("query {} failed", domain);
                                 continue;
