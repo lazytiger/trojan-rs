@@ -46,7 +46,8 @@ pub async fn start_tcp(
         }
         if !proxy_added {
             log::error!(
-                "header not completed after 10 retries:{}",
+                "[{}] header not completed after 10 retries:{}",
+                src_addr,
                 String::from_utf8_lossy(buffer.as_ref())
             );
         }
@@ -58,10 +59,14 @@ pub async fn start_tcp(
 
     log::info!("tcp backend:{}", target_addr);
     let mut target = TcpStream::connect(target_addr).await?;
-    if let Err(err) = target.write_all(buffer.as_ref()).await {
+    if let Ok(Ok(_)) =
+        tokio::time::timeout(Duration::from_secs(5), target.write_all(buffer.as_ref())).await
+    {
+        log::info!("tcp send data to target:{} ok", target_addr);
+    } else {
+        log::error!("tcp send data to target:{} failed", target_addr);
         let _ = target.shutdown().await;
         let _ = source.shutdown().await;
-        log::error!("tcp send data to target:{} failed:{}", target_addr, err);
         return Ok(());
     }
     let (source_read, source_write) = split(source);
