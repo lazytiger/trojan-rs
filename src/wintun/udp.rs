@@ -48,6 +48,10 @@ impl<'a, 'b> std::io::Read for UdpSocketRef<'a, 'b> {
                 Ok(n)
             }
             Err(RecvError::Exhausted) => Err(ErrorKind::WouldBlock.into()),
+            Err(RecvError::Truncated) => {
+                log::error!("udp buffer is too small:{}", buf.len());
+                Err(ErrorKind::OutOfMemory.into())
+            }
         }
     }
 }

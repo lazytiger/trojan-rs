@@ -24,16 +24,16 @@ rayon = "1.8"
 rustls-pemfile = "2.0"
 lazy_static = "1.4"
 derive_more = "0.99"
-libloading = "0.8.1"
+libloading = "0.8"
 crossbeam = "0.8"
 trust-dns-proto = "0.23.2"
 widestring = "1.0"
 itertools = "0.12.0"
-smoltcp = { version = "0.10" }
+smoltcp = { version = "0.11" }
 backtrace = "0.3"
 hex = "0.4"
 surge-ping = "0.8"
-tokio = { version = "1.34", features = ["full"] }
+tokio = { version = "1.35", features = ["full"] }
 rand = "0.8"
 test-log = "0.2"
 notify = "6.1"
@@ -41,7 +41,7 @@ ringbuf = "0.3"
 httparse = "1.8"
 async_smoltcp = { path = "async_smoltcp" }
 tokio-rustls = "0.25"
-rustls-pki-types = "1.0"
+rustls-pki-types = "1.1"
 
 [dev-dependencies]
 env_logger = "0.10"

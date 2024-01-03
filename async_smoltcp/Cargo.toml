@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-smoltcp = { version = "0.10", features = [] }
+smoltcp = { version = "0.11", features = [] }
 bytes = "1.5"
-tokio = { version = "1.34", features = [] }
+tokio = { version = "1.35", features = [] }
 tokio-util = "0.7"
 log = "0.4"
