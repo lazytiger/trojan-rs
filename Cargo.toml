@@ -42,6 +42,7 @@ httparse = "1.8"
 async_smoltcp = { path = "async_smoltcp" }
 tokio-rustls = "0.25"
 rustls-pki-types = "1.1"
+futures = "0.3"
 
 [dev-dependencies]
 env_logger = "0.10"
