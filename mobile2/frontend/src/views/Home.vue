@@ -9,6 +9,6 @@ import {useAppStore} from "@/store/app";
 
 let store = useAppStore();
 onMounted(() => {
-  store.title = "主页"
+  store.title = "设置"
 })
 </script>
