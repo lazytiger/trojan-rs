@@ -1,4 +1,7 @@
-use std::sync::{atomic::AtomicBool, Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, RwLock,
+};
 
 use anyhow::Result;
 use lazy_static::lazy_static;
@@ -112,13 +115,13 @@ pub fn on_start(fd: i32) {
     let running = looper.running.clone();
     std::thread::spawn(move || {
         if let Err(err) = std::panic::catch_unwind(|| {
-            if let Err(err) = crate::tun::start_vpn(fd, running) {
+            if let Err(err) = crate::platform::start_vpn(fd, running) {
                 log::error!("vpn service exit with:{:?}", err);
             }
         }) {
             log::error!("vpn service exit with:{:?}", err);
         }
-        if let Err(err) = stop_vpn() {
+        if let Err(err) = crate::platform::stop_vpn() {
             log::error!("stop vpn failed:{:?}", err);
         }
     });

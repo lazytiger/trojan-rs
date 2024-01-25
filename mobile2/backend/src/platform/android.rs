@@ -2,7 +2,7 @@ use wry::webview::{WebViewBuilder, WebViewBuilderExtAndroid};
 
 use wry::android_binding;
 
-use crate::main;
+use crate::{main, set_error, types::Error};
 use jni::{
     objects::{JObject, JString},
     sys::{jboolean, jint, jobject},
