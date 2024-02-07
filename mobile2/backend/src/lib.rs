@@ -1,25 +1,32 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, RwLock,
+use std::{
+    env::join_paths,
+    fs::File,
+    io::{Read, Write},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
 };
 
 use anyhow::Result;
 use lazy_static::lazy_static;
+use log::error;
 use wry::{
     application::{
         event::{Event, StartCause, WindowEvent},
-        event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
+        event_loop::{ControlFlow, EventLoopWindowTarget},
         window::WindowBuilder,
     },
     webview::{WebView, WebViewBuilder},
 };
 
 use crate::{
-    platform::{init_builder, init_logging},
-    types::{Error, IPCRequest, MobileTrojanLoop},
+    platform::{get_init_data, init_builder, init_logging, start_vpn, stop_vpn},
+    types::{BnetConfig, Error, IPCRequest, MobileTrojanLoop, StartBnetRequest},
 };
 
 mod platform;
+mod tun;
 mod types;
 
 lazy_static! {
@@ -56,14 +63,66 @@ pub fn main() -> Result<()> {
     });
 }
 
+fn load_config() -> Result<String, Error> {
+    let path = LOOPER
+        .read()
+        .map_err(|e| Error::Lock(e.to_string()))?
+        .cache_dir
+        .clone();
+    let path = join_paths(&[path.as_str(), "config.json"])?;
+    let mut content = String::new();
+    if let Ok(mut file) = File::open(path) {
+        file.read_to_string(&mut content)?;
+    }
+    Ok(content)
+}
+
+fn save_config() -> Result<(), Error> {
+    let looper = LOOPER.read().map_err(|e| Error::Lock(e.to_string()))?;
+    let path = join_paths(&[looper.cache_dir.as_str(), "config.json"])?;
+    let mut file = File::options()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(path)?;
+    let data = serde_json::to_string(&looper.config)?;
+    file.write_all(data.as_bytes())?;
+    Ok(())
+}
+
 fn handle_ipc(s: &String) -> Result<(), types::Error> {
     let request: IPCRequest = serde_json::from_str(s.as_str())?;
     match request.method.as_str() {
         "startInit" => {
             log::info!("start init now");
-            set_config("".to_string())?;
+            let data = get_init_data()?;
+            let response: types::InitDataResponse = serde_json::from_str(data.as_str())?;
+            set_app_list(serde_json::to_string(&response.pnames)?)?;
+            LOOPER
+                .write()
+                .map_err(|err| Error::Lock(err.to_string()))?
+                .cache_dir = response.path;
+            let config = load_config()?;
+            set_config(config)?;
         }
-        _ => {}
+        "startBnet" => {
+            let payload: StartBnetRequest = serde_json::from_str(request.payload.as_str())?;
+            let app = payload.config.app.clone();
+            let dns = payload.config.gateway.clone();
+            let gateway = payload.config.gateway.clone();
+            LOOPER
+                .write()
+                .map_err(|err| Error::Lock(err.to_string()))?
+                .config = payload.config;
+            save_config()?;
+            start_vpn(app, dns, gateway)?;
+        }
+        "stopBnet" => {
+            stop_vpn()?;
+        }
+        _ => {
+            log:error!("ipc method:{} not supported", request.method);
+        }
     }
     Ok(())
 }
@@ -115,7 +174,7 @@ pub fn on_start(fd: i32) {
     let running = looper.running.clone();
     std::thread::spawn(move || {
         if let Err(err) = std::panic::catch_unwind(|| {
-            if let Err(err) = crate::platform::start_vpn(fd, running) {
+            if let Err(err) = crate::tun::start_vpn(fd, running) {
                 log::error!("vpn service exit with:{:?}", err);
             }
         }) {

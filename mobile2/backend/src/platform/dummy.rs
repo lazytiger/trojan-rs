@@ -46,3 +46,23 @@ pub fn init_builder(builder: WebViewBuilder) -> WebViewBuilder {
         }
     })
 }
+
+pub fn get_init_data() -> Result<String, crate::types::Error> {
+    unimplemented!()
+}
+
+pub fn start_app() {
+    unimplemented!()
+}
+
+pub fn start_vpn(_: String, _: String, _: String) -> Result<(), crate::types::Error> {
+    unimplemented!()
+}
+
+pub fn stop_vpn() -> Result<(), crate::types::Error> {
+    unimplemented!()
+}
+
+pub fn update_notification(_: String) -> Result<(), crate::types::Error> {
+    unimplemented!()
+}

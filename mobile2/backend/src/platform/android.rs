@@ -119,7 +119,7 @@ pub fn update_notification(message: String) -> Result<(), crate::types::Error> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_mobiletrojan_TrojanService_onStart<'local>(
+pub extern "system" fn Java_com_bmshi_mobiletrojan_BnetService_onStart<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
     fd: jint,
@@ -132,7 +132,7 @@ pub extern "system" fn Java_com_bmshi_mobiletrojan_TrojanService_onStart<'local>
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_mobiletrojan_TrojanService_onStop<'local>(
+pub extern "system" fn Java_com_bmshi_mobiletrojan_BnetService_onStop<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
 ) {
@@ -144,7 +144,7 @@ pub extern "system" fn Java_com_bmshi_mobiletrojan_TrojanService_onStop<'local>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_mobiletrojan_TrojanService_onNetworkChanged<'local>(
+pub extern "system" fn Java_com_bmshi_mobiletrojan_BnetService_onNetworkChanged<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
     available: jboolean,

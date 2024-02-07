@@ -36,6 +36,7 @@ import {VTextField} from "vuetify/components";
 let store = useAppStore();
 let show = ref(false);
 let label = ref("启动")
+
 let app = ref(null as any as VTextField)
 let domain = ref(null)
 let port = ref(null)

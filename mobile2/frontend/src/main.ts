@@ -48,6 +48,6 @@ window.setAppList = (data) => {
 
 }
 
-if (window.ipc != undefined) {
+if (window.ipc) {
   window.ipc.postMessage(JSON.stringify({method: "startInit", payload: ""}))
 }
