@@ -4,12 +4,13 @@ use wintun::Session;
 
 #[derive(Clone)]
 pub struct Wintun {
+    mtu: usize,
     session: Arc<Session>,
 }
 
 impl Wintun {
-    pub fn new(session: Arc<Session>) -> Self {
-        Self { session }
+    pub fn new(mtu: usize, session: Arc<Session>) -> Self {
+        Self { mtu, session }
     }
 }
 
@@ -33,6 +34,10 @@ impl Tun for Wintun {
             .allocate_send_packet(len as u16)
             .map(TunPacket)
             .map_err(|_| ErrorKind::OutOfMemory.into())
+    }
+
+    fn mtu(&self) -> usize {
+        self.mtu
     }
 }
 
