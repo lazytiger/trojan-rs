@@ -93,8 +93,9 @@ fn is_private_v4(addr: IpAddress) -> bool {
 }
 
 impl<'a, T: Tun + Clone> TunDevice<'a, T> {
-    pub fn new(mtu: usize, tun: T) -> Self {
+    pub fn new(tun: T) -> Self {
         let channel_buffer = 1024;
+        let mtu = tun.mtu();
         let (tcp_sender, tcp_receiver) = channel(channel_buffer);
         let (udp_sender, udp_receiver) = channel(channel_buffer);
         let mut device = Self {

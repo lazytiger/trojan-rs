@@ -41,7 +41,7 @@ ringbuf = "0.3"
 httparse = "1.8"
 async_smoltcp = { path = "async_smoltcp" }
 tokio-rustls = "0.25"
-rustls-pki-types = "1.1"
+rustls-pki-types = "1.2"
 futures = "0.3"
 
 [dev-dependencies]

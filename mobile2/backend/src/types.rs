@@ -6,7 +6,7 @@ use std::{
 };
 use wry::application::event_loop::{EventLoop, EventLoopBuilder, EventLoopClosed, EventLoopProxy};
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct BnetConfig {
     pub app: String,
     pub domain: String,
@@ -15,6 +15,7 @@ pub struct BnetConfig {
     pub gateway: String,
     pub trust_dns: String,
     pub distrust_dns: String,
+    pub mtu: usize,
 }
 
 pub struct MobileTrojanLoop {

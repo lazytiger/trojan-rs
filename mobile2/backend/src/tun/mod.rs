@@ -1,5 +1,9 @@
 use std::{
-    net::{IpAddr, SocketAddr},
+    fs::File,
+    io::{ErrorKind, Read, Write},
+    mem::ManuallyDrop,
+    net::SocketAddr,
+    ops::Deref,
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -9,43 +13,117 @@ use std::{
 };
 
 use bytes::BytesMut;
-use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
+use rustls::{pki_types::ServerName, ClientConfig, RootCertStore};
 use sha2::{Digest, Sha224};
-use tokio::{net::UdpSocket, runtime::Builder, spawn, sync::mpsc::channel};
-use trust_dns_proto::{
-    op::{Message, Query},
-    rr::{DNSClass, Name, RecordType},
-    serialize::binary::BinDecodable,
-};
+use tokio::{net::TcpStream, runtime::Builder, spawn, sync::mpsc::channel};
+use tokio_rustls::{client::TlsStream, TlsConnector};
+use trust_dns_proto::serialize::binary::BinDecodable;
 
-use async_smoltcp::TunDevice;
+use async_smoltcp::{Packet as _, TunDevice};
 
-use crate::{
-    emit_event, platform,
-    tun::{
-        dns::start_dns,
-        proto::{TrojanRequest, UDP_ASSOCIATE},
-        tcp::start_tcp,
-        udp::{run_udp_dispatch, start_udp},
-    },
-    types,
-    types::{EventType, VpnError},
-    Context,
-};
+use crate::{platform, types, types::Error, LOOPER};
 
 mod dns;
 mod proto;
 mod tcp;
 mod udp;
 
+pub struct Session {
+    mtu: usize,
+    file: ManuallyDrop<File>,
+}
+
+impl Session {
+    pub fn new(fd: i32) -> types::Result<Self> {
+        let mtu = LOOPER
+            .read()
+            .map_err(|err| Error::Lock(err.to_string()))?
+            .config
+            .mtu;
+        Ok(Self {
+            mtu,
+            file: ManuallyDrop::new(File::from_raw_fd(fd)),
+        })
+    }
+
+    pub fn mtu(&self) -> usize {
+        self.mtu
+    }
+}
+
+pub struct Packet {
+    data: Vec<u8>,
+}
+
+impl Packet {
+    pub fn new(mtu: usize) -> Self {
+        Self {
+            data: vec![0u8; mtu],
+        }
+    }
+
+    pub fn set_len(&mut self, n: usize) {
+        unsafe {
+            self.data.set_len(n);
+        }
+    }
+}
+
+impl async_smoltcp::Packet for Packet {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.data.as_mut()
+    }
+
+    fn as_ref(&self) -> &[u8] {
+        self.data.as_slice()
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+
+impl async_smoltcp::Tun for Session {
+    type Packet = Packet;
+
+    fn receive(&self) -> std::io::Result<Option<Self::Packet>> {
+        let mut file = self.file.deref();
+        let mut packet = Packet::new(self.mtu);
+        match file.read(packet.as_mut()) {
+            Ok(0) => Err(ErrorKind::BrokenPipe.into()),
+            Ok(n) => {
+                packet.set_len(n);
+                Ok(Some(packet))
+            }
+            Err(err)
+                if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted =>
+            {
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn send(&self, packet: Self::Packet) -> std::io::Result<()> {
+        let mut file = self.file.deref();
+        file.write_all(packet.as_ref())
+    }
+
+    fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet> {
+        Ok(Packet::new(len))
+    }
+}
+
 pub async fn init_tls_conn(
-    config: Arc<ClientConfig>,
-    server_addr: SocketAddr,
-    server_name: ServerName,
-) -> types::Result<TlsClientStream> {
-    let stream = tokio::net::TcpStream::connect(server_addr).await?;
-    let session = ClientConnection::new(config, server_name)?;
-    Ok(TlsClientStream::new(stream, session))
+    connector: TlsConnector,
+    server_name: ServerName<'static>,
+) -> types::Result<TlsStream<TcpStream>> {
+    let looper = LOOPER.read().map_err(|err| Error::Lock(err.to_string()))?;
+    let domain = looper.config.domain.clone();
+    let port = looper.config.port;
+    let stream = tokio::net::TcpStream::connect((domain, port)).await?;
+    let conn = connector.connect(server_name, stream).await?;
+    Ok(conn)
 }
 
 fn digest_pass(pass: &String) -> String {
@@ -55,84 +133,16 @@ fn digest_pass(pass: &String) -> String {
     hex::encode(result.as_slice())
 }
 
-/// This function resolves a domain name to a list of IP addresses.
-pub async fn resolve(name: &str, dns_server_addr: &str) -> types::Result<Vec<IpAddr>> {
-    let dns_server_addr: SocketAddr = dns_server_addr.parse()?;
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    let mut message = Message::new();
-    message.set_recursion_desired(true);
-    message.set_id(1);
-    let mut query = Query::new();
-    let name = Name::from_str(name)?;
-    query.set_name(name);
-    query.set_query_type(RecordType::A);
-    query.set_query_class(DNSClass::IN);
-    message.add_query(query);
-    let request = message.to_vec()?;
-    if request.len() != socket.send_to(request.as_slice(), dns_server_addr).await? {
-        log::error!("send dns query to server failed");
-        return Err(VpnError::Resolve);
-    }
-    let mut response = vec![0u8; 1024];
-    tokio::select! {
-        _ = tokio::time::sleep(Duration::from_secs(5)) => {
-            log::error!("dns query timeout");
-            Err(VpnError::Resolve)
-        }
-        ret = socket.recv(response.as_mut_slice()) =>  {
-            let length = ret?;
-            let message = Message::from_bytes(&response.as_slice()[..length])?;
-            if message.id() != 1 {
-                log::error!("dns response id not match");
-                Err(VpnError::Resolve)
-            } else {
-            Ok(message
-                .answers()
-                .iter()
-                .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
-                .collect())
-            }
-        }
-    }
-}
-
-fn show_info(level: &String) -> bool {
-    level == "Debug" || level == "Info" || level == "Trace"
-}
-
 pub async fn async_run(fd: i32, running: Arc<AtomicBool>) -> types::Result<()> {
     log::error!("vpn process start running");
-    let session = Arc::new(platform::Session::new(
-        fd,
-        context.options.mtu,
-        show_info(&context.options.log_level),
-    ));
+    let config = LOOPER
+        .read()
+        .map_err(|err| types::Error::Lock(err.to_string()))?
+        .config
+        .clone();
+    let session = Arc::new(Session::new(fd));
 
-    let mut server_ip = Vec::new();
-    for _ in 0..10 {
-        if let Ok(ips) = resolve(
-            context.options.hostname.as_str(),
-            (context.options.untrusted_dns.clone() + ":53").as_str(),
-        )
-        .await
-        {
-            server_ip = ips;
-            break;
-        }
-    }
-    log::info!("server ip is {:?}", server_ip);
-
-    if server_ip.is_empty() {
-        return Err(VpnError::Resolve);
-    }
-
-    let server_name: ServerName = context.options.hostname.as_str().try_into()?;
-
-    let server_addr = SocketAddr::new(server_ip[0], context.options.port);
-    let dns_addr = dns + ":53";
-    let dns_addr: SocketAddr = dns_addr.parse()?;
-
-    let pass = digest_pass(&context.options.password);
+    let pass = digest_pass(&config.password);
 
     let mut root_store = RootCertStore::empty();
     root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
@@ -150,11 +160,10 @@ pub async fn async_run(fd: i32, running: Arc<AtomicBool>) -> types::Result<()> {
             .with_no_client_auth(),
     );
 
-    let mut device = TunDevice::new(context.options.mtu, session);
-    device.add_white_ip(dns_addr.ip());
+    let mut device = TunDevice::new(session);
 
-    let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;
-    let distrusted_addr = (context.options.untrusted_dns.clone() + ":53").parse()?;
+    let trusted_addr = (config.trust_dns.clone() + ":53").parse()?;
+    let distrusted_addr = (config.distrust_dns.clone() + ":53").parse()?;
 
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let mut header = BytesMut::new();

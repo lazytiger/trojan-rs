@@ -25,6 +25,9 @@ pub trait Tun {
 
     /// Allocate a packet which can hold len bytes data.
     fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet>;
+
+    /// Get the MTU of the tun device.
+    fn mtu(&self) -> usize;
 }
 
 impl<T> Tun for Arc<T>
@@ -40,6 +43,9 @@ where
     }
     fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet> {
         self.deref().allocate_packet(len)
+    }
+    fn mtu(&self) -> usize {
+        self.deref().mtu()
     }
 }
 
