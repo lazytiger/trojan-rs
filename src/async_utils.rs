@@ -23,6 +23,10 @@ pub async fn copy<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
             )
             .await
             {
+                if let Err(err) = write.flush().await {
+                    log::error!("{} flush failed:{}", message, err);
+                    break;
+                }
                 continue;
             } else {
                 log::error!("{} write failed", message);
