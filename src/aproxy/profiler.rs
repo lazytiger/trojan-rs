@@ -8,11 +8,14 @@ use std::{
 use bytes::{Buf, BufMut, BytesMut};
 use itertools::Itertools;
 use rand::random;
-use ringbuf::{HeapRb, Rb};
+use ringbuf::{
+    HeapRb,
+    traits::{Consumer, Observer, RingBuffer},
+};
 use rustls_pki_types::ServerName;
-use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, Pinger, ICMP};
+use surge_ping::{Client, ConfigBuilder, ICMP, Pinger, PingIdentifier, PingSequence};
 use tokio::{
-    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf},
+    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
     net::TcpStream,
     spawn,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -111,7 +114,7 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 if let Err(err) = if add {
-                    session.add(ip, None)
+                    session.add(ip, vec![])
                 } else {
                     session.del(ip)
                 } {
@@ -256,8 +259,8 @@ async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
                 total_ping += cond.ping as usize;
                 total_lost += cond.lost as usize;
             }
-            let avg_ping = total_ping / rb.len();
-            let avg_lost = total_lost / rb.len();
+            let avg_ping = total_ping / rb.occupied_len();
+            let avg_lost = total_lost / rb.occupied_len();
             log::error!(
                 "average proxy server status, ip:{} ping:{}, lost:{}",
                 ip,
@@ -448,7 +451,7 @@ pub async fn run_profiler(
 
         let mut ips1 = Vec::new();
         let mut ips0 = Vec::new();
-        for (key, group) in &set.iter().group_by(|(_ip, pr)| {
+        for (key, group) in &set.iter().chunk_by(|(_ip, pr)| {
             if pr.is_complete() {
                 if pr.sent || pr.is_no_bypass() {
                     2 //already sent

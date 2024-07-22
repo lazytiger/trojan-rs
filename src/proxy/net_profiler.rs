@@ -12,8 +12,11 @@ use dns_lookup::lookup_host;
 use itertools::Itertools;
 use mio::{event::Event, Poll, Token};
 use rand::random;
-use ringbuf::{HeapRb, Rb};
-use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
+use ringbuf::{
+    HeapRb,
+    traits::{Consumer, Observer, RingBuffer},
+};
+use surge_ping::{Client, ConfigBuilder, ICMP, PingIdentifier, PingSequence};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -127,7 +130,7 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 if let Err(err) = if add {
-                    session.add(ip, None)
+                    session.add(ip, vec![])
                 } else {
                     session.del(ip)
                 } {
@@ -251,8 +254,8 @@ async fn check_server(host: String, timeout: u64, ip_timeout: u64) {
             total_ping += cond.ping as usize;
             total_lost += cond.lost as usize;
         }
-        let avg_ping = total_ping / rb.len();
-        let avg_lost = total_lost / rb.len();
+        let avg_ping = total_ping / rb.occupied_len();
+        let avg_lost = total_lost / rb.occupied_len();
 
         if let Err(err) = CONDITION.write().map(|mut cond| {
             cond.lost = avg_lost as u8;
@@ -444,7 +447,7 @@ impl NetProfiler {
 
         let mut ips1 = Vec::new();
         let mut ips0 = Vec::new();
-        for (key, group) in &self.set.iter().group_by(|(_ip, pr)| {
+        for (key, group) in &self.set.iter().chunk_by(|(_ip, pr)| {
             if pr.is_complete() {
                 if pr.sent || pr.is_no_bypass() {
                     2 //already sent

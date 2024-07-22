@@ -1,12 +1,13 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc, atomic::AtomicBool},
 };
 
+use ipset::types::AddOption;
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    crypto::ring::default_provider,
-    ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme,
+    ClientConfig,
+    crypto::ring::default_provider, DigitallySignedStruct, Error, RootCertStore, SignatureScheme,
 };
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio::{
@@ -173,7 +174,7 @@ async fn wait_until_stop(running: Arc<AtomicBool>, ip: IpAddr) {
             .await;
         match proxy_data
             .no_bypass_session
-            .add(ip, Some(timeout as u32 + 5))
+            .add(ip, vec![AddOption::Timeout(timeout as u32 + 5)])
         {
             Ok(ret) => {
                 if !ret {
@@ -209,7 +210,7 @@ pub async fn init_tls_conn(
         for ip in &ips {
             if !proxy_data.server_ips.contains(&ip.ip()) {
                 proxy_data.server_ips.push(ip.ip());
-                if let Err(err) = proxy_data.bypass_session.add(ip.ip(), None) {
+                if let Err(err) = proxy_data.bypass_session.add(ip.ip(), vec![]) {
                     log::error!("add ip:{} to session failed:{}", ip, err);
                 }
             }
