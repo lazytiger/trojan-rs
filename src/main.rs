@@ -5,6 +5,7 @@
 use std::panic;
 
 use backtrace::Backtrace;
+use rustls::crypto::ring::default_provider;
 
 use crate::config::{Mode, OPTIONS};
 
@@ -50,6 +51,8 @@ fn main() {
             }
         }
     }));
+    let provider = default_provider();
+    provider.install_default().unwrap();
     if let Err(err) = match OPTIONS.mode {
         Mode::Proxy(_) => {
             log::warn!(
