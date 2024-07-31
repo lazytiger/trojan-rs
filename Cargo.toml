@@ -12,7 +12,7 @@ mio = { version = "1.0", features = ["net", "os-poll"] }
 log = "0.4"
 chrono = "0.4"
 libc = "0.2"
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 sha2 = "0.10"
 bytes = "1.6"
 dns-lookup = "2.0"
@@ -40,7 +40,7 @@ notify = "6.1"
 ringbuf = "0.4"
 httparse = "1.9"
 async_smoltcp = { path = "async_smoltcp" }
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
 rustls-pki-types = "1.7"
 futures = "0.3"
 
@@ -48,9 +48,9 @@ futures = "0.3"
 env_logger = "0.11"
 
 [target.'cfg(windows)'.dependencies]
-wintun = "0.4"
+wintun = "0.5"
 wintool = { path = "wintool" }
-winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons"] }
+winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons", "consoleapi"] }
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.3"

@@ -1,8 +1,8 @@
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -25,7 +25,7 @@ use crate::{
         udp::start_udp,
     },
     config::OPTIONS,
-    proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
+    proto::{CONNECT, PING, RequestParseResult, Sock5Address, TrojanRequest, UDP_ASSOCIATE},
     server::{init_config, ping_backend::PingResult},
     types::{Result, TrojanError},
 };
@@ -60,7 +60,7 @@ async fn async_run() -> Result<()> {
         log::error!(
             "connection count:{}, active task count:{}",
             task_count.load(Ordering::Relaxed),
-            Handle::current().metrics().active_tasks_count()
+            Handle::current().metrics().num_alive_tasks()
         );
     }
 }

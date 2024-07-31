@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
-use ipset::types::AddOption;
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     ClientConfig,
@@ -172,10 +171,10 @@ async fn wait_until_stop(running: Arc<AtomicBool>, ip: IpAddr) {
             .unwrap()
             .lock()
             .await;
-        match proxy_data
-            .no_bypass_session
-            .add(ip, vec![AddOption::Timeout(timeout as u32 + 5)])
-        {
+        match proxy_data.no_bypass_session.add(
+            ip,
+            vec![ipset::types::AddOption::Timeout(timeout as u32 + 5)],
+        ) {
             Ok(ret) => {
                 if !ret {
                     log::error!("add ip:{} to ipset failed", ip);
