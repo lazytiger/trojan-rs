@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytes::BytesMut;
-use mio::{Interest, net::TcpStream, Poll, Token};
+use mio::{net::TcpStream, Interest, Poll, Token};
 
 use crate::{
     config::OPTIONS,
