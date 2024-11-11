@@ -2,7 +2,6 @@
 
 use std::{
     ffi::CStr,
-    mem::MaybeUninit,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     ptr,
 };
@@ -252,8 +251,8 @@ pub fn get_main_adapter_gwif() -> Option<(String, u32)> {
 
 /// # Safety
 pub unsafe fn get_adapters_addresses<F>(mut callback: F) -> bool
-    where
-        F: FnMut(&AdapterAddresses) -> bool,
+where
+    F: FnMut(&AdapterAddresses) -> bool,
 {
     let mut buffer_length: u32 = 0;
     let status = iphlpapi::GetAdaptersAddresses(
@@ -295,13 +294,13 @@ pub unsafe fn get_adapters_addresses<F>(mut callback: F) -> bool
 
 fn get_error_message(err_code: u32) -> String {
     const LEN: usize = 256;
-    let mut buf = MaybeUninit::<[u16; LEN]>::uninit();
+    let mut buf = [0u16; LEN];
 
     //SAFETY: name is a allocated on the stack above therefore it must be valid, non-null and
     //aligned for u16
-    let first = unsafe { *buf.as_mut_ptr() }.as_mut_ptr();
+    buf[0] = 0;
+    let first = buf.as_mut_ptr();
     //Write default null terminator in case WintunGetAdapterName leaves name unchanged
-    unsafe { first.write(0u16) };
     let chars_written = unsafe {
         winbase::FormatMessageW(
             winbase::FORMAT_MESSAGE_FROM_SYSTEM | winbase::FORMAT_MESSAGE_IGNORE_INSERTS,

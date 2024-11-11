@@ -141,22 +141,25 @@ async fn local_to_remote(
     src_addr: SocketAddr,
     sender: Sender<SocketAddr>,
 ) {
-    let mut remote = if let Ok(mut remote) = init_tls_conn(connector, server_name).await {
-        if let Err(err) = remote.write_all(request.as_ref()).await {
-            let _ = remote.shutdown().await;
+    let mut remote = match init_tls_conn(connector, server_name).await {
+        Ok(mut remote) => {
+            if let Err(err) = remote.write_all(request.as_ref()).await {
+                let _ = remote.shutdown().await;
+                let _ = sender.send(src_addr).await;
+                log::error!("send handshake to remote failed:{}", err);
+                return;
+            }
+            let (read_half, write_half) = split(remote);
+            spawn(remote_to_local_with_wait(
+                read_half, socket, src_addr, sender,
+            ));
+            write_half
+        }
+        Err(err) => {
+            log::error!("connect to remote server failed:{:?}", err);
             let _ = sender.send(src_addr).await;
-            log::error!("send handshake to remote failed:{}", err);
             return;
         }
-        let (read_half, write_half) = split(remote);
-        spawn(remote_to_local_with_wait(
-            read_half, socket, src_addr, sender,
-        ));
-        write_half
-    } else {
-        log::error!("connect to remote server failed");
-        let _ = sender.send(src_addr).await;
-        return;
     };
 
     let mut header = BytesMut::new();
@@ -191,7 +194,7 @@ async fn remote_to_local(
             Duration::from_secs(OPTIONS.udp_idle_timeout),
             remote.read_buf(&mut buffer),
         )
-        .await
+            .await
         {
             Ok(Ok(n)) if n > 0 => loop {
                 match UdpAssociate::parse(buffer.as_ref()) {

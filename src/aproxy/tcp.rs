@@ -38,12 +38,19 @@ pub async fn run_tcp(
             sender.send(dst_addr.ip())?;
         }
         client.set_nodelay(true)?;
-        spawn(start_tcp_proxy(
-            client,
-            server_name.clone(),
-            connector.clone(),
-            dst_addr,
-        ));
+        let server_name_clone = server_name.clone();
+        let connector_clone = connector.clone();
+        spawn(async move {
+            let ret = start_tcp_proxy(
+                client,
+                server_name_clone,
+                connector_clone,
+                dst_addr,
+            ).await;
+            if let Err(err) = ret {
+                log::error!("tcp proxy routine exit with:{:?}", err);
+            }
+        });
     }
 }
 
