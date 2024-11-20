@@ -1,13 +1,13 @@
+use bytes::BytesMut;
+use rustls_pki_types::ServerName;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
-
-use bytes::BytesMut;
-use rustls_pki_types::ServerName;
 use tokio::{
     io::{split, AsyncWriteExt, WriteHalf},
     net::{tcp::OwnedReadHalf, TcpListener, TcpStream},
@@ -41,12 +41,7 @@ pub async fn run_tcp(
         let server_name_clone = server_name.clone();
         let connector_clone = connector.clone();
         spawn(async move {
-            let ret = start_tcp_proxy(
-                client,
-                server_name_clone,
-                connector_clone,
-                dst_addr,
-            ).await;
+            let ret = start_tcp_proxy(client, server_name_clone, connector_clone, dst_addr).await;
             if let Err(err) = ret {
                 log::error!("tcp proxy routine exit with:{:?}", err);
             }
@@ -60,7 +55,11 @@ async fn start_tcp_proxy(
     connector: TlsConnector,
     dst_addr: SocketAddr,
 ) -> Result<()> {
-    let mut remote = init_tls_conn(connector, server_name).await?;
+    let mut remote = tokio::time::timeout(
+        Duration::from_secs(3),
+        init_tls_conn(connector, server_name),
+    )
+    .await??;
     let mut request = BytesMut::new();
     TrojanRequest::generate(&mut request, CONNECT, &dst_addr);
     if let Err(err) = remote.write_all(request.as_ref()).await {
