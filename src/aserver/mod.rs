@@ -1,8 +1,8 @@
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
-        Arc,
         atomic::{AtomicU32, Ordering},
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -25,7 +25,7 @@ use crate::{
         udp::start_udp,
     },
     config::OPTIONS,
-    proto::{CONNECT, PING, RequestParseResult, Sock5Address, TrojanRequest, UDP_ASSOCIATE},
+    proto::{RequestParseResult, Sock5Address, TrojanRequest, CONNECT, PING, UDP_ASSOCIATE},
     server::{init_config, ping_backend::PingResult},
     types::{Result, TrojanError},
 };

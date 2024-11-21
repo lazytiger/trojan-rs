@@ -39,6 +39,7 @@ pub enum TrojanError {
     #[from(ignore)]
     Resolve,
     Elapsed(tokio::time::error::Elapsed),
+    Resolver(trust_dns_resolver::error::ResolveError),
 }
 
 unsafe impl Send for TrojanError {}

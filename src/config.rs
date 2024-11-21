@@ -5,12 +5,18 @@ use std::{
     time::Duration,
 };
 
-use clap::Parser;
-use sha2::{Digest, Sha224};
-
 use crate::{
+    types,
     types::TrojanError,
     utils::{get_system_dns, resolve},
+};
+use clap::Parser;
+use rand::prelude::IteratorRandom;
+use sha2::{Digest, Sha224};
+use trust_dns_resolver::{
+    config::{ResolverConfig, ResolverOpts},
+    name_server::{GenericConnector, TokioRuntimeProvider},
+    AsyncResolver,
 };
 
 #[derive(Parser)]
@@ -212,6 +218,24 @@ pub struct ProxyArgs {
     #[clap(skip)]
     #[cfg(target_os = "linux")]
     pub proxy_data: Option<tokio::sync::Mutex<crate::types::ProxyData>>,
+
+    #[clap(skip)]
+    pub resolver: Option<AsyncResolver<GenericConnector<TokioRuntimeProvider>>>,
+}
+
+impl ProxyArgs {
+    pub async fn server_addr(&self) -> types::Result<SocketAddr> {
+        let ip = self
+            .resolver
+            .as_ref()
+            .unwrap()
+            .lookup_ip(&self.hostname)
+            .await?
+            .iter()
+            .choose(&mut rand::thread_rng())
+            .ok_or(types::TrojanError::Resolve)?;
+        Ok(SocketAddr::new(ip, self.port))
+    }
 }
 
 #[derive(Parser)]
@@ -374,6 +398,10 @@ impl Opts {
                     }
                     args.proxy_data = Some(tokio::sync::Mutex::new(proxy_data));
                 }
+                args.resolver.replace(AsyncResolver::tokio(
+                    ResolverConfig::default(),
+                    ResolverOpts::default(),
+                ));
                 let hostname = args.hostname.clone();
                 let port = args.port;
                 self.resolve(hostname, port, None);

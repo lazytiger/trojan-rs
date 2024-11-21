@@ -13,10 +13,10 @@ use itertools::Itertools;
 use mio::{event::Event, Poll, Token};
 use rand::random;
 use ringbuf::{
-    HeapRb,
     traits::{Consumer, Observer, RingBuffer},
+    HeapRb,
 };
-use surge_ping::{Client, ConfigBuilder, ICMP, PingIdentifier, PingSequence};
+use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, ICMP};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},

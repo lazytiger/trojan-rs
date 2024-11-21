@@ -9,13 +9,13 @@ use bytes::{Buf, BufMut, BytesMut};
 use itertools::Itertools;
 use rand::random;
 use ringbuf::{
-    HeapRb,
     traits::{Consumer, Observer, RingBuffer},
+    HeapRb,
 };
 use rustls_pki_types::ServerName;
-use surge_ping::{Client, ConfigBuilder, ICMP, Pinger, PingIdentifier, PingSequence};
+use surge_ping::{Client, ConfigBuilder, PingIdentifier, PingSequence, Pinger, ICMP};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, split},
+    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf},
     net::TcpStream,
     spawn,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
