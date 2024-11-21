@@ -14,7 +14,7 @@ use clap::Parser;
 use rand::prelude::IteratorRandom;
 use sha2::{Digest, Sha224};
 use trust_dns_resolver::{
-    config::{LookupIpStrategy, ResolverConfig, ResolverOpts},
+    config::{LookupIpStrategy, NameServerConfig, ResolverConfig, ResolverOpts},
     name_server::{GenericConnector, TokioRuntimeProvider},
     AsyncResolver,
 };
@@ -214,6 +214,10 @@ pub struct ProxyArgs {
     #[clap(short = 'd', long, default_value = "8.8.8.8")]
     pub skip_dns: String,
 
+    /// the dns address to be used query server ip
+    #[clap(long, default_value = "192.168.100.5:53")]
+    pub local_dns: String,
+
     /// session used for no bypass ipset
     #[clap(skip)]
     #[cfg(target_os = "linux")]
@@ -398,10 +402,18 @@ impl Opts {
                     }
                     args.proxy_data = Some(tokio::sync::Mutex::new(proxy_data));
                 }
+                let dns_addr = args.local_dns.as_str().parse().unwrap();
+                let mut config = ResolverConfig::new();
+                config.add_name_server(NameServerConfig {
+                    socket_addr: dns_addr,
+                    protocol: Default::default(),
+                    tls_dns_name: None,
+                    trust_negative_responses: false,
+                    bind_addr: None,
+                });
                 let mut opts = ResolverOpts::default();
                 opts.ip_strategy = LookupIpStrategy::Ipv4Only;
-                args.resolver
-                    .replace(AsyncResolver::tokio(ResolverConfig::default(), opts));
+                args.resolver.replace(AsyncResolver::tokio(config, opts));
                 let hostname = args.hostname.clone();
                 let port = args.port;
                 self.resolve(hostname, port, None);
