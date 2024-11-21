@@ -94,6 +94,8 @@ fn prepare_tls_config() -> Arc<ClientConfig> {
 
 async fn async_run() -> Result<()> {
     log::info!("insecure:{}", OPTIONS.proxy_args().insecure);
+    let address = OPTIONS.proxy_args().server_addr().await?;
+    log::info!("server address: {}", address);
     let addr: SocketAddr = OPTIONS.local_addr.parse()?;
     let tcp_listener = TcpListener::from_std(new_socket(addr, false)?.into())?;
     let udp_listener = UdpSocket::from_std(new_socket(addr, true)?.into())?;

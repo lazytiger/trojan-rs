@@ -14,7 +14,7 @@ use clap::Parser;
 use rand::prelude::IteratorRandom;
 use sha2::{Digest, Sha224};
 use trust_dns_resolver::{
-    config::{ResolverConfig, ResolverOpts},
+    config::{LookupIpStrategy, ResolverConfig, ResolverOpts},
     name_server::{GenericConnector, TokioRuntimeProvider},
     AsyncResolver,
 };
@@ -398,10 +398,10 @@ impl Opts {
                     }
                     args.proxy_data = Some(tokio::sync::Mutex::new(proxy_data));
                 }
-                args.resolver.replace(AsyncResolver::tokio(
-                    ResolverConfig::default(),
-                    ResolverOpts::default(),
-                ));
+                let mut opts = ResolverOpts::default();
+                opts.ip_strategy = LookupIpStrategy::Ipv4Only;
+                args.resolver
+                    .replace(AsyncResolver::tokio(ResolverConfig::default(), opts));
                 let hostname = args.hostname.clone();
                 let port = args.port;
                 self.resolve(hostname, port, None);
