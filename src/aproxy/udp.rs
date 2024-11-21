@@ -106,11 +106,12 @@ pub async fn run_udp(
                                 connector_clone,
                                 request_clone,
                                 src_addr,
-                                sender_clone,
+                                sender_clone.clone(),
                             )
                             .await
                             {
                                 log::error!("udp local to remote failed:{:?}", err);
+                                let _ = sender_clone.send(src_addr).await;
                             }
                         });
                         remotes.get(&src_addr).unwrap()
