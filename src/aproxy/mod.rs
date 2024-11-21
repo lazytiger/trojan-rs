@@ -192,6 +192,7 @@ pub async fn init_tls_conn(
     server_name: ServerName<'static>,
 ) -> types::Result<TlsStream<TcpStream>> {
     let ip = OPTIONS.proxy_args().server_addr().await?;
+    log::info!("get server addr:{}", ip);
     #[cfg(target_os = "linux")]
     {
         let mut proxy_data = OPTIONS
