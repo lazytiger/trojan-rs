@@ -49,6 +49,7 @@ fn load_private_key(filename: &str) -> PrivateKeyDer {
         match read_one(&mut buff_reader).unwrap() {
             Some(Item::Pkcs8Key(key)) => return PrivateKeyDer::Pkcs8(key),
             Some(Item::Pkcs1Key(key)) => return PrivateKeyDer::Pkcs1(key),
+            Some(Item::Sec1Key(key)) => return PrivateKeyDer::Sec1(key),
             None => break,
             _ => {}
         }
