@@ -18,11 +18,17 @@ use derive_more::From;
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{
-    api::process::{Command, CommandChild, CommandEvent},
-    CustomMenuItem, Icon, Manager, RunEvent, State, SystemTray, SystemTrayEvent, SystemTrayMenu,
-    SystemTrayMenuItem, Window, WindowEvent, Wry,
+    image::Image,
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    path::BaseDirectory,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, WindowEvent, Wry,
 };
-use tauri_plugin_log::LogTarget;
+use tauri_plugin_log::{Target, TargetKind};
+use tauri_plugin_shell::{
+    process::{CommandChild, CommandEvent},
+    ShellExt,
+};
 
 use wintool::adapter::{get_dns_server, get_main_adapter_ip};
 
@@ -69,8 +75,8 @@ pub struct TrojanProxy {
     config: Config,
     wintun: Option<CommandChild>,
     dns: Option<CommandChild>,
-    running_icon: Icon,
-    stopped_icon: Icon,
+    running_icon: Image<'static>,
+    stopped_icon: Image<'static>,
     rx_speed: f32,
     tx_speed: f32,
     last_update: SystemTime,
@@ -84,8 +90,8 @@ impl TrojanProxy {
             config: init_config().unwrap_or_default(),
             wintun: None,
             dns: None,
-            running_icon: Icon::Raw(include_bytes!("../icons/icon.ico").to_vec()),
-            stopped_icon: Icon::Raw(include_bytes!("../icons/icon_gray.png").to_vec()),
+            running_icon: Image::from_bytes(include_bytes!("../icons/icon.ico")).unwrap(),
+            stopped_icon: Image::from_bytes(include_bytes!("../icons/icon_gray.png")).unwrap(),
             rx_speed: 0.0,
             tx_speed: 0.0,
             last_update: SystemTime::UNIX_EPOCH,
@@ -143,7 +149,7 @@ impl TrojanProxy {
 type TrojanState = Arc<Mutex<TrojanProxy>>;
 
 #[tauri::command]
-fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
+fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) {
     log::info!("start trojan now");
     if let Err(err) = save_config(&config) {
         log::error!("save config failed:{:?}", err);
@@ -166,13 +172,13 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
             let pool_size = config.pool_size.to_string();
             let config_ipset = window
                 .app_handle()
-                .path_resolver()
-                .resolve_resource("config/ipset.txt")
+                .path()
+                .resolve("config/ipset.txt", BaseDirectory::Resource)
                 .unwrap();
             let config_wintun = window
                 .app_handle()
-                .path_resolver()
-                .resolve_resource("libs/wintun.dll")
+                .path()
+                .resolve("libs/wintun.dll", BaseDirectory::Resource)
                 .unwrap();
             let command = if config.sync_mode {
                 "wintun"
@@ -211,7 +217,14 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
             }
             log::info!("{:?}", args);
             let mut rxs = HashMap::new();
-            match Command::new_sidecar("trojan").unwrap().args(args).spawn() {
+            match window
+                .app_handle()
+                .shell()
+                .sidecar("trojan")
+                .unwrap()
+                .args(args)
+                .spawn()
+            {
                 Ok((rx, child)) => {
                     state.lock().unwrap().wintun.replace(child);
                     rxs.insert("wintun", rx);
@@ -228,13 +241,13 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                 let default_dns = state.lock().unwrap().default_dns.clone();
                 let config_domains = window
                     .app_handle()
-                    .path_resolver()
-                    .resolve_resource("config/domain.txt")
+                    .path()
+                    .resolve("config/domain.txt", BaseDirectory::Resource)
                     .unwrap();
                 let config_hosts = window
                     .app_handle()
-                    .path_resolver()
-                    .resolve_resource("config/hosts.txt")
+                    .path()
+                    .resolve("config/hosts.txt", BaseDirectory::Resource)
                     .unwrap();
                 let mut args = vec![
                     "-l",
@@ -263,7 +276,14 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                     args.push("--add-route");
                 }
                 log::info!("{:?}", args);
-                match Command::new_sidecar("trojan").unwrap().args(args).spawn() {
+                match window
+                    .app_handle()
+                    .shell()
+                    .sidecar("trojan")
+                    .unwrap()
+                    .args(args)
+                    .spawn()
+                {
                     Ok((rx, child)) => {
                         state.lock().unwrap().dns.replace(child);
                         rxs.insert("dns", rx);
@@ -292,11 +312,15 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
                                 false
                             }
                             Ok(CommandEvent::Stderr(err)) => {
-                                log::info!("{} got stderr:{}", name, err);
+                                log::info!("{} got stderr:{}", name, String::from_utf8_lossy(&err));
                                 false
                             }
                             Ok(CommandEvent::Stdout(output)) => {
-                                log::info!("{} got stdout:{}", name, output);
+                                log::info!(
+                                    "{} got stdout:{}",
+                                    name,
+                                    String::from_utf8_lossy(&output)
+                                );
                                 false
                             }
                             Err(_err) => false,
@@ -339,7 +363,7 @@ fn start(config: Config, state: State<TrojanState>, window: Window<Wry>) {
     }
 }
 
-fn emit_state_update_event(running: bool, window: Window<Wry>) {
+fn emit_state_update_event(running: bool, window: WebviewWindow<Wry>) {
     window.emit("state-update", running).unwrap();
     let app = window.app_handle();
     let state = app.state::<TrojanState>();
@@ -350,7 +374,9 @@ fn emit_state_update_event(running: bool, window: Window<Wry>) {
         state.stopped_icon.clone()
     };
     window.set_icon(icon.clone()).unwrap();
-    window.app_handle().tray_handle().set_icon(icon).unwrap();
+    if let Some(tray) = window.app_handle().tray_by_id("main") {
+        tray.set_icon(Some(icon)).unwrap();
+    }
 }
 
 #[tauri::command]
@@ -359,7 +385,7 @@ fn init(state: State<TrojanState>) -> Config {
 }
 
 #[tauri::command]
-fn update_speed(state: State<TrojanState>, window: Window<Wry>) {
+fn update_speed(state: State<TrojanState>, window: WebviewWindow<Wry>) {
     let mut state = state.lock().unwrap();
     let (mut rx_speed, mut tx_speed) = state.get_speed().unwrap_or_default();
     let rx_unit = if rx_speed > 1024.0 {
@@ -386,7 +412,7 @@ fn update_speed(state: State<TrojanState>, window: Window<Wry>) {
 }
 
 #[tauri::command]
-fn stop(state: State<TrojanState>, window: Window<Wry>) {
+fn stop(state: State<TrojanState>, window: WebviewWindow<Wry>) {
     log::info!("stop trojan now");
     let mut config = state.lock().unwrap();
     if let Some(child) = config.wintun.take() {
@@ -436,6 +462,27 @@ fn set_dns_server(state: &TrojanProxy) {
     }
 }
 
+fn quit_app(app: &AppHandle<Wry>) {
+    let state: State<TrojanState> = app.state();
+    let mut state = state.lock().unwrap();
+    if let Some(dns) = state.dns.take() {
+        set_dns_server(&state);
+        let _ = dns.kill();
+        thread::sleep(Duration::from_millis(500));
+    }
+    if let Some(wintun) = state.wintun.take() {
+        let _ = wintun.kill();
+    }
+    std::process::exit(0);
+}
+
+fn show_main_window(app: &AppHandle<Wry>) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().unwrap();
+        window.set_focus().unwrap();
+    }
+}
+
 fn main() {
     let path = Path::new("logs");
     if !path.exists() {
@@ -460,23 +507,18 @@ fn main() {
         }
     }));
 
-    let quit = CustomMenuItem::new("quit".to_string(), "退出");
-    let dev = CustomMenuItem::new("dev".to_string(), "开发工具");
-    let menu = SystemTrayMenu::new();
-
-    #[cfg(debug_assertions)]
-    let menu = menu
-        .add_item(dev)
-        .add_native_item(SystemTrayMenuItem::Separator);
-    let menu = menu.add_item(quit);
-    let tray = SystemTray::new().with_menu(menu);
-
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![start, init, stop, update_speed])
-        .system_tray(tray)
         .plugin(
             tauri_plugin_log::Builder::default()
-                .targets([LogTarget::LogDir, LogTarget::Webview, LogTarget::Stdout])
+                .targets([
+                    Target::new(TargetKind::LogDir { file_name: None }),
+                    Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::Stdout),
+                ])
                 .format(|callback, args, record| {
                     callback.finish(format_args!(
                         "{}[{}:{}][{}]{}",
@@ -499,39 +541,47 @@ fn main() {
             );
         }))
         .manage(Arc::new(Mutex::new(TrojanProxy::new())))
-        .on_system_tray_event(|app, event| match event {
-            SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
-                "quit" => {
-                    let state: State<TrojanState> = app.state();
-                    let mut state = state.lock().unwrap();
-                    if let Some(dns) = state.dns.take() {
-                        set_dns_server(&state);
-                        let _ = dns.kill();
-                        thread::sleep(Duration::from_millis(500));
-                    }
-                    if let Some(wintun) = state.wintun.take() {
-                        let _ = wintun.kill();
-                    }
-                    std::process::exit(0);
-                }
-                #[cfg(debug_assertions)]
-                "dev" => {
-                    let window = app.get_window("main").unwrap();
-                    if !window.is_devtools_open() {
-                        window.open_devtools();
-                    }
-                }
-                _ => {}
-            },
-            SystemTrayEvent::DoubleClick { .. } => {
-                let window = app.get_window("main").unwrap();
-                window.show().unwrap();
-                window.set_focus().unwrap();
-            }
-            _ => {}
-        })
         .setup(|app| {
-            emit_state_update_event(false, app.get_window("main").unwrap());
+            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::new(app)?;
+
+            #[cfg(debug_assertions)]
+            {
+                let dev = MenuItem::with_id(app, "dev", "开发工具", true, None::<&str>)?;
+                let separator = PredefinedMenuItem::separator(app)?;
+                menu.append_items(&[&dev, &separator])?;
+            }
+
+            menu.append(&quit)?;
+            TrayIconBuilder::with_id("main")
+                .icon(Image::from_bytes(include_bytes!("../icons/icon.png"))?)
+                .icon_as_template(true)
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    if event.id() == "quit" {
+                        quit_app(app);
+                    }
+                    #[cfg(debug_assertions)]
+                    if event.id() == "dev" {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if !window.is_devtools_open() {
+                                window.open_devtools();
+                            }
+                        }
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            emit_state_update_event(false, app.get_webview_window("main").unwrap());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -541,7 +591,7 @@ fn main() {
                 event: WindowEvent::CloseRequested { api, .. },
                 ..
             } => {
-                app.get_window("main").unwrap().hide().unwrap();
+                app.get_webview_window("main").unwrap().hide().unwrap();
                 api.prevent_close();
             }
             _ => {}

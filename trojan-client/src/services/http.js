@@ -1,5 +1,5 @@
 import { makeUnifiedNetwork } from 'unified-network';
-import { fetch, ResponseType } from '@tauri-apps/api/http';
+import { fetch, ResponseType } from '@tauri-apps/plugin-http';
 
 
 let requestProcesor;

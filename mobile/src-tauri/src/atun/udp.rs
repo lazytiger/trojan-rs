@@ -1,7 +1,8 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::{Buf, BytesMut};
-use rustls::{ClientConfig, ServerName};
+use rustls::ClientConfig;
+use rustls_pki_types::ServerName;
 use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -27,7 +28,7 @@ pub async fn run_udp_dispatch(
     mut data_receiver: Receiver<(IpEndpoint, IpEndpoint, BytesMut)>,
     mut socket_receiver: Receiver<Arc<UdpWriteHalf>>,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     config: Arc<ClientConfig>,
     request: Arc<BytesMut>,
     mut close_receiver: Receiver<(IpEndpoint, bool)>,
@@ -130,7 +131,7 @@ async fn local_to_remote(
     src_addr: IpEndpoint,
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     request: Arc<BytesMut>,
     local: Arc<UdpWriteHalf>,
     close_sender: Sender<(IpEndpoint, bool)>,

@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State, Window, Wry};
+use tauri::{Emitter, Manager, State, WebviewWindow};
 
 use crate::types::{EventType, VpnError};
 
@@ -38,6 +38,14 @@ pub struct Options {
     pub dns_cache_time: u64,
     pub trusted_dns: String,
     pub untrusted_dns: String,
+    #[serde(default)]
+    pub selected_app: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct InstalledApp {
+    pub label: String,
+    pub package_name: String,
 }
 
 #[derive(Clone)]
@@ -135,7 +143,7 @@ impl Context {
 pub type VpnState = RwLock<Context>;
 
 #[tauri::command]
-fn init_window(log_level: String, window: Window<Wry>, state: State<VpnState>) {
+fn init_window(log_level: String, window: WebviewWindow, state: State<VpnState>) {
     if let Err(err) = WINDOW.write().map(|mut context| context.replace(window)) {
         log::error!("write lock windows failed:{}", err);
     } else {
@@ -150,10 +158,15 @@ fn init_window(log_level: String, window: Window<Wry>, state: State<VpnState>) {
 }
 
 #[tauri::command]
-fn start_vpn(options: Options, window: Window<Wry>) {
+fn start_vpn(options: Options, window: WebviewWindow) {
     if let Ok(mut state) = window.state::<VpnState>().inner().write() {
         state.options = options;
-        if let Err(err) = platform::start_vpn(state.options.mtu as i32) {
+        if let Err(err) = platform::start_vpn(
+            &state.options.selected_app,
+            state.options.mtu as i32,
+            &state.options.trusted_dns,
+            &state.options.untrusted_dns,
+        ) {
             log::error!("start_vpn failed:{:?}", err);
         }
     } else {
@@ -223,6 +236,17 @@ fn load_data(key: String) -> String {
 }
 
 #[tauri::command]
+fn list_installed_apps() -> Vec<InstalledApp> {
+    match platform::list_installed_apps() {
+        Err(err) => {
+            log::error!("list installed apps failed:{:?}", err);
+            Vec::new()
+        }
+        Ok(apps) => apps,
+    }
+}
+
+#[tauri::command]
 fn search_domain(key: String, state: State<VpnState>) -> Vec<String> {
     if let Ok(state) = state.read() {
         state.search_domain(key)
@@ -257,7 +281,7 @@ fn start_process() {
 }
 
 lazy_static::lazy_static! {
-   static ref WINDOW:RwLock<Option<Window>> =RwLock::new(None);
+   static ref WINDOW:RwLock<Option<WebviewWindow>> =RwLock::new(None);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -276,7 +300,6 @@ pub fn run() {
         blocked_domains,
     });
     tauri::Builder::default()
-        .plugin(tauri_plugin_window::init())
         .plugin(tauri_plugin_shell::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -289,6 +312,7 @@ pub fn run() {
             update_notification,
             save_data,
             load_data,
+            list_installed_apps,
             search_domain,
             add_domain,
             remove_domain,
@@ -326,4 +350,35 @@ pub fn process_vpn(fd: i32, dns: String, running: Arc<AtomicBool>) -> Result<(),
 #[allow(mutable_transmutes)]
 pub unsafe fn get_mut_unchecked<T>(t: &mut Arc<T>) -> &mut T {
     std::mem::transmute(t.as_ref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EventType, Options};
+
+    #[test]
+    fn config_defaults_selected_app_for_old_config() {
+        let options: Options = serde_json::from_str(
+            r#"{
+                "hostname":"example.com",
+                "password":"secret",
+                "port":443,
+                "mtu":1500,
+                "pool_size":20,
+                "speed_update_ms":2000,
+                "log_level":"Info",
+                "dns_cache_time":600,
+                "trusted_dns":"8.8.8.8",
+                "untrusted_dns":"114.114.114.114"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(options.selected_app, "");
+    }
+
+    #[test]
+    fn open_config_event_name_is_stable() {
+        assert_eq!(EventType::OpenConfig.to_str(), "open_config");
+    }
 }

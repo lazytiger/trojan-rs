@@ -3,93 +3,64 @@
   "build": {
     "beforeBuildCommand": "",
     "beforeDevCommand": "",
-    "devPath": "http://localhost:8080",
-    "distDir": "../dist"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:8080"
   },
-  "package": {
-    "productName": "trojan-client",
-    "version": "0.4.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "http": {
-        "all": true,
-        "request": true,
-        "scope": [
-          "https://**",
-          "http://**"
-        ]
-      },
-      "shell": {
-        "sidecar": true,
-        "scope": [
-          {
-            "name": "libs/trojan",
-            "sidecar": true,
-            "args": true
-          }
-        ]
-      },
-      "fs": {
-        "scope": [
-          "$RESOURCE/*"
-        ]
-      }
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "copyright": "",
+    "targets": "all",
+    "externalBin": [
+      "libs/trojan"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
     },
-    "systemTray": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true
+    "longDescription": "",
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null
     },
-    "bundle": {
-      "active": true,
-      "category": "DeveloperTool",
-      "copyright": "",
+    "resources": [
+      "config/domain.txt",
+      "config/ipset.txt",
+      "config/hosts.txt",
+      "libs/wintun.dll"
+    ],
+    "shortDescription": "",
+    "linux": {
       "deb": {
         "depends": []
-      },
-      "externalBin": [
-        "libs/trojan"
-      ],
-      "icon": [
-        "icons/icon.ico"
-      ],
-      "identifier": "com.bmshi.trojan.windows",
-      "longDescription": "",
-      "macOS": {
-        "entitlements": null,
-        "exceptionDomain": "",
-        "frameworks": [],
-        "providerShortName": null,
-        "signingIdentity": null
-      },
-      "resources": [
-        "config/domain.txt",
-        "config/ipset.txt",
-        "config/hosts.txt",
-        "libs/wintun.dll"
-      ],
-      "shortDescription": "",
-      "targets": "all",
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": ""
       }
-    },
-    "security": {
-      "csp": null
-    },
-    "updater": {
-      "active": false
-    },
+    }
+  },
+  "productName": "trojan-client",
+  "mainBinaryName": "app",
+  "version": "0.4.0",
+  "identifier": "com.bmshi.trojan.windows",
+  "plugins": {},
+  "app": {
     "windows": [
       {
         "fullscreen": false,
         "height": 860,
         "resizable": false,
         "title": "Trojan客户端",
-        "width": 500
+        "width": 500,
+        "useHttpsScheme": true
       }
-    ]
+    ],
+    "security": {
+      "csp": null
+    }
   }
 }

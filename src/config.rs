@@ -236,7 +236,7 @@ impl ProxyArgs {
             .lookup_ip(&self.hostname)
             .await?
             .iter()
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .ok_or(types::TrojanError::Resolve)?;
         Ok(SocketAddr::new(ip, self.port))
     }
@@ -359,7 +359,9 @@ impl Opts {
             if let Ok(response) = if let Some(dns_server) = dns_server {
                 resolve(hostname.as_str(), dns_server)
             } else {
-                dns_lookup::lookup_host(hostname.as_str()).map_err(|_| TrojanError::Dummy(()))
+                dns_lookup::lookup_host(hostname.as_str())
+                    .map(|ips| ips.collect())
+                    .map_err(|_| TrojanError::Dummy(()))
             } {
                 for ip in response {
                     if ip.is_ipv4() {

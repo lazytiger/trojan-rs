@@ -83,7 +83,9 @@ impl DnsResolver {
             if let Ok(ips) = if let Some(dns_server) = dns_server {
                 crate::utils::resolve(domain.as_str(), dns_server.as_str())
             } else {
-                dns_lookup::lookup_host(domain.as_str()).map_err(|_| TrojanError::Dummy(()))
+                dns_lookup::lookup_host(domain.as_str())
+                    .map(|ips| ips.collect())
+                    .map_err(|_| TrojanError::Dummy(()))
             } {
                 for addr in ips {
                     if address.is_none() || addr.is_ipv4() {

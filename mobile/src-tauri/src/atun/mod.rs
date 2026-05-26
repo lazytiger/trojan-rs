@@ -9,7 +9,8 @@ use std::{
 };
 
 use bytes::BytesMut;
-use rustls::{ClientConfig, ClientConnection, OwnedTrustAnchor, RootCertStore, ServerName};
+use rustls::{ClientConfig, ClientConnection, RootCertStore};
+use rustls_pki_types::ServerName;
 use sha2::{Digest, Sha224};
 use tokio::{net::UdpSocket, runtime::Builder, spawn, sync::mpsc::channel};
 use trust_dns_proto::{
@@ -41,7 +42,7 @@ mod udp;
 pub async fn init_tls_conn(
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
 ) -> types::Result<TlsClientStream> {
     let stream = tokio::net::TcpStream::connect(server_addr).await?;
     let session = ClientConnection::new(config, server_name)?;
@@ -89,7 +90,7 @@ pub async fn resolve(name: &str, dns_server_addr: &str) -> types::Result<Vec<IpA
             Ok(message
                 .answers()
                 .iter()
-                .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
+                .filter_map(|record| record.data().and_then(|data| data.ip_addr()))
                 .collect())
             }
         }
@@ -131,7 +132,7 @@ pub async fn async_run(
         return Err(VpnError::Resolve);
     }
 
-    let server_name: ServerName = context.options.hostname.as_str().try_into()?;
+    let server_name = ServerName::try_from(context.options.hostname.clone())?;
 
     let server_addr = SocketAddr::new(server_ip[0], context.options.port);
     let dns_addr = dns + ":53";
@@ -140,22 +141,17 @@ pub async fn async_run(
     let pass = digest_pass(&context.options.password);
 
     let mut root_store = RootCertStore::empty();
-    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
-        )
-    }));
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
     let config = Arc::new(
-        ClientConfig::builder()
-            .with_safe_defaults()
+        ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+            .with_safe_default_protocol_versions()
+            .unwrap()
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
 
-    let mut device = TunDevice::new(context.options.mtu, session);
+    let mut device = TunDevice::new(session);
     device.add_white_ip(dns_addr.ip());
 
     let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;

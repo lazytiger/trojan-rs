@@ -56,6 +56,7 @@ impl<'a, 'b> std::io::Read for UdpSocketRef<'a, 'b> {
                 Ok(n)
             }
             Err(RecvError::Exhausted) => Err(ErrorKind::WouldBlock.into()),
+            Err(RecvError::Truncated) => Err(ErrorKind::InvalidData.into()),
         }
     }
 }

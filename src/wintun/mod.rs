@@ -153,7 +153,7 @@ pub fn run() -> Result<()> {
 
     loop {
         let sockets = unsafe { Arc::get_mut_unchecked(&mut sockets) };
-        if interface.poll(now, &mut device, sockets) {
+        if interface.poll(now, &mut device, sockets) != smoltcp::iface::PollResult::None {
             udp_server.do_local(&mut pool, &poll, &resolver, &mut device);
             tcp_server.do_local(&mut pool, &poll, &resolver, &mut device);
         }

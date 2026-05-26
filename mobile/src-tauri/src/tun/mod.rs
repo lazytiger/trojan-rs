@@ -1,5 +1,4 @@
 use std::{
-    convert::TryInto,
     net::SocketAddr,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -9,7 +8,8 @@ use std::{
 };
 
 use mio::{Events, Poll, Token, Waker};
-use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pki_types::ServerName;
 use sha2::{Digest, Sha224};
 use smoltcp::{
     iface::{Config, Interface, SocketSet},
@@ -60,19 +60,11 @@ fn prepare_idle_pool(
     resolver: &DnsResolver,
     options: &Options,
     addr: SocketAddr,
-) -> Result<(IdlePool, Arc<ClientConfig>, ServerName)> {
-    let hostname: ServerName = options.hostname.as_str().try_into()?;
+) -> Result<(IdlePool, Arc<ClientConfig>, ServerName<'static>)> {
+    let hostname = ServerName::try_from(options.hostname.clone())?;
     let mut root_store = RootCertStore::empty();
-    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
-        )
-    }));
-    let config = ClientConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
         .with_safe_default_protocol_versions()
         .unwrap()
         .with_root_certificates(root_store)
@@ -190,7 +182,7 @@ pub fn run(fd: i32, dns: String, context: Context, running: Arc<AtomicBool>) -> 
         let now = Instant::now();
         dns_server.ready(&mut device);
         let sockets = unsafe { crate::get_mut_unchecked(&mut sockets) };
-        if interface.poll(now, &mut device, sockets) {
+        if interface.poll(now, &mut device, sockets) != smoltcp::iface::PollResult::None {
             udp_server.do_local(&mut pool, &poll, &resolver, &mut device);
             tcp_server.do_local(&mut pool, &poll, &resolver, &mut device);
             //session.sync();
