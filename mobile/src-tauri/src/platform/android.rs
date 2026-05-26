@@ -259,7 +259,7 @@ pub fn start_vpn(
     let trusted_dns = env.new_string(trusted_dns.as_ref())?;
     let untrusted_dns = env.new_string(untrusted_dns.as_ref())?;
     env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "startVpn",
         "(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V",
         &[
@@ -277,7 +277,7 @@ pub fn stop_vpn() -> Result<(), VpnError> {
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
-    env.call_static_method("com/bmshi/proxy/mobile/MainActivity", "stopVpn", "()V", &[])?;
+    env.call_static_method("com/bmshi/router/mobile/MainActivity", "stopVpn", "()V", &[])?;
     Ok(())
 }
 
@@ -288,7 +288,7 @@ pub fn check_self_permission(permission: impl AsRef<str>) -> Result<bool, VpnErr
     drop(lock);
     let permission = env.new_string(permission)?;
     let ret = env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "checkSelfPermission",
         "(Ljava/lang/String;)Z",
         &[(&permission).into()],
@@ -303,7 +303,7 @@ pub fn request_permission(permission: impl AsRef<str>) -> Result<(), VpnError> {
     drop(lock);
     let permission = env.new_string(permission)?;
     env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "requestPermission",
         "(Ljava/lang/String;)V",
         &[(&permission).into()],
@@ -318,7 +318,7 @@ pub fn should_show_permission_rationale(permission: impl AsRef<str>) -> Result<b
     drop(lock);
     let permission = env.new_string(permission)?;
     let ret = env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "shouldShowRequestPermissionRationaleNative",
         "(Ljava/lang/String;)Z",
         &[(&permission).into()],
@@ -333,7 +333,7 @@ pub fn update_notification(content: impl AsRef<str>) -> Result<(), VpnError> {
     drop(lock);
     let content = env.new_string(content)?;
     env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "updateNotification",
         "(Ljava/lang/String;)V",
         &[(&content).into()],
@@ -349,7 +349,7 @@ pub fn save_data(key: impl AsRef<str>, content: impl AsRef<str>) -> Result<(), V
     let content = env.new_string(content)?;
     let key = env.new_string(key)?;
     env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "saveData",
         "(Ljava/lang/String;Ljava/lang/String;)V",
         &[(&key).into(), (&content).into()],
@@ -364,7 +364,7 @@ pub fn load_data(key: impl AsRef<str>) -> Result<String, VpnError> {
     drop(lock);
     let key = env.new_string(key)?;
     let ret = env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "loadData",
         "(Ljava/lang/String;)Ljava/lang/String;",
         &[(&key).into()],
@@ -382,7 +382,7 @@ pub fn list_installed_apps() -> Result<Vec<InstalledApp>, VpnError> {
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
     let ret = env.call_static_method(
-        "com/bmshi/proxy/mobile/MainActivity",
+        "com/bmshi/router/mobile/MainActivity",
         "listInstalledApps",
         "()Ljava/lang/String;",
         &[],
@@ -400,7 +400,7 @@ pub fn sync_data() -> Result<(), VpnError> {
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
-    env.call_static_method("com/bmshi/proxy/mobile/TrojanProxy", "syncData", "()V", &[])?;
+    env.call_static_method("com/bmshi/router/mobile/TrojanProxy", "syncData", "()V", &[])?;
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-package com.bmshi.proxy.mobile
+package com.bmshi.router.mobile
 
 import android.Manifest
 import android.content.Intent
@@ -30,7 +30,7 @@ class MainActivity : TauriActivity() {
   private external fun onOpenConfigIntent()
 
   companion object {
-    const val OPEN_CONFIG_ACTION = "com.bmshi.proxy.mobile.OPEN_CONFIG"
+    const val OPEN_CONFIG_ACTION = "com.bmshi.router.mobile.OPEN_CONFIG"
     var mtu: Int = 1500
     var selectedApp: String = ""
     var trustedDns: String = ""

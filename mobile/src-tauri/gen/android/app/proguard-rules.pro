@@ -20,11 +20,11 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
--keep class com.bmshi.proxy.mobile.TauriActivity {
+-keep class com.bmshi.router.mobile.TauriActivity {
   public app.tauri.plugin.PluginManager getPluginManager();
 }
 
--keep class com.bmshi.proxy.mobile.MainActivity {
+-keep class com.bmshi.router.mobile.MainActivity {
   public saveData(java.lang.String, java.lang.String);
   public java.lang.String loadData(java.lang.String);
   public java.lang.String listInstalledApps();
@@ -36,7 +36,7 @@
   public updateNotification(java.lang.String);
 }
 
--keep class com.bmshi.proxy.mobile.TrojanProxy {
+-keep class com.bmshi.router.mobile.TrojanProxy {
   public syncData();
 }
 

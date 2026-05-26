@@ -1,4 +1,4 @@
-package com.bmshi.proxy.mobile
+package com.bmshi.router.mobile
 
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -210,7 +210,7 @@ class TrojanProxy : VpnService() {
 
   companion object {
     private lateinit var vpnFd: ParcelFileDescriptor
-    const val STOP_ACTION = "com.bmshi.proxy.mobile.STOP_VPN"
+    const val STOP_ACTION = "com.bmshi.router.mobile.STOP_VPN"
     const val NOTIFICATION_ID = 428571
 
 

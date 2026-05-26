@@ -34,7 +34,7 @@
       android:permission="android.permission.BIND_VPN_SERVICE">
       <intent-filter>
         <action android:name="android.net.VpnService" />
-        <action android:name="com.bmshi.proxy.mobile.STOP_VPN" />
+        <action android:name="com.bmshi.router.mobile.STOP_VPN" />
       </intent-filter>
     </service>
   </application>
