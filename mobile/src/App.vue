@@ -1,25 +1,29 @@
 <script>
-import {invoke} from "@tauri-apps/api";
-import {appWindow} from "@tauri-apps/plugin-window";
+import {invoke} from "@tauri-apps/api/core";
+import {listen} from "@tauri-apps/api/event";
 
 const VPN_PERMISSION = "android.permission.BIND_VPN_SERVICE";
+const defaultConfig = () => ({
+  hostname: "",
+  password: "",
+  pool_size: 20,
+  mtu: 1500,
+  port: 443,
+  trusted_dns: "8.8.8.8",
+  untrusted_dns: "114.114.114.114",
+  dns_cache_time: 600,
+  log_level: "Error",
+  speed_update_ms: 2000,
+  selected_app: "",
+});
 
 export default {
   data() {
     return {
       show: false,
-      config: {
-        hostname: "",
-        password: "",
-        pool_size: 20,
-        mtu: 1500,
-        port: 443,
-        trusted_dns: "8.8.8.8",
-        untrusted_dns: "114.114.114.114",
-        dns_cache_time: 600,
-        log_level: "Error",
-        speed_update_ms: 2000,
-      },
+      config: defaultConfig(),
+      apps: [],
+      configReady: false,
       label: "开始",
       running: false,
       homeVisible: true,
@@ -31,9 +35,19 @@ export default {
       process_exit: true,
     }
   },
+  watch: {
+    "config.selected_app": async function (app, oldApp) {
+      if (this.configReady && app !== oldApp) {
+        await this.saveConfig();
+      }
+    },
+  },
   methods: {
-    async start() {
+    async saveConfig() {
       await invoke("save_data", {key: "config", value: JSON.stringify(this.config)});
+    },
+    async start() {
+      await this.saveConfig();
       if (!this.running) {
         await invoke("start_vpn", {options: this.config});
         this.label = "启动中";
@@ -45,7 +59,7 @@ export default {
       }
     },
     async init_listener() {
-      await appWindow.listen("on_status_changed", async (event) => {
+      await listen("on_status_changed", async (event) => {
         if (event.payload === "VpnStart") {
           this.running = true;
           this.process_exit = false;
@@ -72,12 +86,15 @@ export default {
           this.network_lost = true;
         }
       });
-      await appWindow.listen("update_speed", async (event) => {
+      await listen("update_speed", async (event) => {
         if (this.running) {
           this.label = '停止';
           await invoke("update_notification", {content: event.payload});
         }
-      })
+      });
+      await listen("open_config", async () => {
+        this.showHome();
+      });
     },
     do_action() {
       if (this.label !== '开始' && this.label !== '停止') {
@@ -90,7 +107,7 @@ export default {
       }
     },
     config_ok() {
-      return this.config.hostname !== "" && this.config.password !== "" && (this.label === "开始" || this.label === "停止")
+      return this.config.hostname !== "" && this.config.password !== "" && this.config.selected_app !== "" && (this.label === "开始" || this.label === "停止")
     },
     showHome() {
       this.homeVisible = true;
@@ -130,9 +147,14 @@ export default {
   async mounted() {
     let data = await invoke("load_data", {key: "config"});
     if (data !== "") {
-      this.config = JSON.parse(data.toString());
+      this.config = {...defaultConfig(), ...JSON.parse(data.toString())};
       this.config.speed_update_ms = 2000;
     }
+    this.apps = (await invoke("list_installed_apps", {})).map((app) => ({
+      title: `${app.label} (${app.package_name})`,
+      value: app.package_name,
+    }));
+    this.configReady = true;
     await invoke("init_window", {logLevel: this.config.log_level});
     await this.init_listener();
   }
@@ -166,6 +188,15 @@ export default {
                         variant="outlined"></v-text-field>
           <v-text-field v-model="config.untrusted_dns" :readonly="running" label="不可信DNS"
                         variant="outlined"></v-text-field>
+          <v-autocomplete v-model="config.selected_app"
+                          :items="apps"
+                          :readonly="running"
+                          clearable
+                          item-title="title"
+                          item-value="value"
+                          label="启用VPN的应用"
+                          variant="outlined"
+          ></v-autocomplete>
           <v-combobox v-model="config.log_level"
                       :items="['Trace', 'Debug', 'Info', 'Warn', 'Error', 'Off']"
                       :readonly="running"

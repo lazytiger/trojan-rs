@@ -11,7 +11,8 @@ use mio::{
     net::{TcpStream, UdpSocket},
     Token,
 };
-use rustls::{ClientConfig, ClientConnection, Connection, ServerName};
+use rustls::{ClientConfig, ClientConnection, Connection};
+use rustls_pki_types::ServerName;
 use smoltcp::{iface::SocketHandle, socket::udp::Socket, wire::IpEndpoint};
 use trust_dns_proto::{op::Message, serialize::binary::BinDecodable};
 
@@ -31,7 +32,7 @@ use crate::{
 pub struct DnsServer {
     server_addr: SocketAddr,
     config: Arc<ClientConfig>,
-    hostname: ServerName,
+    hostname: ServerName<'static>,
     listener: SocketHandle,
     trusted: TlsConn,
     trusted_rbuffer: BytesMut,
@@ -56,7 +57,7 @@ impl DnsServer {
     pub fn new(
         server_addr: SocketAddr,
         config: Arc<ClientConfig>,
-        hostname: ServerName,
+        hostname: ServerName<'static>,
         listener: SocketHandle,
         trusted_addr: SocketAddr,
         untrusted_addr: SocketAddr,
@@ -410,7 +411,7 @@ impl DnsServer {
 fn new_tls_conn(
     server_addr: SocketAddr,
     config: Arc<ClientConfig>,
-    hostname: ServerName,
+    hostname: ServerName<'static>,
     pass: &String,
 ) -> Result<TlsConn, VpnError> {
     let server = TcpStream::connect(server_addr)?;

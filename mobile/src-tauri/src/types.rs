@@ -21,7 +21,7 @@ pub enum VpnError {
     #[from(ignore)]
     RxBreak(Option<std::io::Error>),
     Resolve,
-    InvalidDnsName(rustls::client::InvalidDnsNameError),
+    InvalidDnsName(rustls_pki_types::InvalidDnsNameError),
     Smoltcp(smoltcp::wire::Error),
     Json(serde_json::Error),
 }
@@ -32,6 +32,7 @@ pub enum CopyResult {
     TxBlock,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Clone)]
 pub enum VpnStatus {
     VpnStart,
@@ -45,6 +46,7 @@ pub enum EventType {
     StatusChanged,
     PermissionResult,
     UpdateSpeed,
+    OpenConfig,
 }
 
 impl EventType {
@@ -53,6 +55,7 @@ impl EventType {
             EventType::StatusChanged => "on_status_changed",
             EventType::PermissionResult => "on_permission_result",
             EventType::UpdateSpeed => "update_speed",
+            EventType::OpenConfig => "open_config",
         }
     }
 }

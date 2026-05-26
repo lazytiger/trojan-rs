@@ -27,7 +27,8 @@
 -keep class com.bmshi.proxy.mobile.MainActivity {
   public saveData(java.lang.String, java.lang.String);
   public java.lang.String loadData(java.lang.String);
-  public startVpn(int);
+  public java.lang.String listInstalledApps();
+  public startVpn(java.lang.String, int, java.lang.String, java.lang.String);
   public stopVpn();
   public boolean shouldShowRequestPermissionRationaleNative(java.lang.String);
   public requestPermission(java.lang.String);
@@ -37,4 +38,8 @@
 
 -keep class com.bmshi.proxy.mobile.TrojanProxy {
   public syncData();
+}
+
+-keepclasseswithmembernames class * {
+  native <methods>;
 }

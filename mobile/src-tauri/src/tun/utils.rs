@@ -125,7 +125,7 @@ pub fn resolve(name: &str, dns_server_addr: &str) -> Result<Vec<IpAddr>> {
         Ok(message
             .answers()
             .iter()
-            .filter_map(|record| record.data().and_then(|data| data.to_ip_addr()))
+            .filter_map(|record| record.data().and_then(|data| data.ip_addr()))
             .collect())
     }
 }

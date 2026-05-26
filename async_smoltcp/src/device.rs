@@ -78,14 +78,15 @@ pub struct TunDevice<'a, T: Tun> {
 
 fn is_private_v4(addr: IpAddress) -> bool {
     if let IpAddress::Ipv4(ip) = addr {
+        let octets = ip.octets();
         ip.is_unspecified() //0.0.0.0/8
-            || ip.0[0] == 10 //10.0.0.0/8
+            || octets[0] == 10 //10.0.0.0/8
             || ip.is_loopback() //127.0.0.0/8
             || ip.is_link_local() //169.254.0.0/16
-            || ip.0[0] == 172 && ip.0[1] & 0xf0 == 16 //172.16.0.0/12
-            || ip.0[0] == 192 && ip.0[1] == 168 //192.168.0.0/16
+            || octets[0] == 172 && octets[1] & 0xf0 == 16 //172.16.0.0/12
+            || octets[0] == 192 && octets[1] == 168 //192.168.0.0/16
             || ip.is_multicast() //224.0.0.0/4
-            || ip.0[0] & 0xf0 == 240 // 240.0.0.0/4
+            || octets[0] & 0xf0 == 240 // 240.0.0.0/4
             || ip.is_broadcast() //255.255.255.255/32
     } else {
         true
@@ -484,13 +485,13 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         self.udp_req_senders.remove(&target);
     }
 
-    fn get_tcp_socket(&mut self, source: IpEndpoint) -> &mut TcpSocket {
+    fn get_tcp_socket(&mut self, source: IpEndpoint) -> &mut TcpSocket<'_> {
         let handle = self.tcp_ip2handle.get(&source).unwrap().0;
         let socket: &mut TcpSocket = self.sockets.get_mut(handle);
         unsafe { std::mem::transmute(socket) }
     }
 
-    fn get_udp_socket(&mut self, source: IpEndpoint) -> &mut UdpSocket {
+    fn get_udp_socket(&mut self, source: IpEndpoint) -> &mut UdpSocket<'_> {
         let handle = *self.udp_ip2handle.get(&source).unwrap();
         let socket: &mut UdpSocket = self.sockets.get_mut(handle);
         unsafe { std::mem::transmute(socket) }
@@ -568,11 +569,11 @@ pub struct RxToken<T: Tun> {
 }
 
 impl<T: Tun> smoltcp::phy::RxToken for RxToken<T> {
-    fn consume<R, F>(mut self, f: F) -> R
+    fn consume<R, F>(self, f: F) -> R
     where
-        F: FnOnce(&mut [u8]) -> R,
+        F: FnOnce(&[u8]) -> R,
     {
-        f(self.packet.as_mut())
+        f(self.packet.as_ref())
     }
 }
 

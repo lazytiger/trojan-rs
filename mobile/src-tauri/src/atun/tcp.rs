@@ -1,7 +1,8 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use bytes::BytesMut;
-use rustls::{ClientConfig, ServerName};
+use rustls::ClientConfig;
+use rustls_pki_types::ServerName;
 use tokio::{io::AsyncWriteExt, spawn};
 
 use async_rustls::{TlsClientReadHalf, TlsClientWriteHalf};
@@ -16,7 +17,7 @@ pub async fn start_tcp(
     mut local: TcpStream,
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     pass: String,
 ) {
     if local.peer_addr().ip() == server_addr.ip() {

@@ -1,10 +1,11 @@
 <script>
 
-import {invoke} from "@tauri-apps/api";
-import {attachConsole, info} from "tauri-plugin-log-api";
-import {appWindow} from "@tauri-apps/api/window";
+import {invoke} from "@tauri-apps/api/core";
+import {attachConsole, info} from "@tauri-apps/plugin-log";
+import {getCurrentWebviewWindow} from "@tauri-apps/api/webviewWindow";
+const appWindow = getCurrentWebviewWindow()
 
-const detach = attachConsole();
+attachConsole();
 
 async function update_speed() {
   await invoke("update_speed", {});

@@ -6,7 +6,8 @@ use std::{
 };
 
 use bytes::{Buf, BytesMut};
-use rustls::{ClientConfig, ServerName};
+use rustls::ClientConfig;
+use rustls_pki_types::ServerName;
 use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -27,7 +28,7 @@ pub async fn start_trust_response(
     sender: Sender<Response>,
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     request: Arc<BytesMut>,
 ) -> Option<TlsClientWriteHalf> {
     if let Ok(client) = init_tls_conn(config, server_addr, server_name).await {
@@ -70,7 +71,7 @@ pub async fn start_dns(
     mut local: async_smoltcp::UdpSocket,
     config: Arc<ClientConfig>,
     server_addr: SocketAddr,
-    server_name: ServerName,
+    server_name: ServerName<'static>,
     request: Arc<BytesMut>,
     trusted_addr: SocketAddr,
     distrusted_addr: SocketAddr,

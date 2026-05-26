@@ -1,6 +1,7 @@
 package com.bmshi.proxy.mobile
 
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -15,6 +16,7 @@ import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 
 
 class TrojanProxy : VpnService() {
@@ -53,15 +55,23 @@ class TrojanProxy : VpnService() {
   }
 
   private fun createNotificationBuilder(): NotificationCompat.Builder {
-    //val openMain = Intent(this, MainActivity::class.java)
-    //openMain.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-    //val pi = PendingIntent.getActivity(this, 0, openMain, PendingIntent.FLAG_IMMUTABLE)
+    val openMain = Intent(this, MainActivity::class.java)
+    openMain.action = MainActivity.OPEN_CONFIG_ACTION
+    openMain.flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+      Intent.FLAG_ACTIVITY_CLEAR_TOP or
+      Intent.FLAG_ACTIVITY_SINGLE_TOP
+    val pi = PendingIntent.getActivity(
+      this,
+      0,
+      openMain,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
     return NotificationCompat.Builder(this, "vpn")
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setContentTitle("VPN服务")
       .setContentText("连接中")
       .setSmallIcon(R.mipmap.ic_launcher)
-      //.setContentIntent(pi)
+      .setContentIntent(pi)
       .setAutoCancel(false)
       .setOngoing(true)
       .setShowWhen(true)
@@ -71,64 +81,72 @@ class TrojanProxy : VpnService() {
 
   override fun onCreate() {
     val filter = IntentFilter(STOP_ACTION)
-    registerReceiver(stopReceiver, filter)
+    ContextCompat.registerReceiver(
+      this,
+      stopReceiver,
+      filter,
+      ContextCompat.RECEIVER_NOT_EXPORTED
+    )
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Logger.info("start vpn service now")
+    val app = intent?.getStringExtra("app").orEmpty()
+    val mtu = intent?.getIntExtra("mtu", 1500) ?: 1500
+    val trustedDns = intent?.getStringExtra("trusted_dns").orEmpty()
+    val untrustedDns = intent?.getStringExtra("untrusted_dns").orEmpty()
     val notifyChannel =
       NotificationChannelCompat.Builder("vpn", NotificationManager.IMPORTANCE_LOW).setName("vpn")
         .build()
     NotificationManagerCompat.from(this).createNotificationChannel(notifyChannel)
     val notifyBuilder = createNotificationBuilder()
     MainActivity.notifyBuilder = notifyBuilder
+    startForeground(NOTIFICATION_ID, notifyBuilder.build())
     Thread(Runnable {
-      for (bypass in arrayOf(
-        R.array.bypass_china_24,
-        R.array.bypass_china_16,
-        R.array.bypass_private_route
-      )) {
-        try {
-          val builder = Builder()
-          val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-          val network = manager.activeNetwork
-          if (network != null) {
-            builder.setUnderlyingNetworks(arrayOf(network))
-          }
-          for (route in resources.getStringArray(bypass)) {
-            val parts = route.split("/")
-            builder.addRoute(parts[0], parts[1].toInt())
-          }
-          builder.addRoute("10.10.11.1", 32)
-            //.addRoute("8.8.8.8", 32)
-            //.addRoute("212.103.62.58", 32)
-            .addAddress("10.10.10.1", 30)
-            .addDnsServer("10.10.11.1")
-            .addDnsServer("8.8.8.8")
-            .addDnsServer("8.8.4.4")
-            .addDnsServer("1.1.1.1")
-            .addDnsServer("1.0.0.1")
-            .addDisallowedApplication(packageName)
-            .setSession("gfw")
-            .setMtu(MainActivity.mtu)
-            .setBlocking(false)
-          var vpn = builder.establish()
-          if (vpn != null) {
-            startNetworkMonitor()
-            vpnFd = vpn
-            onStart(vpn.fd, "10.10.11.1")
-            startForeground(NOTIFICATION_ID, notifyBuilder.build())
-          } else {
-            Logger.error("establish vpn failed")
-            close()
-          }
-          break
-        } catch (e: Exception) {
-          Logger.error("initialize vpn failed, switch to next bypass policy", e)
+      try {
+        if (app.isBlank()) {
+          Logger.error("selected app is empty")
+          close()
+          return@Runnable
         }
+        val builder = Builder()
+        val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = manager.activeNetwork
+        if (network != null) {
+          builder.setUnderlyingNetworks(arrayOf(network))
+        }
+        builder.addRoute("0.0.0.0", 0)
+          .addAddress("10.10.10.1", 30)
+          .addDnsServer("10.10.11.1")
+          .addAllowedApplication(app)
+          .setSession("gfw")
+          .setMtu(mtu)
+          .setBlocking(false)
+        addDnsServer(builder, trustedDns)
+        addDnsServer(builder, untrustedDns)
+        val vpn = builder.establish()
+        if (vpn != null) {
+          Logger.info("vpn established for app=$app mtu=$mtu")
+          startNetworkMonitor()
+          vpnFd = vpn
+          onStart(vpn.fd, "10.10.11.1")
+        } else {
+          Logger.error("establish vpn failed")
+          close()
+        }
+      } catch (e: Exception) {
+        Logger.error("initialize vpn failed", e)
+        close()
       }
     }).start()
     return super.onStartCommand(intent, flags, startId)
+  }
+
+  private fun addDnsServer(builder: Builder, dns: String) {
+    if (dns.isNotBlank() && dns != "10.10.11.1") {
+      Logger.info("add dns server $dns")
+      builder.addDnsServer(dns)
+    }
   }
 
   override fun onDestroy() {

@@ -26,15 +26,16 @@ use crate::{
 
 fn is_private(endpoint: IpEndpoint) -> bool {
     if let IpAddress::Ipv4(ip) = endpoint.addr {
+        let octets = ip.octets();
         endpoint.port == 0
             || ip.is_unspecified() //0.0.0.0/8
-            || ip.0[0] == 10 //10.0.0.0/8
+            || octets[0] == 10 //10.0.0.0/8
             || ip.is_loopback() //127.0.0.0/8
             || ip.is_link_local() //169.254.0.0/16
-            || ip.0[0] == 172 && ip.0[1] & 0xf0 == 16 //172.16.0.0/12
-            || ip.0[0] == 192 && ip.0[1] == 168 //192.168.0.0/16
+            || octets[0] == 172 && octets[1] & 0xf0 == 16 //172.16.0.0/12
+            || octets[0] == 192 && octets[1] == 168 //192.168.0.0/16
             || ip.is_multicast() //224.0.0.0/4
-            || ip.0[0] & 0xf0 == 240 // 240.0.0.0/4
+            || octets[0] & 0xf0 == 240 // 240.0.0.0/4
             || ip.is_broadcast() //255.255.255.255/32
     } else {
         true
@@ -167,7 +168,11 @@ impl<'a> VpnDevice<'a> {
         self.tcp_wakers.get_events()
     }
 
-    pub fn get_tcp_socket_mut(&mut self, handle: SocketHandle, waker: WakerMode) -> &mut TcpSocket {
+    pub fn get_tcp_socket_mut(
+        &mut self,
+        handle: SocketHandle,
+        waker: WakerMode,
+    ) -> &mut TcpSocket<'_> {
         let sockets = unsafe { crate::get_mut_unchecked(&mut self.sockets) };
         let socket: &mut TcpSocket = sockets.get_mut(handle);
         match waker {
@@ -194,7 +199,11 @@ impl<'a> VpnDevice<'a> {
         unsafe { std::mem::transmute(socket) }
     }
 
-    pub fn get_udp_socket_mut(&mut self, handle: SocketHandle, waker: WakerMode) -> &mut UdpSocket {
+    pub fn get_udp_socket_mut(
+        &mut self,
+        handle: SocketHandle,
+        waker: WakerMode,
+    ) -> &mut UdpSocket<'_> {
         let sockets = unsafe { crate::get_mut_unchecked(&mut self.sockets) };
         let socket: &mut UdpSocket = sockets.get_mut(handle);
         match waker {
@@ -341,11 +350,11 @@ pub struct RxToken {
 }
 
 impl smoltcp::phy::RxToken for RxToken {
-    fn consume<R, F>(mut self, f: F) -> R
+    fn consume<R, F>(self, f: F) -> R
     where
-        F: FnOnce(&mut [u8]) -> R,
+        F: FnOnce(&[u8]) -> R,
     {
-        f(self.packet.as_mut())
+        f(self.packet.as_ref())
     }
 }
 
@@ -359,7 +368,7 @@ impl<'a> smoltcp::phy::TxToken for TxToken<'a> {
             .allocate_packet(len)
             .map(|mut packet| {
                 let r = f(packet.as_mut());
-                self.session.send(packet);
+                let _ = self.session.send(packet);
                 r
             })
             .unwrap()

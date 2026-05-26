@@ -74,8 +74,8 @@ impl TypeConverter for IpAddress {
     type TargetType = IpAddr;
     fn convert(self) -> Self::TargetType {
         match self {
-            IpAddress::Ipv4(v4) => IpAddr::V4(v4.0.into()),
-            IpAddress::Ipv6(v6) => IpAddr::V6(v6.0.into()),
+            IpAddress::Ipv4(v4) => IpAddr::V4(v4),
+            IpAddress::Ipv6(v6) => IpAddr::V6(v6),
         }
     }
 }

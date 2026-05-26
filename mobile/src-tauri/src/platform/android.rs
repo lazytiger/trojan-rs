@@ -23,7 +23,7 @@ use jni::{
 };
 
 use crate::{
-    emit_event, types,
+    emit_event, types, InstalledApp,
     types::{EventType, VpnError, VpnStatus},
 };
 
@@ -111,6 +111,17 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onPermissionResu
     log::info!("onPermissionResult:{}", granted);
     if let Err(err) = crate::emit_event(EventType::PermissionResult, granted != 0) {
         log::error!("onPermissionResult failed:{:?}", err);
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onOpenConfigIntent<'local>(
+    _: JNIEnv<'local>,
+    _: JObject<'local>,
+) {
+    log::info!("onOpenConfigIntent");
+    if let Err(err) = crate::emit_event(EventType::OpenConfig, true) {
+        log::error!("onOpenConfigIntent failed:{:?}", err);
     }
 }
 
@@ -230,16 +241,33 @@ pub fn init_log(log_level: &String) {
     android_logger::init_once(config);
 }
 
-pub fn start_vpn(mtu: i32) -> Result<(), VpnError> {
-    log::info!("start vpn proxy");
+pub fn start_vpn(
+    app: impl AsRef<str>,
+    mtu: i32,
+    trusted_dns: impl AsRef<str>,
+    untrusted_dns: impl AsRef<str>,
+) -> Result<(), VpnError> {
+    log::info!(
+        "start vpn proxy for app:{} mtu:{}",
+        app.as_ref(),
+        mtu
+    );
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
+    let app = env.new_string(app)?;
+    let trusted_dns = env.new_string(trusted_dns)?;
+    let untrusted_dns = env.new_string(untrusted_dns)?;
     env.call_static_method(
         "com/bmshi/proxy/mobile/MainActivity",
         "startVpn",
-        "(I)V",
-        &[mtu.into()],
+        "(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V",
+        &[
+            (&app).into(),
+            mtu.into(),
+            (&trusted_dns).into(),
+            (&untrusted_dns).into(),
+        ],
     )?;
     Ok(())
 }
@@ -348,6 +376,24 @@ pub fn load_data(key: impl AsRef<str>) -> Result<String, VpnError> {
     Ok(value)
 }
 
+pub fn list_installed_apps() -> Result<Vec<InstalledApp>, VpnError> {
+    log::info!("list installed apps");
+    let (context, lock) = get_context()?;
+    let mut env = context.jvm.attach_current_thread()?;
+    drop(lock);
+    let ret = env.call_static_method(
+        "com/bmshi/proxy/mobile/MainActivity",
+        "listInstalledApps",
+        "()Ljava/lang/String;",
+        &[],
+    )?;
+
+    let value: JString = ret.l()?.into();
+    let value = env.get_string(&value)?.to_string_lossy().to_string();
+
+    Ok(serde_json::from_str(&value)?)
+}
+
 #[allow(unused)]
 pub fn sync_data() -> Result<(), VpnError> {
     log::info!("sync data");
@@ -422,6 +468,10 @@ impl Tun for Session {
     }
     fn allocate_packet(&self, len: usize) -> std::io::Result<Self::Packet> {
         Ok(Packet::new(len))
+    }
+
+    fn mtu(&self) -> usize {
+        self.mtu
     }
 }
 

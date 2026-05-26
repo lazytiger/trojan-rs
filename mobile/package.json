@@ -11,15 +11,13 @@
   },
   "dependencies": {
     "@mdi/font": "^7.2.96",
-    "@tauri-apps/api": "^2.0.0-alpha.4",
-    "@tauri-apps/plugin-shell": "^2.0.0-alpha.0",
-    "@tauri-apps/plugin-window": "^2.0.0-alpha.0",
-    "tauri-plugin-log-api": "https://github.com/tauri-apps/tauri-plugin-log",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-shell": "^2.3.5",
     "vue": "^3.2.45",
     "vuetify": "^3.1.11"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0-alpha.9",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^18.7.10",
     "@vitejs/plugin-vue": "^4.0.0",
     "internal-ip": "^7.0.0",
