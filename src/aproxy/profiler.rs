@@ -114,7 +114,7 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
                 if let Err(err) = if add {
-                    session.add(ip, vec![])
+                    session.add(ip, &[])
                 } else {
                     session.del(ip)
                 } {

@@ -175,7 +175,7 @@ async fn wait_until_stop(running: Arc<AtomicBool>, ip: IpAddr) {
             .await;
         match proxy_data.no_bypass_session.add(
             ip,
-            vec![ipset::types::AddOption::Timeout(timeout as u32 + 5)],
+            &[ipset::types::AddOption::Timeout(timeout as u32 + 5)],
         ) {
             Ok(ret) => {
                 if !ret {
@@ -206,7 +206,7 @@ pub async fn init_tls_conn(
             .await;
         if !proxy_data.server_ips.contains(&ip.ip()) {
             proxy_data.server_ips.push(ip.ip());
-            if let Err(err) = proxy_data.bypass_session.add(ip.ip(), vec![]) {
+            if let Err(err) = proxy_data.bypass_session.add(ip.ip(), &[]) {
                 log::error!("add ip:{} to session failed:{}", ip, err);
             }
         }

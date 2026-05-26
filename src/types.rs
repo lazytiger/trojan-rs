@@ -63,9 +63,9 @@ pub struct ProxyData {
 #[cfg(target_os = "linux")]
 impl ProxyData {
     pub fn new(no_bypass: String, bypass: String) -> Self {
-        let no_bypass_session = Session::new(no_bypass);
+        let mut no_bypass_session = Session::new(no_bypass);
         no_bypass_session.set_option(EnvOption::Exist);
-        let bypass_session = Session::new(bypass);
+        let mut bypass_session = Session::new(bypass);
         bypass_session.set_option(EnvOption::Exist);
         Self {
             server_ips: vec![],
