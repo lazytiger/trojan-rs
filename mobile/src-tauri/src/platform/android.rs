@@ -255,9 +255,9 @@ pub fn start_vpn(
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
-    let app = env.new_string(app)?;
-    let trusted_dns = env.new_string(trusted_dns)?;
-    let untrusted_dns = env.new_string(untrusted_dns)?;
+    let app = env.new_string(app.as_ref())?;
+    let trusted_dns = env.new_string(trusted_dns.as_ref())?;
+    let untrusted_dns = env.new_string(untrusted_dns.as_ref())?;
     env.call_static_method(
         "com/bmshi/proxy/mobile/MainActivity",
         "startVpn",

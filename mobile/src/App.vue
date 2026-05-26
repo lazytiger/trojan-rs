@@ -147,7 +147,12 @@ export default {
   async mounted() {
     let data = await invoke("load_data", {key: "config"});
     if (data !== "") {
-      this.config = {...defaultConfig(), ...JSON.parse(data.toString())};
+      try {
+        this.config = {...defaultConfig(), ...JSON.parse(data.toString())};
+      } catch (err) {
+        console.error("Failed to parse config, using default config", err);
+        this.config = defaultConfig();
+      }
       this.config.speed_update_ms = 2000;
     }
     this.apps = (await invoke("list_installed_apps", {})).map((app) => ({
