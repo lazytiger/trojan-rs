@@ -59,16 +59,20 @@ class MainActivity : TauriActivity() {
       val apps = JSONArray()
       return try {
         val pm = instance.packageManager
-        val installedApps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0L))
-        } else {
-          pm.getInstalledApplications(0)
+        val launcherIntent = Intent(Intent.ACTION_MAIN, null).apply {
+          addCategory(Intent.CATEGORY_LAUNCHER)
         }
-        for (appInfo in installedApps) {
-          val packageName = appInfo.packageName
-          if (pm.getLaunchIntentForPackage(packageName) != null) {
+        val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          pm.queryIntentActivities(launcherIntent, PackageManager.ResolveInfoFlags.of(0L))
+        } else {
+          pm.queryIntentActivities(launcherIntent, 0)
+        }
+        val seen = hashSetOf<String>()
+        for (resolveInfo in resolveInfos) {
+          val packageName = resolveInfo.activityInfo.packageName
+          if (seen.add(packageName)) {
             val app = JSONObject()
-            app.put("label", appInfo.loadLabel(pm).toString())
+            app.put("label", resolveInfo.loadLabel(pm).toString())
             app.put("package_name", packageName)
             apps.put(app)
           }

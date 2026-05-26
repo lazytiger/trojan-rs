@@ -161,7 +161,7 @@ fn parse_address_endpoint(atyp: u8, buffer: &[u8]) -> Option<(usize, Sock5Addres
                 log::error!("unknown protocol, invalid ipv6 address");
                 return None;
             }
-            let addr = Ipv6Address::from(<[u8; 16]>::try_from(&buffer[..16]).unwrap());
+            let addr = Ipv6Address::from_octets(buffer[..16].try_into().unwrap());
             let endpoint = IpEndpoint::new(IpAddress::Ipv6(addr), to_u16(&buffer[16..]));
             Some((18, Sock5Address::Endpoint(endpoint)))
         }
