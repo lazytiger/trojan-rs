@@ -78,7 +78,7 @@ fn get_mut_context<'a>() -> Result<
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_00024Companion_initRust<'local>(
+pub extern "system" fn Java_com_bmshi_router_mobile_MainActivity_00024Companion_initRust<'local>(
     env: JNIEnv<'local>,
     _: JClass<'local>,
 ) {
@@ -103,7 +103,7 @@ fn init_rust<'local>(env: JNIEnv<'local>) -> Result<(), VpnError> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onPermissionResult<'local>(
+pub extern "system" fn Java_com_bmshi_router_mobile_MainActivity_onPermissionResult<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
     granted: jboolean,
@@ -115,7 +115,7 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onPermissionResu
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onOpenConfigIntent<'local>(
+pub extern "system" fn Java_com_bmshi_router_mobile_MainActivity_onOpenConfigIntent<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
 ) {
@@ -126,7 +126,7 @@ pub extern "system" fn Java_com_bmshi_proxy_mobile_MainActivity_onOpenConfigInte
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStart<'local>(
+pub extern "system" fn Java_com_bmshi_router_mobile_TrojanProxy_onStart<'local>(
     mut env: JNIEnv<'local>,
     _: JObject<'local>,
     fd: jint,
@@ -178,7 +178,7 @@ pub fn start_vpn_process() -> Result<(), VpnError> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onStop<'local>(
+pub extern "system" fn Java_com_bmshi_router_mobile_TrojanProxy_onStop<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
 ) {
@@ -197,7 +197,7 @@ fn on_vpn_stop() -> Result<(), VpnError> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_bmshi_proxy_mobile_TrojanProxy_onNetworkChanged<'local>(
+pub extern "system" fn Java_com_bmshi_router_mobile_TrojanProxy_onNetworkChanged<'local>(
     _: JNIEnv<'local>,
     _: JObject<'local>,
     available: jboolean,

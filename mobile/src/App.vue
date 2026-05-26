@@ -173,7 +173,7 @@ export default {
           color="blue"
           dark=true
       >
-        <v-toolbar-title>Trojan客户端</v-toolbar-title>
+        <v-toolbar-title>AppRouter</v-toolbar-title>
         <v-spacer></v-spacer>
         <v-btn icon @click="showHome">
           <v-icon>mdi-home-edit-outline</v-icon>

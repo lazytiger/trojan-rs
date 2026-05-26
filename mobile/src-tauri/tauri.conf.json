@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "mobile",
+  "productName": "AppRouter",
   "version": "0.0.1",
   "identifier": "com.bmshi.router.mobile",
   "build": {
@@ -14,7 +14,7 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "mobile proxy",
+        "title": "AppRouter",
         "width": 750,
         "height": 1334
       }

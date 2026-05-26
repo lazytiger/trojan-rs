@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">mobile</string>
-    <string name="main_activity_title">mobile</string>
+    <string name="app_name">AppRouter</string>
+    <string name="main_activity_title">AppRouter</string>
 </resources>
