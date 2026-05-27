@@ -140,10 +140,10 @@ async fn async_run() -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_os = "linux"))]
 async fn wait_until_stop(_running: Arc<AtomicBool>, _ip: IpAddr) {}
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 async fn wait_until_stop(running: Arc<AtomicBool>, ip: IpAddr) {
     let timeout = OPTIONS.proxy_args().ipset_timeout;
     {
