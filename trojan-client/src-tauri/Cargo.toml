@@ -26,10 +26,12 @@ derive_more = { version = "2.0", features = ["from"] }
 backtrace = "0.3"
 log = "0.4"
 chrono = "0.4"
-wintool = { path = "../../wintool" }
 tauri-plugin-fs = "2.5.1"
 tauri-plugin-http = "2.5.9"
 tauri-plugin-shell = "2.3.5"
+
+[target.'cfg(windows)'.dependencies]
+wintool = { path = "../../wintool" }
 
 [features]
 # by default Tauri runs in production mode

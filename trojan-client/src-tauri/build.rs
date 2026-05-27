@@ -1,7 +1,11 @@
 fn main() {
     let profile = std::env::var("PROFILE").unwrap();
     let target = std::env::var("TARGET").unwrap();
-    let exe = if target.contains("windows") { ".exe" } else { "" };
+    let exe = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
     let file = format!("../../target/{}/trojan{}", profile, exe);
     println!("cargo:rerun-if-changed={}", file);
     let new_file = format!("libs/trojan-{}{}", target, exe);
