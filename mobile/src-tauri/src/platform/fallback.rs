@@ -50,12 +50,7 @@ impl async_smoltcp::Packet for Packet {
 
 pub fn init_log(_: &String) {}
 
-pub fn start_vpn(
-    _: impl AsRef<str>,
-    _: i32,
-    _: impl AsRef<str>,
-    _: impl AsRef<str>,
-) -> Result<(), VpnError> {
+pub fn start_vpn(_: &[String], _: i32, _: impl AsRef<str>) -> Result<(), VpnError> {
     Err(VpnError::NoPlatformContext)
 }
 

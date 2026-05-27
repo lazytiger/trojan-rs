@@ -1,6 +1,5 @@
 use std::{
-    net::{IpAddr, SocketAddr},
-    str::FromStr,
+    net::SocketAddr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -12,12 +11,7 @@ use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, RootCertStore};
 use rustls_pki_types::ServerName;
 use sha2::{Digest, Sha224};
-use tokio::{net::UdpSocket, runtime::Builder, spawn, sync::mpsc::channel};
-use trust_dns_proto::{
-    op::{Message, Query},
-    rr::{DNSClass, Name, RecordType},
-    serialize::binary::BinDecodable,
-};
+use tokio::{runtime::Builder, spawn, sync::mpsc::channel};
 
 use async_rustls::TlsClientStream;
 use async_smoltcp::TunDevice;
@@ -56,47 +50,6 @@ fn digest_pass(pass: &String) -> String {
     hex::encode(result.as_slice())
 }
 
-/// This function resolves a domain name to a list of IP addresses.
-pub async fn resolve(name: &str, dns_server_addr: &str) -> types::Result<Vec<IpAddr>> {
-    let dns_server_addr: SocketAddr = dns_server_addr.parse()?;
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    let mut message = Message::new();
-    message.set_recursion_desired(true);
-    message.set_id(1);
-    let mut query = Query::new();
-    let name = Name::from_str(name)?;
-    query.set_name(name);
-    query.set_query_type(RecordType::A);
-    query.set_query_class(DNSClass::IN);
-    message.add_query(query);
-    let request = message.to_vec()?;
-    if request.len() != socket.send_to(request.as_slice(), dns_server_addr).await? {
-        log::error!("send dns query to server failed");
-        return Err(VpnError::Resolve);
-    }
-    let mut response = vec![0u8; 1024];
-    tokio::select! {
-        _ = tokio::time::sleep(Duration::from_secs(5)) => {
-            log::error!("dns query timeout");
-            Err(VpnError::Resolve)
-        }
-        ret = socket.recv(response.as_mut_slice()) =>  {
-            let length = ret?;
-            let message = Message::from_bytes(&response.as_slice()[..length])?;
-            if message.id() != 1 {
-                log::error!("dns response id not match");
-                Err(VpnError::Resolve)
-            } else {
-            Ok(message
-                .answers()
-                .iter()
-                .filter_map(|record| record.data().and_then(|data| data.ip_addr()))
-                .collect())
-            }
-        }
-    }
-}
-
 fn show_info(level: &String) -> bool {
     level == "Debug" || level == "Info" || level == "Trace"
 }
@@ -116,12 +69,7 @@ pub async fn async_run(
 
     let mut server_ip = Vec::new();
     for _ in 0..10 {
-        if let Ok(ips) = resolve(
-            context.options.hostname.as_str(),
-            (context.options.untrusted_dns.clone() + ":53").as_str(),
-        )
-        .await
-        {
+        if let Ok(ips) = dns_lookup::lookup_host(context.options.hostname.as_str()) {
             server_ip = ips;
             break;
         }
@@ -155,7 +103,6 @@ pub async fn async_run(
     device.add_white_ip(dns_addr.ip());
 
     let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;
-    let distrusted_addr = (context.options.untrusted_dns.clone() + ":53").parse()?;
 
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let mut header = BytesMut::new();
@@ -204,8 +151,6 @@ pub async fn async_run(
                     server_name.clone(),
                     udp_header.clone(),
                     trusted_addr,
-                    distrusted_addr,
-                    context.blocked_domains.clone(),
                 ));
             } else {
                 log::info!("accept udp to:{}", socket.peer_addr());

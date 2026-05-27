@@ -18,7 +18,7 @@ use smoltcp::{
 };
 use wintun::Adapter;
 
-pub use route::route_add_with_if;
+pub use route::{route_add_many_with_if, route_add_with_if, RouteSpec};
 
 use crate::{
     dns::{get_adapter_ip, get_main_adapter_gwif},
@@ -51,10 +51,34 @@ const CHANNEL_UDP: usize = 1;
 /// Channel index for remote tcp connection
 const CHANNEL_TCP: usize = 2;
 
-pub fn apply_ipset(file: &str, index: u32, inverse: bool) -> Result<()> {
-    let ipset = IPSet::with_file(file, inverse)?;
-    ipset.add_route(index)?;
-    log::warn!("route add completed");
+pub fn apply_ipset(
+    file: &str,
+    wintun_index: u32,
+    main_gw: Ipv4Addr,
+    main_index: u32,
+) -> Result<()> {
+    let mut routes = vec![
+        RouteSpec::new(0u32, Ipv4Addr::new(128, 0, 0, 0).into(), 0, wintun_index),
+        RouteSpec::new(
+            Ipv4Addr::new(128, 0, 0, 0).into(),
+            Ipv4Addr::new(128, 0, 0, 0).into(),
+            0,
+            wintun_index,
+        ),
+    ];
+
+    let mut ipset = IPSet::with_file(file, false)?;
+    ipset.add_reserved_ranges();
+    ipset.build();
+    ipset.route_specs_with_gateway(main_gw.into(), main_index, &mut routes);
+    let stats = route_add_many_with_if(&routes)?;
+    log::warn!(
+        "split route add completed total:{} skipped:{} added:{} refreshed:{}",
+        stats.total,
+        stats.skipped,
+        stats.added,
+        stats.refreshed
+    );
     Ok(())
 }
 
@@ -102,7 +126,7 @@ pub fn run() -> Result<()> {
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let adapter = Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?;
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
-    if let Some((main_gw, main_index)) = get_main_adapter_gwif() {
+    let (main_gw, main_index) = if let Some((main_gw, main_index)) = get_main_adapter_gwif() {
         log::warn!(
             "main adapter gateway is {}, main adapter index is :{}",
             main_gw,
@@ -113,13 +137,14 @@ pub fn run() -> Result<()> {
             let index: u32 = (*v4.ip()).into();
             route_add_with_if(index, !0, gw.into(), main_index)?;
         }
+        (gw, main_index)
     } else {
         log::error!("main adapter gateway not found");
         return Err(TrojanError::MainAdapterNotFound);
-    }
+    };
     let index = adapter.get_adapter_index()?;
     if let Some(file) = &OPTIONS.wintun_args().route_ipset {
-        apply_ipset(file, index, OPTIONS.wintun_args().inverse_route)?;
+        apply_ipset(file, index, main_gw, main_index)?;
     }
 
     let mut poll = Poll::new()?;

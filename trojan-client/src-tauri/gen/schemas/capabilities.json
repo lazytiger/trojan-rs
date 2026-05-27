@@ -1,0 +1,1 @@
+{"migrated":{"identifier":"migrated","description":"permissions that were migrated from v1","local":true,"windows":["main"],"permissions":["core:default","log:default",{"identifier":"fs:scope","allow":["$RESOURCE/*"]},{"identifier":"http:default","allow":[{"url":"https://**/"},{"url":"http://**/"}]},"fs:default","http:default"]}}

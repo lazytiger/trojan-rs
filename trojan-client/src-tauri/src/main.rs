@@ -6,7 +6,7 @@
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::Path,
     sync::{Arc, Mutex},
     thread,
@@ -19,7 +19,7 @@ use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{
     image::Image,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem},
     path::BaseDirectory,
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, WindowEvent, Wry,
@@ -50,10 +50,7 @@ pub struct Config {
     pub server_auth: String,
     pub log_level: String,
     pub pool_size: u32,
-    pub enable_ipset: bool,
-    pub inverse_route: bool,
     pub enable_dns: bool,
-    pub sync_mode: bool,
     pub dns_listen: String,
     pub trust_dns: String,
 }
@@ -180,11 +177,6 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                 .path()
                 .resolve("libs/wintun.dll", BaseDirectory::Resource)
                 .unwrap();
-            let command = if config.sync_mode {
-                "wintun"
-            } else {
-                "awintun"
-            };
             let mut args = vec![
                 "-l",
                 "logs\\wintun.log",
@@ -194,7 +186,7 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                 "127.0.0.1:60080",
                 "-p",
                 config.server_auth.as_str(),
-                command,
+                "awintun",
                 "-n",
                 config.iface_name.as_str(),
                 "-H",
@@ -208,13 +200,8 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                 "-w",
                 config_wintun.to_str().unwrap(),
             ];
-            if config.enable_ipset {
-                args.push("--route-ipset");
-                args.push(config_ipset.to_str().unwrap());
-                if config.inverse_route {
-                    args.push("--inverse-route");
-                }
-            }
+            args.push("--route-ipset");
+            args.push(config_ipset.to_str().unwrap());
             log::info!("{:?}", args);
             let mut rxs = HashMap::new();
             match window
@@ -249,7 +236,7 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                     .path()
                     .resolve("config/hosts.txt", BaseDirectory::Resource)
                     .unwrap();
-                let mut args = vec![
+                let args = vec![
                     "-l",
                     "logs\\dns.log",
                     "-L",
@@ -272,9 +259,6 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                     "--hosts",
                     config_hosts.to_str().unwrap(),
                 ];
-                if !config.enable_ipset {
-                    args.push("--add-route");
-                }
                 log::info!("{:?}", args);
                 match window
                     .app_handle()
@@ -454,6 +438,85 @@ fn init_config() -> Result<Config> {
     Ok(config)
 }
 
+
+fn load_domains() -> Result<Vec<String>> {
+    let path = Path::new("config\\domain.txt");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut domains = Vec::new();
+    for line in reader.lines() {
+        let domain = line?.trim().to_string();
+        if !domain.is_empty() {
+            domains.push(domain);
+        }
+    }
+    Ok(domains)
+}
+
+fn save_domains(domains: &[String]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open("config\\domain.txt")?;
+    for domain in domains {
+        writeln!(file, "{}", domain)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn search_domain(key: String) -> Vec<String> {
+    match load_domains() {
+        Ok(domains) => domains
+            .into_iter()
+            .filter(|domain| domain.contains(&key))
+            .take(10)
+            .collect(),
+        Err(err) => {
+            log::error!("search domain failed:{:?}", err);
+            Vec::new()
+        }
+    }
+}
+
+#[tauri::command]
+fn add_domain(key: String) {
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return;
+    }
+    match load_domains() {
+        Ok(mut domains) => {
+            if !domains.iter().any(|domain| domain == &key) {
+                domains.push(key);
+                if let Err(err) = save_domains(&domains) {
+                    log::error!("save domains failed:{:?}", err);
+                }
+            }
+        }
+        Err(err) => log::error!("load domains failed:{:?}", err),
+    }
+}
+
+#[tauri::command]
+fn remove_domain(key: String) {
+    match load_domains() {
+        Ok(mut domains) => {
+            let old_len = domains.len();
+            domains.retain(|domain| domain != &key);
+            if domains.len() != old_len {
+                if let Err(err) = save_domains(&domains) {
+                    log::error!("save domains failed:{:?}", err);
+                }
+            }
+        }
+        Err(err) => log::error!("load domains failed:{:?}", err),
+    }
+}
 fn set_dns_server(state: &TrojanProxy) {
     if state.explicit_dns {
         wintool::adapter::set_dns_server(state.default_dns.clone());
@@ -511,7 +574,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![start, init, stop, update_speed])
+        .invoke_handler(tauri::generate_handler![start, init, stop, update_speed, search_domain, add_domain, remove_domain])
         .plugin(
             tauri_plugin_log::Builder::default()
                 .targets([

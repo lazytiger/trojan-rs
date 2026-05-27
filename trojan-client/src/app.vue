@@ -21,15 +21,17 @@ export default {
         server_auth: "",
         log_level: "2",
         pool_size: 20,
-        enable_ipset: true,
-        inverse_route: true,
         enable_dns: true,
         dns_listen: "",
         trust_dns: "",
-        sync_mode: false,
       },
       label: "开始",
       running: false,
+      homeVisible: true,
+      domainVisible: false,
+      domains: [],
+      query: "",
+      showResult: false,
     }
   },
   methods: {
@@ -50,6 +52,40 @@ export default {
     stop() {
       info("stop trojan now");
       invoke("stop", {});
+    },
+    showHome() {
+      this.homeVisible = true;
+      this.domainVisible = false;
+    },
+    showDomain() {
+      this.domainVisible = true;
+      this.homeVisible = false;
+    },
+    async handleDomain(item) {
+      if (item.id === -1) {
+        await invoke("add_domain", {key: this.query});
+      } else {
+        for (let i = 0; i < this.domains.length; i++) {
+          let domain = this.domains[i];
+          if (domain.value === item.id) {
+            await invoke("remove_domain", {key: domain.title});
+            break;
+          }
+        }
+      }
+      await this.doQuery();
+    },
+    async doQuery() {
+      let domains = await invoke("search_domain", {key: this.query});
+      this.domains = [];
+      for (let i = 0; i < domains.length; i++) {
+        let domain = domains[i];
+        this.domains.push({title: domain, value: i});
+      }
+      if (this.domains.length === 0) {
+        this.domains.push({title: "未找到该域名，点击添加", value: -1});
+      }
+      this.showResult = this.domains.length > 0;
     },
     check_ipv4(s) {
       let ipv4_regex = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}$/gm;
@@ -91,6 +127,17 @@ export default {
 <template>
   <v-app>
     <v-main class="bg-grey-lighten-4">
+      <v-toolbar color="blue" dark=true>
+        <v-toolbar-title>Trojan客户端</v-toolbar-title>
+        <v-spacer></v-spacer>
+        <v-btn icon @click="showHome">
+          <v-icon>mdi-home-edit-outline</v-icon>
+        </v-btn>
+        <v-btn icon @click="showDomain">
+          <v-icon>mdi-ladder</v-icon>
+        </v-btn>
+      </v-toolbar>
+      <div v-if="homeVisible">
       <v-container class="mx-auto" style="max-width: 480px;">
         <v-text-field v-model="config.iface_name" :readonly="running" label="虚拟网卡名"
                       variant="outlined"></v-text-field>
@@ -117,11 +164,6 @@ export default {
             ></v-text-field>
           </template>
         </v-slider>
-        <v-checkbox v-model="config.sync_mode" :readonly="running" label="同步模式"></v-checkbox>
-        <v-row>
-          <v-checkbox v-model="config.enable_ipset" :readonly="running" label="全局代理"></v-checkbox>
-          <v-checkbox v-model="config.inverse_route" :readonly="running" label="反转地址"></v-checkbox>
-        </v-row>
         <v-container class="rounded-xl, border">
           <v-checkbox v-model="config.enable_dns" :readonly="running"
                       label="信任DNS" @click="config.enable_dns=!config.enable_dns"></v-checkbox>
@@ -134,6 +176,34 @@ export default {
         </v-container>
         <v-btn :disabled="!is_config_ok()" block color="blue" size="x-large" @click="do_action">{{ label }}</v-btn>
       </v-container>
+      </div>
+      <div v-if="domainVisible">
+        <v-container class="mx-auto" style="max-width: 480px;">
+          <v-row>
+            <v-col>
+              <v-text-field v-model="query" label="域名关键字"
+                            variant="outlined"></v-text-field>
+            </v-col>
+            <v-col cols="2">
+              <v-btn icon @click="doQuery">
+                <v-icon>mdi-tab-search</v-icon>
+              </v-btn>
+            </v-col>
+          </v-row>
+          <div v-if="showResult">
+            <v-list :items="domains" class="my-list" @click:select="handleDomain">
+            </v-list>
+          </div>
+        </v-container>
+      </div>
     </v-main>
   </v-app>
 </template>
+
+<style>
+.my-list {
+  background-color: #f5f5f5;
+  padding: 10px;
+  border: 1px solid #ccc;
+}
+</style>

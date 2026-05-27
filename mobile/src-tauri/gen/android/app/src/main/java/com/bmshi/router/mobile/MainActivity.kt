@@ -3,6 +3,7 @@ package com.bmshi.router.mobile
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -32,22 +33,20 @@ class MainActivity : TauriActivity() {
   companion object {
     const val OPEN_CONFIG_ACTION = "com.bmshi.router.mobile.OPEN_CONFIG"
     var mtu: Int = 1500
-    var selectedApp: String = ""
+    var selectedAppsJson: String = "[]"
     var trustedDns: String = ""
-    var untrustedDns: String = ""
     private lateinit var instance: MainActivity
     lateinit var notifyBuilder: NotificationCompat.Builder
 
     private external fun initRust()
 
     @JvmStatic
-    fun startVpn(app: String, mtu: Int, trustedDns: String, untrustedDns: String) {
+    fun startVpn(appsJson: String, mtu: Int, trustedDns: String) {
       try {
-        Logger.info("start vpn in MainActivity app=$app mtu=$mtu")
-        MainActivity.selectedApp = app
+        Logger.info("start vpn in MainActivity apps=$appsJson mtu=$mtu")
+        MainActivity.selectedAppsJson = appsJson
         MainActivity.mtu = mtu
         MainActivity.trustedDns = trustedDns
-        MainActivity.untrustedDns = untrustedDns
         instance.startService()
       } catch (e: Exception) {
         Logger.warn(e.toString())
@@ -59,24 +58,25 @@ class MainActivity : TauriActivity() {
       val apps = JSONArray()
       return try {
         val pm = instance.packageManager
-        val launcherIntent = Intent(Intent.ACTION_MAIN, null).apply {
-          addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-        val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          pm.queryIntentActivities(launcherIntent, PackageManager.ResolveInfoFlags.of(0L))
+        val installedApps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0L))
         } else {
-          pm.queryIntentActivities(launcherIntent, 0)
+          @Suppress("DEPRECATION")
+          pm.getInstalledApplications(0)
         }
-        val seen = hashSetOf<String>()
-        for (resolveInfo in resolveInfos) {
-          val packageName = resolveInfo.activityInfo.packageName
-          if (seen.add(packageName)) {
+        installedApps
+          .asSequence()
+          .filter { it.enabled && it.packageName != instance.packageName }
+          .sortedWith(
+            compareBy<ApplicationInfo> { it.loadLabel(pm).toString().lowercase() }
+              .thenBy { it.packageName }
+          )
+          .forEach { appInfo ->
             val app = JSONObject()
-            app.put("label", resolveInfo.loadLabel(pm).toString())
-            app.put("package_name", packageName)
+            app.put("label", appInfo.loadLabel(pm).toString())
+            app.put("package_name", appInfo.packageName)
             apps.put(app)
           }
-        }
         apps.toString()
       } catch (e: Exception) {
         Logger.warn(e.toString())
@@ -196,10 +196,9 @@ class MainActivity : TauriActivity() {
 
   private fun createVpnIntent(): Intent {
     val intent = Intent(this, TrojanProxy::class.java)
-    intent.putExtra("app", selectedApp)
+    intent.putExtra("apps", selectedAppsJson)
     intent.putExtra("mtu", mtu)
     intent.putExtra("trusted_dns", trustedDns)
-    intent.putExtra("untrusted_dns", untrustedDns)
     return intent
   }
 

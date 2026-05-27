@@ -57,7 +57,7 @@ async fn async_run() -> Result<()> {
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
     let adapter = Adapter::create(&wintun, "trojan", OPTIONS.wintun_args().name.as_str(), None)?;
     let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
-    if let Some((main_gw, main_index)) = get_main_adapter_gwif() {
+    let (main_gw, main_index) = if let Some((main_gw, main_index)) = get_main_adapter_gwif() {
         log::warn!(
             "main adapter gateway is {}, main adapter index is :{}",
             main_gw,
@@ -68,13 +68,14 @@ async fn async_run() -> Result<()> {
             let index: u32 = (*v4.ip()).into();
             route_add_with_if(index, !0, gw.into(), main_index)?;
         }
+        (gw, main_index)
     } else {
         log::error!("main adapter gateway not found");
         return Err(TrojanError::MainAdapterNotFound);
-    }
+    };
     let index = adapter.get_adapter_index()?;
     if let Some(file) = &OPTIONS.wintun_args().route_ipset {
-        apply_ipset(file, index, OPTIONS.wintun_args().inverse_route)?;
+        apply_ipset(file, index, main_gw, main_index)?;
     }
 
     let server_name: ServerName = OPTIONS.wintun_args().hostname.as_str().try_into()?;

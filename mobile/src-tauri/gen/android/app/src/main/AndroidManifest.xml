@@ -31,7 +31,8 @@
     <service
       android:name=".TrojanProxy"
       android:exported="false"
-      android:permission="android.permission.BIND_VPN_SERVICE">
+      android:permission="android.permission.BIND_VPN_SERVICE"
+      android:stopWithTask="true">
       <intent-filter>
         <action android:name="android.net.VpnService" />
         <action android:name="com.bmshi.router.mobile.STOP_VPN" />

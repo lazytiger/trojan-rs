@@ -6,7 +6,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tauri::{Emitter, Manager, State, WebviewWindow};
 
 use crate::types::{EventType, VpnError};
@@ -26,6 +26,29 @@ use atun::run as run_vpn;
 #[cfg(not(feature = "async"))]
 use tun::run as run_vpn;
 
+fn deserialize_selected_apps<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum SelectedApps {
+        One(String),
+        Many(Vec<String>),
+    }
+
+    Ok(match SelectedApps::deserialize(deserializer)? {
+        SelectedApps::One(app) => {
+            if app.is_empty() {
+                Vec::new()
+            } else {
+                vec![app]
+            }
+        }
+        SelectedApps::Many(apps) => apps.into_iter().filter(|app| !app.is_empty()).collect(),
+    })
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Options {
     pub hostname: String,
@@ -37,9 +60,12 @@ pub struct Options {
     pub log_level: String,
     pub dns_cache_time: u64,
     pub trusted_dns: String,
-    pub untrusted_dns: String,
-    #[serde(default)]
-    pub selected_app: String,
+    #[serde(
+        default,
+        alias = "selected_app",
+        deserialize_with = "deserialize_selected_apps"
+    )]
+    pub selected_apps: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -162,10 +188,9 @@ fn start_vpn(options: Options, window: WebviewWindow) {
     if let Ok(mut state) = window.state::<VpnState>().inner().write() {
         state.options = options;
         if let Err(err) = platform::start_vpn(
-            &state.options.selected_app,
+            &state.options.selected_apps,
             state.options.mtu as i32,
             &state.options.trusted_dns,
-            &state.options.untrusted_dns,
         ) {
             log::error!("start_vpn failed:{:?}", err);
         }
@@ -357,7 +382,27 @@ mod tests {
     use super::{EventType, Options};
 
     #[test]
-    fn config_defaults_selected_app_for_old_config() {
+    fn config_defaults_selected_apps_for_old_config() {
+        let options: Options = serde_json::from_str(
+            r#"{
+                "hostname":"example.com",
+                "password":"secret",
+                "port":443,
+                "mtu":1500,
+                "pool_size":20,
+                "speed_update_ms":2000,
+                "log_level":"Info",
+                "dns_cache_time":600,
+                "trusted_dns":"8.8.8.8"
+            }"#,
+        )
+        .unwrap();
+
+        assert!(options.selected_apps.is_empty());
+    }
+
+    #[test]
+    fn config_migrates_old_selected_app_string() {
         let options: Options = serde_json::from_str(
             r#"{
                 "hostname":"example.com",
@@ -369,14 +414,37 @@ mod tests {
                 "log_level":"Info",
                 "dns_cache_time":600,
                 "trusted_dns":"8.8.8.8",
-                "untrusted_dns":"114.114.114.114"
+                "selected_app":"com.google.android.youtube"
             }"#,
         )
         .unwrap();
 
-        assert_eq!(options.selected_app, "");
+        assert_eq!(options.selected_apps, vec!["com.google.android.youtube"]);
     }
 
+    #[test]
+    fn config_reads_selected_apps_array() {
+        let options: Options = serde_json::from_str(
+            r#"{
+                "hostname":"example.com",
+                "password":"secret",
+                "port":443,
+                "mtu":1500,
+                "pool_size":20,
+                "speed_update_ms":2000,
+                "log_level":"Info",
+                "dns_cache_time":600,
+                "trusted_dns":"8.8.8.8",
+                "selected_apps":["com.google.android.youtube","com.google.android.gms"]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            options.selected_apps,
+            vec!["com.google.android.youtube", "com.google.android.gms"]
+        );
+    }
     #[test]
     fn open_config_event_name_is_stable() {
         assert_eq!(EventType::OpenConfig.to_str(), "open_config");

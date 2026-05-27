@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io::{ErrorKind, Write},
     net::{Shutdown, SocketAddr},
     sync::Arc,
@@ -7,10 +7,7 @@ use std::{
 };
 
 use bytes::BytesMut;
-use mio::{
-    net::{TcpStream, UdpSocket},
-    Token,
-};
+use mio::{net::TcpStream, Token};
 use rustls::{ClientConfig, ClientConnection, Connection};
 use rustls_pki_types::ServerName;
 use smoltcp::{iface::SocketHandle, socket::udp::Socket, wire::IpEndpoint};
@@ -38,11 +35,8 @@ pub struct DnsServer {
     trusted_rbuffer: BytesMut,
     trusted_lbuffer: BytesMut,
     trusted_addr: SocketAddr,
-    blocked_domains: HashSet<String>,
     store: HashMap<String, QueryResult>,
-    untrusted: UdpSocket,
     buffer: Vec<u8>,
-    untrusted_addr: SocketAddr,
     dns_cache_time: u64,
     pub pass: String,
 }
@@ -60,14 +54,11 @@ impl DnsServer {
         hostname: ServerName<'static>,
         listener: SocketHandle,
         trusted_addr: SocketAddr,
-        untrusted_addr: SocketAddr,
         dns_cache_time: u64,
         mtu: usize,
         pass: String,
-        blocked_domains: HashSet<String>,
     ) -> types::Result<DnsServer> {
         let trusted = new_tls_conn(server_addr, config.clone(), hostname.clone(), &pass)?;
-        let untrusted = UdpSocket::bind("0.0.0.0:0".parse().unwrap())?;
         Ok(DnsServer {
             server_addr,
             config,
@@ -77,22 +68,11 @@ impl DnsServer {
             trusted_rbuffer: Default::default(),
             trusted_lbuffer: Default::default(),
             trusted_addr,
-            blocked_domains,
             store: Default::default(),
-            untrusted,
             buffer: vec![0u8; mtu],
-            untrusted_addr,
             dns_cache_time,
             pass,
         })
-    }
-
-    pub fn add_domain(&mut self, domain: String) {
-        self.blocked_domains.insert(domain);
-    }
-
-    pub fn del_domain(&mut self, domain: &String) {
-        self.blocked_domains.remove(domain);
     }
 
     fn do_request(&mut self, device: &mut VpnDevice) {
@@ -128,19 +108,11 @@ impl DnsServer {
                     };
 
                     if renew {
-                        if self.is_blocked(&name) {
-                            if !self.query_trusted(data) {
-                                log::error!("send to trusted dns failed");
-                                continue;
-                            }
-                            log::info!("domain:{} is blocked", name);
-                        } else {
-                            if let Err(err) = self.untrusted.send_to(data, self.untrusted_addr) {
-                                log::error!("send to poisoned dns failed:{}", err);
-                                continue;
-                            }
-                            log::info!("domain:{} is not blocked", name);
+                        if !self.query_trusted(data) {
+                            log::error!("send to trusted dns failed");
+                            continue;
                         }
+                        log::info!("send domain:{} to trusted dns", name);
                         if respond {
                             self.add_request(key, endpoint, message.id());
                         }
@@ -217,21 +189,6 @@ impl DnsServer {
                 }
             }
             self.trusted_rbuffer.unsplit(trusted_rbuffer);
-        }
-    }
-
-    fn do_untrusted_response(&mut self, device: &mut VpnDevice) {
-        while let Ok((len, from)) = self.untrusted.recv_from(self.buffer.as_mut_slice()) {
-            let data = &self.buffer.as_slice()[..len];
-            if let Ok(message) = Message::from_bytes(data) {
-                log::info!("get response from untrusted");
-                self.dispatch_message(
-                    message,
-                    device.get_udp_socket_mut(self.listener, WakerMode::None),
-                );
-            } else {
-                log::error!("invalid response message received from {}", from);
-            }
         }
     }
 
@@ -368,22 +325,6 @@ impl DnsServer {
         name + "|" + query.query_type().to_string().as_str()
     }
 
-    fn is_blocked(&self, name: &str) -> bool {
-        let split: Vec<_> = name.split(".").collect();
-        let len = if name.ends_with(".") {
-            split.len() - 1
-        } else {
-            split.len()
-        };
-        for i in 0..(len - 1) {
-            let name = split.as_slice()[i..len].join(".");
-            log::info!("test domain:{}", name);
-            if self.blocked_domains.contains(name.as_str()) {
-                return true;
-            }
-        }
-        false
-    }
     fn add_request(&mut self, name: String, address: IpEndpoint, id: u16) {
         let result = if let Some(result) = self.store.get_mut(&name) {
             result
@@ -404,7 +345,6 @@ impl DnsServer {
     pub fn ready(&mut self, device: &mut VpnDevice) {
         self.do_request(device);
         self.do_trusted_response(device);
-        self.do_untrusted_response(device);
     }
 }
 

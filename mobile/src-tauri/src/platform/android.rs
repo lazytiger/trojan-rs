@@ -23,8 +23,9 @@ use jni::{
 };
 
 use crate::{
-    emit_event, types, InstalledApp,
+    emit_event, types,
     types::{EventType, VpnError, VpnStatus},
+    InstalledApp,
 };
 
 struct AndroidContext {
@@ -241,33 +242,19 @@ pub fn init_log(log_level: &String) {
     android_logger::init_once(config);
 }
 
-pub fn start_vpn(
-    app: impl AsRef<str>,
-    mtu: i32,
-    trusted_dns: impl AsRef<str>,
-    untrusted_dns: impl AsRef<str>,
-) -> Result<(), VpnError> {
-    log::info!(
-        "start vpn proxy for app:{} mtu:{}",
-        app.as_ref(),
-        mtu
-    );
+pub fn start_vpn(apps: &[String], mtu: i32, trusted_dns: impl AsRef<str>) -> Result<(), VpnError> {
+    let apps_json = serde_json::to_string(apps)?;
+    log::info!("start vpn proxy for apps:{} mtu:{}", apps_json, mtu);
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
-    let app = env.new_string(app.as_ref())?;
+    let apps = env.new_string(apps_json)?;
     let trusted_dns = env.new_string(trusted_dns.as_ref())?;
-    let untrusted_dns = env.new_string(untrusted_dns.as_ref())?;
     env.call_static_method(
         "com/bmshi/router/mobile/MainActivity",
         "startVpn",
-        "(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V",
-        &[
-            (&app).into(),
-            mtu.into(),
-            (&trusted_dns).into(),
-            (&untrusted_dns).into(),
-        ],
+        "(Ljava/lang/String;ILjava/lang/String;)V",
+        &[(&apps).into(), mtu.into(), (&trusted_dns).into()],
     )?;
     Ok(())
 }
@@ -277,7 +264,12 @@ pub fn stop_vpn() -> Result<(), VpnError> {
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
-    env.call_static_method("com/bmshi/router/mobile/MainActivity", "stopVpn", "()V", &[])?;
+    env.call_static_method(
+        "com/bmshi/router/mobile/MainActivity",
+        "stopVpn",
+        "()V",
+        &[],
+    )?;
     Ok(())
 }
 
@@ -400,7 +392,12 @@ pub fn sync_data() -> Result<(), VpnError> {
     let (context, lock) = get_context()?;
     let mut env = context.jvm.attach_current_thread()?;
     drop(lock);
-    env.call_static_method("com/bmshi/router/mobile/TrojanProxy", "syncData", "()V", &[])?;
+    env.call_static_method(
+        "com/bmshi/router/mobile/TrojanProxy",
+        "syncData",
+        "()V",
+        &[],
+    )?;
     Ok(())
 }
 

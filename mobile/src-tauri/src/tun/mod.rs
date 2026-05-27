@@ -64,11 +64,12 @@ fn prepare_idle_pool(
     let hostname = ServerName::try_from(options.hostname.clone())?;
     let mut root_store = RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+    let config =
+        ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
     let config = Arc::new(config);
     let mut pool = IdlePool::new(
         config.clone(),
@@ -121,24 +122,16 @@ pub fn run(fd: i32, dns: String, context: Context, running: Arc<AtomicBool>) -> 
     ));
 
     let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;
-    let untrusted_addr = (context.options.untrusted_dns.clone() + ":53").parse()?;
 
     let mut poll = Poll::new()?;
     let waker = Arc::new(Waker::new(poll.registry(), Token(RESOLVER))?);
-    let server_ip = utils::resolve(
-        context.options.hostname.as_str(),
-        (context.options.untrusted_dns.clone() + ":53").as_str(),
-    )?;
+    let server_ip = dns_lookup::lookup_host(context.options.hostname.as_str())?;
     if server_ip.is_empty() {
         return Err(VpnError::Resolve);
     }
     log::info!("server ip are {:?}", server_ip);
     let server_addr = SocketAddr::new(server_ip[0], context.options.port);
-    let mut resolver = DnsResolver::new(
-        waker,
-        Token(RESOLVER),
-        Some((context.options.untrusted_dns.clone() + ":53").into()),
-    );
+    let mut resolver = DnsResolver::new(waker, Token(RESOLVER), None);
     let (mut pool, config, hostname) =
         prepare_idle_pool(&poll, &resolver, &context.options, server_addr)?;
 
@@ -165,11 +158,9 @@ pub fn run(fd: i32, dns: String, context: Context, running: Arc<AtomicBool>) -> 
         hostname,
         listener,
         trusted_addr,
-        untrusted_addr,
         context.options.dns_cache_time,
         context.options.mtu,
         pass,
-        context.blocked_domains,
     )?;
 
     let mut events = Events::with_capacity(1024);

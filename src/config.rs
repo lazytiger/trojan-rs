@@ -155,13 +155,9 @@ pub struct WintunArgs {
     #[clap(long, default_value = "102400")]
     pub tcp_tx_buffer_size: usize,
 
-    /// Ip set in CIDR format to route through this tunnel
+    /// Ip set in CIDR format to bypass this tunnel when split route is enabled
     #[clap(long)]
     pub route_ipset: Option<String>,
-
-    /// Should reverse the ipset
-    #[clap(long)]
-    pub inverse_route: bool,
 
     /// DNS server address used for query trojan server ip
     #[clap(long)]

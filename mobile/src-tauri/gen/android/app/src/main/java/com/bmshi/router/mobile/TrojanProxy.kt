@@ -2,6 +2,7 @@ package com.bmshi.router.mobile
 
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -17,6 +18,7 @@ import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import org.json.JSONArray
 
 
 class TrojanProxy : VpnService() {
@@ -44,6 +46,7 @@ class TrojanProxy : VpnService() {
   }
 
   private var networkMonitorRunning = false
+  private var closed = false
 
   private val stopReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -80,6 +83,7 @@ class TrojanProxy : VpnService() {
   }
 
   override fun onCreate() {
+    instance = this
     val filter = IntentFilter(STOP_ACTION)
     ContextCompat.registerReceiver(
       this,
@@ -91,10 +95,9 @@ class TrojanProxy : VpnService() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Logger.info("start vpn service now")
-    val app = intent?.getStringExtra("app").orEmpty()
+    val apps = intent?.getStringExtra("apps").orEmpty()
     val mtu = intent?.getIntExtra("mtu", 1500) ?: 1500
     val trustedDns = intent?.getStringExtra("trusted_dns").orEmpty()
-    val untrustedDns = intent?.getStringExtra("untrusted_dns").orEmpty()
     val notifyChannel =
       NotificationChannelCompat.Builder("vpn", NotificationManager.IMPORTANCE_LOW).setName("vpn")
         .build()
@@ -104,8 +107,11 @@ class TrojanProxy : VpnService() {
     startForeground(NOTIFICATION_ID, notifyBuilder.build())
     Thread(Runnable {
       try {
-        if (app.isBlank()) {
-          Logger.error("selected app is empty")
+        val allowedApps = JSONArray(apps).let { array ->
+          (0 until array.length()).map { array.getString(it) }.filter { it.isNotBlank() }
+        }
+        if (allowedApps.isEmpty()) {
+          Logger.error("selected apps is empty")
           close()
           return@Runnable
         }
@@ -118,15 +124,15 @@ class TrojanProxy : VpnService() {
         builder.addRoute("0.0.0.0", 0)
           .addAddress("10.10.10.1", 30)
           .addDnsServer("10.10.11.1")
-          .addAllowedApplication(app)
-          .setSession("gfw")
+        for (app in allowedApps) {
+          builder.addAllowedApplication(app)
+        }
+        builder.setSession("gfw")
           .setMtu(mtu)
           .setBlocking(false)
-        addDnsServer(builder, trustedDns)
-        addDnsServer(builder, untrustedDns)
         val vpn = builder.establish()
         if (vpn != null) {
-          Logger.info("vpn established for app=$app mtu=$mtu")
+          Logger.info("vpn established for apps=$allowedApps mtu=$mtu")
           startNetworkMonitor()
           vpnFd = vpn
           onStart(vpn.fd, "10.10.11.1")
@@ -139,23 +145,33 @@ class TrojanProxy : VpnService() {
         close()
       }
     }).start()
-    return super.onStartCommand(intent, flags, startId)
-  }
-
-  private fun addDnsServer(builder: Builder, dns: String) {
-    if (dns.isNotBlank() && dns != "10.10.11.1") {
-      Logger.info("add dns server $dns")
-      builder.addDnsServer(dns)
-    }
+    return START_NOT_STICKY
   }
 
   override fun onDestroy() {
     super.onDestroy()
-    unregisterReceiver(stopReceiver)
+    try {
+      unregisterReceiver(stopReceiver)
+    } catch (e: Exception) {
+      Logger.info(e.toString())
+    }
     close()
+    if (instance === this) {
+      instance = null
+    }
+  }
+
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    Logger.info("app task removed, stop vpn service")
+    close()
+    super.onTaskRemoved(rootIntent)
   }
 
   fun close() {
+    if (closed) {
+      return
+    }
+    closed = true
     Logger.info("stop vpn now in TrojanProxy")
     onStop()
     stopNetworkMonitor()
@@ -209,10 +225,30 @@ class TrojanProxy : VpnService() {
   }
 
   companion object {
+    private var instance: TrojanProxy? = null
     private lateinit var vpnFd: ParcelFileDescriptor
     const val STOP_ACTION = "com.bmshi.router.mobile.STOP_VPN"
     const val NOTIFICATION_ID = 428571
 
+    @JvmStatic
+    fun updateNotification(content: String) {
+      val service = instance ?: return
+      try {
+        MainActivity.notifyBuilder.setContentText(content)
+        if (ContextCompat.checkSelfPermission(
+            service,
+            Manifest.permission.POST_NOTIFICATIONS
+          ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+          NotificationManagerCompat.from(service)
+            .notify(NOTIFICATION_ID, MainActivity.notifyBuilder.build())
+        } else {
+          Logger.warn("notification disabled")
+        }
+      } catch (e: Exception) {
+        Logger.warn(e.toString())
+      }
+    }
 
     @JvmStatic
     fun syncData() {

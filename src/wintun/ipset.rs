@@ -8,7 +8,7 @@ use std::{
 
 use smoltcp::wire::{IpAddress, IpEndpoint};
 
-use crate::{types::Result, wintun::route::route_add_with_if};
+use crate::wintun::route::RouteSpec;
 
 //TODO ipv6
 pub fn is_private(endpoint: IpEndpoint) -> bool {
@@ -48,7 +48,11 @@ impl Cidr {
         (self.ip, self.ip + !self.mask())
     }
     fn mask(&self) -> u32 {
-        !((1 << (32 - self.prefix)) - 1)
+        if self.prefix == 0 {
+            0
+        } else {
+            !((1 << (32 - self.prefix)) - 1)
+        }
     }
     fn ip_mask(&self) -> (Ipv4Addr, Ipv4Addr) {
         let ip = Ipv4Addr::from(self.ip);
@@ -94,15 +98,7 @@ impl IPSet {
             }
         });
         if inverse {
-            ipset.add_str("0.0.0.0/8");
-            ipset.add_str("10.0.0.0/8");
-            ipset.add_str("127.0.0.0/8");
-            ipset.add_str("169.254.0.0/16");
-            ipset.add_str("172.16.0.0/12");
-            ipset.add_str("192.168.0.0/16");
-            ipset.add_str("224.0.0.0/4");
-            ipset.add_str("240.0.0.0/4");
-            ipset.add_str("255.255.255.255/32");
+            ipset.add_reserved_ranges();
             Ok(!ipset)
         } else {
             ipset.build();
@@ -137,11 +133,24 @@ impl IPSet {
         self.data.sort();
     }
 
-    pub fn add_route(&self, index: u32) -> Result<()> {
-        for item in &self.data {
-            route_add_with_if(item.ip, item.mask(), 0, index)?;
-        }
-        Ok(())
+    pub fn route_specs_with_gateway(&self, gateway: u32, index: u32, routes: &mut Vec<RouteSpec>) {
+        routes.extend(
+            self.data
+                .iter()
+                .map(|item| RouteSpec::new(item.ip, item.mask(), gateway, index)),
+        );
+    }
+
+    pub fn add_reserved_ranges(&mut self) {
+        self.add_str("0.0.0.0/8");
+        self.add_str("10.0.0.0/8");
+        self.add_str("127.0.0.0/8");
+        self.add_str("169.254.0.0/16");
+        self.add_str("172.16.0.0/12");
+        self.add_str("192.168.0.0/16");
+        self.add_str("224.0.0.0/4");
+        self.add_str("240.0.0.0/4");
+        self.add_str("255.255.255.255/32");
     }
 }
 
@@ -151,16 +160,23 @@ impl Not for IPSet {
     fn not(mut self) -> Self::Output {
         self.data.sort();
         let mut set = Self::new();
-        let mut r = 0;
+        let mut next = 0u64;
         for item in &self.data {
             let (left, right) = item.range();
-            if left > 0 && r < u32::MAX {
-                set.add_range(r + 1, left - 1);
+            let left = left as u64;
+            let right = right as u64;
+            if left > next {
+                set.add_range(next as u32, (left - 1) as u32);
             }
-            r = right;
+            if right >= next {
+                next = right + 1;
+            }
+            if next > u32::MAX as u64 {
+                break;
+            }
         }
-        if r < u32::MAX {
-            set.add_range(r + 1, u32::MAX);
+        if next <= u32::MAX as u64 {
+            set.add_range(next as u32, u32::MAX);
         }
         set.data.sort();
         set
@@ -168,29 +184,26 @@ impl Not for IPSet {
 }
 
 /// check with https://www.ipaddressguide.com/cidr
-fn range_to_cidr(mut left: u32, mut right: u32) -> Vec<Cidr> {
+fn range_to_cidr(left: u32, right: u32) -> Vec<Cidr> {
     let mut cidrs = Vec::new();
     if left == right {
         cidrs.push(Cidr::new(left, 32));
         return cidrs;
     }
 
-    loop {
-        let shift = right.trailing_ones();
-        let prefix = 32 - shift;
-        let ip = right & !((1 << shift) - 1);
-        if left <= ip {
-            cidrs.push(Cidr::new(ip, prefix));
-            right = ip - 1;
+    let mut current = left as u64;
+    let end = right as u64;
+    while current <= end {
+        let mut block_bits = if current == 0 {
+            32
         } else {
-            break;
+            (current as u32).trailing_zeros()
+        };
+        while (1u64 << block_bits) > end - current + 1 {
+            block_bits -= 1;
         }
-    }
-    while left <= right {
-        let shift = left.trailing_zeros();
-        let prefix = 32 - shift;
-        cidrs.push(Cidr::new(left, prefix));
-        left += 1 << shift;
+        cidrs.push(Cidr::new(current as u32, 32 - block_bits));
+        current += 1u64 << block_bits;
     }
     cidrs.sort();
     cidrs
@@ -202,6 +215,72 @@ mod tests {
     use std::{fs::File, io::Write, net::Ipv4Addr, sync::Mutex, time::Instant};
 
     use crate::wintun::ipset::{range_to_cidr, IPSet};
+
+    fn contains(ipset: &IPSet, ip: &str) -> bool {
+        let ip: u32 = ip.parse::<Ipv4Addr>().unwrap().into();
+        ipset.data.iter().any(|item| {
+            let (left, right) = item.range();
+            left <= ip && ip <= right
+        })
+    }
+
+    fn china_ipset_from_apnic_fixture() -> IPSet {
+        let mut ipset = IPSet::new();
+        for line in include_str!("../../tests/fixtures/apnic-cn-ipv4.txt").lines() {
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with('#') {
+                ipset.add_str(line);
+            }
+        }
+        ipset.build();
+        ipset
+    }
+
+    fn assert_no_ranges_overlap(left: &IPSet, right: &IPSet) {
+        let mut i = 0;
+        let mut j = 0;
+        while i < left.data.len() && j < right.data.len() {
+            let (left_start, left_end) = left.data[i].range();
+            let (right_start, right_end) = right.data[j].range();
+            assert!(
+                left_end < right_start || right_end < left_start,
+                "overlap found: {}/{} intersects {}/{}",
+                Ipv4Addr::from(left.data[i].ip),
+                left.data[i].prefix,
+                Ipv4Addr::from(right.data[j].ip),
+                right.data[j].prefix
+            );
+            if left_end < right_end {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn test_inverse_apnic_china_ipv4_excludes_every_china_range() {
+        let china = china_ipset_from_apnic_fixture();
+        assert!(china.data.len() > 8000);
+
+        let mut inverse = !china_ipset_from_apnic_fixture();
+        inverse.build();
+
+        assert_no_ranges_overlap(&china, &inverse);
+    }
+
+    #[test]
+    fn test_ipset_reverse_ignores_nested_ranges() {
+        let mut ipset = IPSet::new();
+        ipset.add_str("1.0.0.0/8");
+        ipset.add_str("1.1.0.0/16");
+        ipset.add_str("2.0.0.0/8");
+
+        let reversed = !ipset;
+
+        assert!(!contains(&reversed, "1.2.3.4"));
+        assert!(contains(&reversed, "3.0.0.1"));
+    }
 
     #[test]
     fn test_names() {

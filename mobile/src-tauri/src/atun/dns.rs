@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
@@ -11,7 +11,6 @@ use rustls_pki_types::ServerName;
 use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::UdpSocket,
     spawn,
     sync::mpsc::Sender,
 };
@@ -45,17 +44,6 @@ pub async fn start_trust_response(
     }
 }
 
-pub async fn start_distrust_response(sender: Sender<Response>) -> Option<Arc<UdpSocket>> {
-    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0").await {
-        let socket = Arc::new(socket);
-        spawn(do_distrust_response(sender, socket.clone()));
-        Some(socket)
-    } else {
-        log::error!("create udp socket failed");
-        None
-    }
-}
-
 fn get_message_key(message: &Message) -> String {
     let query = &message.queries()[0];
     let name = query.name().to_utf8();
@@ -74,11 +62,8 @@ pub async fn start_dns(
     server_name: ServerName<'static>,
     request: Arc<BytesMut>,
     trusted_addr: SocketAddr,
-    distrusted_addr: SocketAddr,
-    blocked_domains: HashSet<String>,
 ) {
     let (sender, mut receiver) = tokio::sync::mpsc::channel(1024);
-    let mut distrust = start_distrust_response(sender.clone()).await.unwrap();
     let mut trust = start_trust_response(
         sender.clone(),
         config.clone(),
@@ -114,21 +99,12 @@ pub async fn start_dns(
                             .respond(&mut local, source, message.id())
                             .await
                         {
-                            let name = message.query().unwrap().name().to_utf8();
-                            if is_blocked(&blocked_domains, &name) {
-                                let mut header = BytesMut::new();
-                                UdpAssociate::generate(
-                                    &mut header,
-                                    &trusted_addr,
-                                    data.len() as u16,
-                                );
-                                if trust.write_all(header.as_ref()).await.is_err()
-                                    || trust.write_all(data.as_ref()).await.is_err()
-                                {
-                                    let _ = trust.shutdown().await;
-                                }
-                            } else {
-                                let _ = distrust.send_to(data.as_ref(), distrusted_addr).await;
+                            let mut header = BytesMut::new();
+                            UdpAssociate::generate(&mut header, &trusted_addr, data.len() as u16);
+                            if trust.write_all(header.as_ref()).await.is_err()
+                                || trust.write_all(data.as_ref()).await.is_err()
+                            {
+                                let _ = trust.shutdown().await;
                             }
                         }
                     }
@@ -146,9 +122,6 @@ pub async fn start_dns(
                         .or_insert_with(|| DnsItem::new(m.clone()))
                         .notify(m, &mut local)
                         .await;
-                }
-                Some(Response::DistrustClosed) => {
-                    distrust = start_distrust_response(sender.clone()).await.unwrap();
                 }
                 Some(Response::TrustClosed) => {
                     trust = start_trust_response(
@@ -169,29 +142,6 @@ pub async fn start_dns(
         }
     }
     panic!("dns routine quit");
-}
-
-pub async fn do_distrust_response(sender: Sender<Response>, socket: Arc<UdpSocket>) {
-    let mut buffer = vec![0u8; 1500];
-    loop {
-        match socket.recv(buffer.as_mut_slice()).await {
-            Ok(n) => {
-                if let Ok(message) = Message::from_bytes(&buffer.as_slice()[..n]) {
-                    if let Err(err) = sender.send(Response::Message(message)).await {
-                        log::error!("sender closed with error:{}", err);
-                        break;
-                    }
-                } else {
-                    log::error!("parse dns response from distrusted failed");
-                }
-            }
-            Err(err) => {
-                log::error!("recv from untrusted socket failed:{}", err);
-                break;
-            }
-        }
-    }
-    let _ = sender.send(Response::DistrustClosed).await;
 }
 
 pub async fn do_trust_response(sender: Sender<Response>, mut remote: TlsClientReadHalf) {
@@ -227,27 +177,9 @@ pub async fn do_trust_response(sender: Sender<Response>, mut remote: TlsClientRe
     let _ = sender.send(Response::TrustClosed).await;
 }
 
-fn is_blocked(blocked: &HashSet<String>, name: &str) -> bool {
-    let split: Vec<_> = name.split(".").collect();
-    let len = if name.ends_with(".") {
-        split.len() - 1
-    } else {
-        split.len()
-    };
-    for i in 0..(len - 1) {
-        let name = split.as_slice()[i..len].join(".");
-        if blocked.contains(name.as_str()) {
-            log::info!("test domain:{} blocked", name);
-            return true;
-        }
-    }
-    false
-}
-
 pub enum Response {
     Message(Message),
     TrustClosed,
-    DistrustClosed,
 }
 
 pub struct DnsItem {

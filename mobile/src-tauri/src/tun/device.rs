@@ -250,8 +250,14 @@ impl<'a> VpnDevice<'a> {
 }
 
 impl<'b> Device for VpnDevice<'b> {
-    type RxToken<'a> = RxToken where Self: 'a;
-    type TxToken<'a> = TxToken<'a> where Self: 'a;
+    type RxToken<'a>
+        = RxToken
+    where
+        Self: 'a;
+    type TxToken<'a>
+        = TxToken<'a>
+    where
+        Self: 'a;
 
     fn receive(
         &mut self,
