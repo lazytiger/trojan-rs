@@ -9,6 +9,7 @@
     "serve:tauri": "set VITE_NETWORK_PROCESSOR=tauri && vite",
     "serve:native": "tauri dev",
     "build": "set VITE_NETWORK_PROCESSOR=tauri && vite build && tauri build",
+    "build:macos": "VITE_NETWORK_PROCESSOR=tauri vite build && tauri build --config src-tauri/tauri.macos.conf.json",
     "preview": "vite preview"
   },
   "dependencies": {

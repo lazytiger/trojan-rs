@@ -38,7 +38,7 @@ jobs:
 
       - name: Build trojan-client macOS app
         working-directory: trojan-client
-        run: npm run build
+        run: npm run build:macos
 
       - name: Upload macOS bundles
         uses: actions/upload-artifact@v4
