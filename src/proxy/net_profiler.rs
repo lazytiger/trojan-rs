@@ -113,7 +113,7 @@ async fn start_check_routine(
 async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: String) {
     log::info!("start response routine");
     cfg_if::cfg_if! {
-        if #[cfg(unix)] {
+        if #[cfg(target_os = "linux")] {
             let mut session:ipset::Session<ipset::types::HashIp> = ipset::Session::new(name);
             if let Err(err) = session.flush() {
                 log::error!("flush ipset failed:{:?}", err);
@@ -128,7 +128,7 @@ async fn start_response(mut receiver: UnboundedReceiver<(IpAddr, bool)>, name: S
         };
         log::warn!("{} should be bypassed", ip);
         cfg_if::cfg_if! {
-            if #[cfg(unix)] {
+            if #[cfg(target_os = "linux")] {
                 if let Err(err) = if add {
                     session.add(ip, &[])
                 } else {
@@ -152,7 +152,7 @@ async fn start_request(
     let config = ConfigBuilder::default().kind(ICMP::V4).build();
     let client = Arc::new(Client::new(&config).unwrap());
     cfg_if::cfg_if! {
-        if #[cfg(unix)] {
+        if #[cfg(target_os = "linux")] {
             let mut session:ipset::Session<ipset::types::HashIp> = ipset::Session::new(name);
         }
     }
@@ -164,7 +164,7 @@ async fn start_request(
             break;
         };
         cfg_if::cfg_if! {
-            if #[cfg(unix)] {
+            if #[cfg(target_os = "linux")] {
                 if let Ok(true) = session.test(ip) {
                     if let Err(err) = sender.send((ip, u16::MAX, u8::MAX)) {
                         log::error!("send local ping for {} failed:{}", ip, err);
