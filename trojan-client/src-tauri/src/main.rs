@@ -19,7 +19,7 @@ use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{
     image::Image,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     path::BaseDirectory,
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, WindowEvent, Wry,
@@ -30,6 +30,7 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
+#[cfg(windows)]
 use wintool::adapter::{get_dns_server, get_main_adapter_ip};
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -97,6 +98,7 @@ impl TrojanProxy {
         }
     }
 
+    #[cfg(windows)]
     fn update_dns(&mut self) -> Result<()> {
         let ret = get_dns_server();
         if ret.is_none() {
@@ -116,6 +118,13 @@ impl TrojanProxy {
         self.default_dns = dns;
         self.explicit_dns = set;
         Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn update_dns(&mut self) -> Result<()> {
+        Err(Error::Custom(
+            "VPN mode is not supported on this platform yet".to_string(),
+        ))
     }
 
     fn get_speed(&mut self) -> Result<(f32, f32)> {
@@ -438,7 +447,6 @@ fn init_config() -> Result<Config> {
     Ok(config)
 }
 
-
 fn load_domains() -> Result<Vec<String>> {
     let path = Path::new("config\\domain.txt");
     if !path.exists() {
@@ -517,6 +525,7 @@ fn remove_domain(key: String) {
         Err(err) => log::error!("load domains failed:{:?}", err),
     }
 }
+#[cfg(windows)]
 fn set_dns_server(state: &TrojanProxy) {
     if state.explicit_dns {
         wintool::adapter::set_dns_server(state.default_dns.clone());
@@ -524,6 +533,9 @@ fn set_dns_server(state: &TrojanProxy) {
         wintool::adapter::set_dns_server("".into());
     }
 }
+
+#[cfg(not(windows))]
+fn set_dns_server(_state: &TrojanProxy) {}
 
 fn quit_app(app: &AppHandle<Wry>) {
     let state: State<TrojanState> = app.state();
@@ -574,7 +586,15 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![start, init, stop, update_speed, search_domain, add_domain, remove_domain])
+        .invoke_handler(tauri::generate_handler![
+            start,
+            init,
+            stop,
+            update_speed,
+            search_domain,
+            add_domain,
+            remove_domain
+        ])
         .plugin(
             tauri_plugin_log::Builder::default()
                 .targets([
