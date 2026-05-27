@@ -1,36 +1,50 @@
 use std::{
     fs::OpenOptions,
     io::Write,
-    net::{Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use async_smoltcp::{Tun, TunDevice};
 use bytes::BytesMut;
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::ServerName;
 use tokio::{net::TcpStream, runtime::Runtime, spawn, sync::mpsc::channel};
 use tokio_rustls::{client::TlsStream, TlsConnector};
-use wintun::Adapter;
-
-use async_smoltcp::TunDevice;
 use types::Result;
+
+#[cfg(windows)]
+use std::net::Ipv4Addr;
+#[cfg(windows)]
 use wintool::adapter::get_main_adapter_gwif;
+#[cfg(windows)]
+use wintun::Adapter;
 
 use crate::{
     awintun::{
         tcp::start_tcp,
-        tun::Wintun,
         udp::{run_udp_dispatch, start_udp},
     },
     config::OPTIONS,
     proto::{TrojanRequest, UDP_ASSOCIATE},
     types,
+};
+
+#[cfg(target_os = "macos")]
+use crate::osxtun::{
+    route::{build_cleanup_commands, default_gateway, run_commands, RouteConfig, RouteGuard},
+    tun::OsxTun,
+};
+#[cfg(windows)]
+use crate::{
+    awintun::tun::Wintun,
     types::TrojanError,
     wintun::{apply_ipset, route_add_with_if},
 };
 
 mod tcp;
+#[cfg(windows)]
 mod tun;
 mod udp;
 
@@ -52,6 +66,7 @@ pub fn run() -> Result<()> {
     runtime.block_on(async_run())
 }
 
+#[cfg(windows)]
 async fn async_run() -> Result<()> {
     log::info!("dll:{}", OPTIONS.wintun_args().wintun);
     let wintun = unsafe { wintun::load_from_path(&OPTIONS.wintun_args().wintun)? };
@@ -78,6 +93,52 @@ async fn async_run() -> Result<()> {
         apply_ipset(file, index, main_gw, main_index)?;
     }
 
+    let server_addr = *OPTIONS.back_addr.as_ref().unwrap();
+    let mtu = OPTIONS.wintun_args().mtu;
+    let mut device = TunDevice::new(Wintun::new(mtu, session));
+    device.add_black_ip(server_addr.ip());
+    run_device(device).await
+}
+
+#[cfg(target_os = "macos")]
+async fn async_run() -> Result<()> {
+    let server_addr = *OPTIONS.back_addr.as_ref().unwrap();
+    let server_ip = match server_addr.ip() {
+        std::net::IpAddr::V4(ip) => ip,
+        std::net::IpAddr::V6(_) => {
+            return Err(types::TrojanError::Custom(
+                "osxtun only supports IPv4 server route now".to_string(),
+            ))
+        }
+    };
+    let mtu = OPTIONS.wintun_args().mtu;
+    let tun = OsxTun::create(mtu)?;
+    let interface = tun.interface_name().to_string();
+    let route_config = RouteConfig {
+        interface: interface.clone(),
+        gateway: default_gateway()?,
+        server_ip,
+        tun_addr: "10.255.0.2".parse()?,
+        tun_peer: "10.255.0.1".parse()?,
+        mtu,
+    };
+    let _ = run_commands(&build_cleanup_commands(&route_config));
+    let _route_guard = RouteGuard::apply(route_config)?;
+    log::warn!(
+        "osxtun started on {} with server:{}",
+        interface,
+        server_addr
+    );
+    let mut device = TunDevice::new(tun);
+    device.add_black_ip(server_addr.ip());
+    device.allow_private(true);
+    run_device(device).await
+}
+
+async fn run_device<T>(mut device: TunDevice<'_, T>) -> Result<()>
+where
+    T: Tun + Clone,
+{
     let server_name: ServerName = OPTIONS.wintun_args().hostname.as_str().try_into()?;
 
     let mut root_store = RootCertStore::empty();
@@ -88,11 +149,6 @@ async fn async_run() -> Result<()> {
             .with_root_certificates(root_store)
             .with_no_client_auth(),
     );
-
-    let server_addr = *OPTIONS.back_addr.as_ref().unwrap();
-    let mtu = OPTIONS.wintun_args().mtu;
-    let mut device = TunDevice::new(Wintun::new(mtu, session));
-    device.add_black_ip(server_addr.ip());
 
     let empty: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let mut header = BytesMut::new();
@@ -108,7 +164,7 @@ async fn async_run() -> Result<()> {
         socket_receiver,
         server_name.clone(),
         connector.clone(),
-        mtu,
+        OPTIONS.wintun_args().mtu,
         udp_header.clone(),
         close_receiver,
         close_sender.clone(),

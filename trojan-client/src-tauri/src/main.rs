@@ -120,7 +120,14 @@ impl TrojanProxy {
         Ok(())
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    fn update_dns(&mut self) -> Result<()> {
+        self.default_dns = self.config.trust_dns.clone();
+        self.explicit_dns = true;
+        Ok(())
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
     fn update_dns(&mut self) -> Result<()> {
         Err(Error::Custom(
             "VPN mode is not supported on this platform yet".to_string(),
@@ -128,10 +135,10 @@ impl TrojanProxy {
     }
 
     fn get_speed(&mut self) -> Result<(f32, f32)> {
-        let metadata = std::fs::metadata("logs\\wintun.status")?;
+        let metadata = std::fs::metadata(tun_status_file())?;
         let mod_time = metadata.modified()?;
         if mod_time > self.last_update {
-            let mut file = File::open("logs\\wintun.status")?;
+            let mut file = File::open(tun_status_file())?;
             let mut content = String::new();
             let _ = file.read_to_string(&mut content)?;
             let mut split = content.split(' ');
@@ -150,6 +157,26 @@ impl TrojanProxy {
         }
         Ok((self.rx_speed, self.tx_speed))
     }
+}
+
+#[cfg(windows)]
+fn tun_log_file() -> &'static str {
+    "logs\\wintun.log"
+}
+
+#[cfg(target_os = "macos")]
+fn tun_log_file() -> &'static str {
+    "logs/osxtun.log"
+}
+
+#[cfg(windows)]
+fn tun_status_file() -> &'static str {
+    "logs\\wintun.status"
+}
+
+#[cfg(target_os = "macos")]
+fn tun_status_file() -> &'static str {
+    "logs/osxtun.status"
 }
 
 type TrojanState = Arc<Mutex<TrojanProxy>>;
@@ -176,11 +203,13 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
             let config = state.lock().unwrap().config.clone();
             let default_dns = state.lock().unwrap().default_dns.clone() + ":53";
             let pool_size = config.pool_size.to_string();
+            #[cfg(windows)]
             let config_ipset = window
                 .app_handle()
                 .path()
                 .resolve("config/ipset.txt", BaseDirectory::Resource)
                 .unwrap();
+            #[cfg(windows)]
             let config_wintun = window
                 .app_handle()
                 .path()
@@ -188,29 +217,35 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                 .unwrap();
             let mut args = vec![
                 "-l",
-                "logs\\wintun.log",
+                tun_log_file(),
                 "-L",
                 config.log_level_str(),
                 "-a",
                 "127.0.0.1:60080",
                 "-p",
                 config.server_auth.as_str(),
+                #[cfg(windows)]
                 "awintun",
+                #[cfg(target_os = "macos")]
+                "osxtun",
                 "-n",
                 config.iface_name.as_str(),
                 "-H",
                 config.server_domain.as_str(),
                 "-s",
-                "logs\\wintun.status",
+                tun_status_file(),
                 "--dns-server-addr",
                 default_dns.as_str(),
                 "-P",
                 pool_size.as_str(),
-                "-w",
-                config_wintun.to_str().unwrap(),
             ];
-            args.push("--route-ipset");
-            args.push(config_ipset.to_str().unwrap());
+            #[cfg(windows)]
+            {
+                args.push("-w");
+                args.push(config_wintun.to_str().unwrap());
+                args.push("--route-ipset");
+                args.push(config_ipset.to_str().unwrap());
+            }
             log::info!("{:?}", args);
             let mut rxs = HashMap::new();
             match window
@@ -231,6 +266,7 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                     return;
                 }
             };
+            #[cfg(windows)]
             if state.lock().unwrap().config.enable_dns {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 let dns_listen = config.dns_listen.clone() + ":53";
