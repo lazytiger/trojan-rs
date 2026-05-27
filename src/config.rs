@@ -93,6 +93,8 @@ pub enum Mode {
         about = "run in asynchronous windows tun mode"
     )]
     Awintun(WintunArgs),
+    #[clap(version, name = "osxtun", about = "run in macOS utun mode")]
+    Osxtun(WintunArgs),
     #[clap(version, name = "dns", about = "run in dns mode")]
     Dns(DnsArgs),
 }
@@ -337,8 +339,8 @@ impl Opts {
     #[allow(dead_code)]
     pub fn wintun_args(&self) -> &WintunArgs {
         match self.mode {
-            Mode::Wintun(ref args) | Mode::Awintun(ref args) => args,
-            _ => panic!("not in wintun mode"),
+            Mode::Wintun(ref args) | Mode::Awintun(ref args) | Mode::Osxtun(ref args) => args,
+            _ => panic!("not in tun mode"),
         }
     }
 
@@ -416,7 +418,7 @@ impl Opts {
                 let port = args.port;
                 self.resolve(hostname, port, None);
             }
-            Mode::Wintun(ref args) | Mode::Awintun(ref args) => {
+            Mode::Wintun(ref args) | Mode::Awintun(ref args) | Mode::Osxtun(ref args) => {
                 let hostname = args.hostname.clone();
                 let port = args.port;
                 let dns_server = args.dns_server_addr.clone();
@@ -520,4 +522,36 @@ lazy_static::lazy_static! {
         opts.setup();
         opts
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Mode, Opts};
+
+    #[test]
+    fn parses_osxtun_mode_with_wintun_args() {
+        let opts = Opts::try_parse_from([
+            "trojan",
+            "-a",
+            "127.0.0.1:60080",
+            "-p",
+            "password",
+            "osxtun",
+            "-n",
+            "utun",
+            "-H",
+            "example.com",
+        ])
+        .unwrap();
+
+        match opts.mode {
+            Mode::Osxtun(args) => {
+                assert_eq!(args.name, "utun");
+                assert_eq!(args.hostname, "example.com");
+            }
+            _ => panic!("expected osxtun mode"),
+        }
+    }
 }

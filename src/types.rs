@@ -27,6 +27,8 @@ pub enum TrojanError {
     #[from(ignore)]
     Winapi(String),
     #[from(ignore)]
+    Custom(String),
+    #[from(ignore)]
     TxBreak(Option<std::io::Error>),
     #[from(ignore)]
     RxBreak(Option<std::io::Error>),

@@ -15,12 +15,17 @@ cfg_if::cfg_if! {
         mod dns;
         mod wintun;
         mod awintun;
+    } else if #[cfg(target_os = "macos")] {
+        mod awintun;
+        mod osxtun;
     }
 }
 mod aproxy;
 mod aserver;
 mod async_utils;
 mod idle_pool;
+#[cfg(all(test, not(target_os = "macos")))]
+mod osxtun;
 mod proto;
 mod proxy;
 mod resolver;
@@ -82,17 +87,27 @@ fn main() {
                     log::warn!("trojan started in wintun mode with server:{}", OPTIONS.back_addr.as_ref().unwrap());
                     wintun::run()
                 } else {
-                    panic!("trojan in wintun mode not supported on non-windows platform");
+                    panic!("trojan in wintun mode only supported on Windows");
                 }
             }
         }
         Mode::Awintun(_) => {
             cfg_if::cfg_if! {
                 if #[cfg(windows)] {
-                    log::warn!("trojan started in wintun mode with server:{}", OPTIONS.back_addr.as_ref().unwrap());
+                    log::warn!("trojan started in awintun mode with server:{}", OPTIONS.back_addr.as_ref().unwrap());
                     awintun::run()
                 } else {
-                    panic!("trojan in wintun mode not supported on non-windows platform");
+                    panic!("trojan in awintun mode only supported on Windows");
+                }
+            }
+        }
+        Mode::Osxtun(_) => {
+            cfg_if::cfg_if! {
+                if #[cfg(target_os = "macos")] {
+                    log::warn!("trojan started in osxtun mode with server:{}", OPTIONS.back_addr.as_ref().unwrap());
+                    awintun::run()
+                } else {
+                    panic!("trojan in osxtun mode only supported on macOS");
                 }
             }
         }
@@ -104,7 +119,7 @@ fn main() {
                     dns::set_dns_server("".into());
                     ret
                 } else {
-                    panic!("trojan in dns mode not supported on non-windows platform");
+                    panic!("trojan in dns mode only supported on Windows");
                 }
             }
         }
