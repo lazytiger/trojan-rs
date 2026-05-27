@@ -15,7 +15,9 @@
       "libs/trojan"
     ],
     "icon": [
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.icns",
+      "icons/icon.png"
     ],
     "windows": {
       "certificateThumbprint": null,
@@ -46,7 +48,7 @@
   "productName": "trojan-client",
   "mainBinaryName": "app",
   "version": "0.4.0",
-  "identifier": "com.bmshi.trojan.windows",
+  "identifier": "com.bmshi.trojan.client",
   "plugins": {},
   "app": {
     "windows": [

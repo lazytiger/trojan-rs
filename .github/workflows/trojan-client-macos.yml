@@ -1,0 +1,50 @@
+name: Trojan Client macOS
+
+on:
+  push:
+    branches:
+      - master
+      - feature/macos-trojan-client
+  pull_request:
+    branches:
+      - master
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: trojan-client/package-lock.json
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install frontend dependencies
+        working-directory: trojan-client
+        run: npm ci
+
+      - name: Build trojan sidecar
+        run: cargo build --release
+
+      - name: Build trojan-client macOS app
+        working-directory: trojan-client
+        run: npm run build
+
+      - name: Upload macOS bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: trojan-client-macos
+          path: |
+            trojan-client/src-tauri/target/release/bundle/macos/*.app
+            trojan-client/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
