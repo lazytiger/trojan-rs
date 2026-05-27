@@ -5,7 +5,9 @@ import { listen } from "@tauri-apps/api/event";
 import {
   addSelectedApp,
   filterAvailableApps,
+  getInstalledGmsPackages,
   removeSelectedApp,
+  setGmsAppsSelected,
 } from "./appSelection.js";
 
 const VPN_PERMISSION = "android.permission.BIND_VPN_SERVICE";
@@ -55,6 +57,34 @@ export default {
   computed: {
     availableApps() {
       return filterAvailableApps(this.apps, this.config.selected_apps);
+    },
+    installedGmsPackages() {
+      return getInstalledGmsPackages(this.apps);
+    },
+    gmsSelected: {
+      get() {
+        return (
+          this.installedGmsPackages.length > 0 &&
+          this.installedGmsPackages.every((packageName) =>
+            this.config.selected_apps.includes(packageName),
+          )
+        );
+      },
+      set(selected) {
+        this.config.selected_apps = setGmsAppsSelected(
+          this.config.selected_apps,
+          this.apps,
+          selected,
+        );
+      },
+    },
+    gmsIndeterminate() {
+      const selectedCount = this.installedGmsPackages.filter((packageName) =>
+        this.config.selected_apps.includes(packageName),
+      ).length;
+      return (
+        selectedCount > 0 && selectedCount < this.installedGmsPackages.length
+      );
     },
     selectedAppItems() {
       const appMap = new Map(this.apps.map((app) => [app.value, app]));
@@ -274,6 +304,14 @@ export default {
             label="可信DNS"
             variant="outlined"
           ></v-text-field>
+          <v-checkbox
+            v-model="gmsSelected"
+            :disabled="running || installedGmsPackages.length === 0"
+            :indeterminate="gmsIndeterminate"
+            density="compact"
+            hide-details
+            label="GMS三件套"
+          ></v-checkbox>
           <div class="selected-apps">
             <div class="selected-apps__title">Selected app</div>
             <v-list
