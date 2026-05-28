@@ -3,7 +3,7 @@ use std::{
     io::{ErrorKind, Read, Write},
     mem::ManuallyDrop,
     ops::Deref,
-    os::fd::{FromRawFd, OwnedFd},
+    os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
@@ -407,6 +407,18 @@ pub struct Session {
     show_info: bool,
 }
 
+struct RawTunFd(RawFd);
+
+impl AsRawFd for RawTunFd {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
+}
+
+pub struct TunReady {
+    fd: tokio::io::unix::AsyncFd<RawTunFd>,
+}
+
 pub struct Packet {
     data: Vec<u8>,
 }
@@ -422,6 +434,30 @@ impl Session {
                 show_info,
             }
         }
+    }
+
+    fn raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
+}
+
+impl TunReady {
+    pub fn new(session: &Session) -> std::io::Result<Self> {
+        Ok(Self {
+            fd: tokio::io::unix::AsyncFd::new(RawTunFd(session.raw_fd()))?,
+        })
+    }
+
+    pub async fn readable(&mut self) -> std::io::Result<()> {
+        let guard = self.fd.readable().await?;
+        drop(guard);
+        Ok(())
+    }
+
+    pub async fn clear_ready(&mut self) -> std::io::Result<()> {
+        let mut guard = self.fd.readable().await?;
+        guard.clear_ready();
+        Ok(())
     }
 }
 

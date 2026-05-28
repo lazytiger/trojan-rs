@@ -8,6 +8,6 @@ edition = "2021"
 [dependencies]
 smoltcp = { version = "0.13", features = [] }
 bytes = "1.11"
-tokio = { version = "1.52", features = [] }
+tokio = { version = "1.52", features = ["sync"] }
 tokio-util = "0.7"
 log = "0.4"

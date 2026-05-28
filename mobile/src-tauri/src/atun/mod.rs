@@ -4,14 +4,19 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use bytes::BytesMut;
 use rustls::{ClientConfig, ClientConnection, RootCertStore};
 use rustls_pki_types::ServerName;
 use sha2::{Digest, Sha224};
-use tokio::{runtime::Builder, spawn, sync::mpsc::channel};
+use tokio::{
+    runtime::Builder,
+    spawn,
+    sync::mpsc::channel,
+    time::{interval, MissedTickBehavior},
+};
 
 use async_rustls::TlsClientStream;
 use async_smoltcp::TunDevice;
@@ -52,6 +57,20 @@ fn digest_pass(pass: &String) -> String {
 
 fn show_info(level: &String) -> bool {
     level == "Debug" || level == "Info" || level == "Trace"
+}
+
+async fn wait_stack_delay(delay: Option<Duration>) {
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    } else {
+        std::future::pending::<()>().await;
+    }
+}
+
+enum PollTrigger {
+    TunReady,
+    DeviceWake,
+    StackTimer,
 }
 
 pub async fn async_run(
@@ -99,7 +118,7 @@ pub async fn async_run(
             .with_no_client_auth(),
     );
 
-    let mut device = TunDevice::new(session);
+    let mut device = TunDevice::new(session.clone());
     device.add_white_ip(dns_addr.ip());
 
     let trusted_addr = (context.options.trusted_dns.clone() + ":53").parse()?;
@@ -123,9 +142,60 @@ pub async fn async_run(
         close_sender.clone(),
     ));
 
-    let mut last_speed_time = Instant::now();
+    let mut tun_ready = platform::TunReady::new(&session)?;
+    let device_wake = device.notifier();
+    let speed_update_ms = (context.options.speed_update_ms as u64).max(1);
+    let mut speed_tick = interval(Duration::from_millis(speed_update_ms));
+    speed_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    speed_tick.tick().await;
+    let mut shutdown_tick = interval(Duration::from_millis(250));
+    shutdown_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    shutdown_tick.tick().await;
+    let mut maintenance_tick = interval(Duration::from_secs(1));
+    maintenance_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    maintenance_tick.tick().await;
+
     while running.load(Ordering::Relaxed) {
+        let stack_delay = device.poll_delay();
+        let poll_trigger = tokio::select! {
+            result = tun_ready.readable() => {
+                result?;
+                Some(PollTrigger::TunReady)
+            }
+            _ = device_wake.notified() => Some(PollTrigger::DeviceWake),
+            _ = wait_stack_delay(stack_delay) => Some(PollTrigger::StackTimer),
+            _ = speed_tick.tick() => {
+                let (rx_speed, tx_speed) = device.calculate_speed();
+                let (rx_speed, rx_unit) = get_speed_and_unit(rx_speed);
+                let (tx_speed, tx_unit) = get_speed_and_unit(tx_speed);
+                emit_event(
+                    EventType::UpdateSpeed,
+                    format!(
+                        "上行速度:{:.1}{}/s, 下行速度:{:.1}{}/s",
+                        rx_speed, rx_unit, tx_speed, tx_unit
+                    ),
+                )?;
+                None
+            }
+            _ = maintenance_tick.tick() => {
+                device.maintenance();
+                None
+            }
+            _ = shutdown_tick.tick() => None,
+        };
+
+        let Some(poll_trigger) = poll_trigger else {
+            continue;
+        };
+
+        if !running.load(Ordering::Relaxed) {
+            continue;
+        }
+
         let (tcp_streams, udp_sockets) = device.poll();
+        if matches!(poll_trigger, PollTrigger::TunReady) {
+            tun_ready.clear_ready().await?;
+        }
 
         for stream in tcp_streams {
             log::info!(
@@ -159,21 +229,6 @@ pub async fn async_run(
                 spawn(start_udp(socket, data_sender.clone(), close_sender.clone()));
             }
         }
-
-        if last_speed_time.elapsed().as_millis() >= context.options.speed_update_ms {
-            let (rx_speed, tx_speed) = device.calculate_speed();
-            let (rx_speed, rx_unit) = get_speed_and_unit(rx_speed);
-            let (tx_speed, tx_unit) = get_speed_and_unit(tx_speed);
-            emit_event(
-                EventType::UpdateSpeed,
-                format!(
-                    "上行速度:{:.1}{}/s, 下行速度:{:.1}{}/s",
-                    rx_speed, rx_unit, tx_speed, tx_unit
-                ),
-            )?;
-            last_speed_time = std::time::Instant::now();
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     Ok(())

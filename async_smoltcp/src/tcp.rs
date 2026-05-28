@@ -2,6 +2,7 @@ use std::{
     io::Error,
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 
@@ -9,7 +10,10 @@ use bytes::{Buf, BytesMut};
 use smoltcp::wire::IpEndpoint;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Notify,
+    },
 };
 use tokio_util::sync::PollSender;
 
@@ -33,6 +37,7 @@ impl TcpReadHalf {
 pub struct TcpWriteHalf {
     sender: PollSender<(IpEndpoint, BytesMut)>,
     local_addr: IpEndpoint,
+    wake: Arc<Notify>,
 }
 
 pub struct TcpStream {
@@ -48,6 +53,7 @@ impl TcpStream {
         sender: Sender<(IpEndpoint, BytesMut)>,
         local_addr: IpEndpoint,
         peer_addr: IpEndpoint,
+        wake: Arc<Notify>,
     ) -> Self {
         Self {
             reader: TcpReadHalf {
@@ -58,6 +64,7 @@ impl TcpStream {
             writer: TcpWriteHalf {
                 sender: PollSender::new(sender),
                 local_addr,
+                wake,
             },
             local_addr,
             peer_addr,
@@ -111,6 +118,7 @@ impl AsyncWrite for TcpWriteHalf {
             if let Err(err) = pin.sender.send_item((pin.local_addr, buf.into())) {
                 log::error!("tcp send response failed: {}", err);
             } else {
+                pin.wake.notify_one();
                 return Poll::Ready(Ok(buf.len()));
             }
         }
@@ -154,5 +162,51 @@ impl AsyncWrite for TcpStream {
         let pin = self.get_mut();
         pin.reader.receiver.close();
         Pin::new(&mut pin.writer).poll_shutdown(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+    };
+
+    use smoltcp::wire::{IpAddress, IpEndpoint};
+    use tokio::sync::{mpsc::channel, Notify};
+
+    use super::*;
+
+    fn noop_waker() -> Waker {
+        unsafe fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        unsafe fn wake(_: *const ()) {}
+        unsafe fn wake_by_ref(_: *const ()) {}
+        unsafe fn drop(_: *const ()) {}
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+        unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
+    }
+
+    #[test]
+    fn tcp_write_notifies_device_after_queueing_egress() {
+        let (sender, mut receiver) = channel(1);
+        let wake = std::sync::Arc::new(Notify::new());
+        let mut writer = TcpWriteHalf {
+            sender: PollSender::new(sender),
+            local_addr: IpEndpoint::new(IpAddress::v4(10, 10, 10, 1), 12345),
+            wake: wake.clone(),
+        };
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        let written = Pin::new(&mut writer).poll_write(&mut cx, b"packet");
+
+        assert!(matches!(written, Poll::Ready(Ok(6))));
+        assert!(receiver.try_recv().is_ok());
+
+        let mut notified = Box::pin(wake.notified());
+        assert!(matches!(notified.as_mut().poll(&mut cx), Poll::Ready(())));
     }
 }

@@ -38,7 +38,7 @@ socket2 = "0.5"
 sha2 = "0.10"
 hex = "0.4"
 mio = { version = "0.8", features = ["net", "os-poll"] }
-tokio = { version = "1.34", features = ["net", "macros"] }
+tokio = { version = "1.34", features = ["net", "macros", "rt", "time", "sync", "io-util"] }
 async_smoltcp = { path = "../../async_smoltcp" }
 async_rustls = { path = "../../tokio_rustls" }
 

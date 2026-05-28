@@ -1,8 +1,11 @@
-use std::{io::ErrorKind, net::SocketAddr};
+use std::{io::ErrorKind, net::SocketAddr, sync::Arc};
 
 use bytes::BytesMut;
 use smoltcp::wire::IpEndpoint;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Notify,
+};
 
 use crate::TypeConverter;
 
@@ -17,11 +20,16 @@ impl UdpSocket {
         peer_addr: IpEndpoint,
         receiver: Receiver<(IpEndpoint, BytesMut)>,
         sender: Sender<(IpEndpoint, IpEndpoint, BytesMut)>,
+        wake: Arc<Notify>,
     ) -> Self {
         Self {
             peer_addr,
             receiver,
-            write_half: UdpWriteHalf { sender, peer_addr },
+            write_half: UdpWriteHalf {
+                sender,
+                peer_addr,
+                wake,
+            },
         }
     }
 
@@ -67,6 +75,7 @@ impl UdpSocket {
 pub struct UdpWriteHalf {
     sender: Sender<(IpEndpoint, IpEndpoint, BytesMut)>,
     peer_addr: IpEndpoint,
+    wake: Arc<Notify>,
 }
 
 impl UdpWriteHalf {
@@ -82,6 +91,8 @@ impl UdpWriteHalf {
             .await
         {
             log::error!("send udp response failed:{}", err);
+        } else {
+            self.wake.notify_one();
         }
         Ok(len)
     }
@@ -96,5 +107,52 @@ impl UdpWriteHalf {
 
     pub fn peer_addr_std(&self) -> SocketAddr {
         self.peer_addr.convert()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        future::Future,
+        task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+    };
+
+    use smoltcp::wire::{IpAddress, IpEndpoint};
+    use tokio::sync::{mpsc::channel, Notify};
+
+    use super::*;
+
+    fn noop_waker() -> Waker {
+        unsafe fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        unsafe fn wake(_: *const ()) {}
+        unsafe fn wake_by_ref(_: *const ()) {}
+        unsafe fn drop(_: *const ()) {}
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+        unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
+    }
+
+    #[test]
+    fn udp_write_notifies_device_after_queueing_egress() {
+        let (sender, mut receiver) = channel(1);
+        let wake = std::sync::Arc::new(Notify::new());
+        let writer = UdpWriteHalf {
+            sender,
+            peer_addr: IpEndpoint::new(IpAddress::v4(8, 8, 8, 8), 53),
+            wake: wake.clone(),
+        };
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut send = Box::pin(writer.send_to(
+            b"packet",
+            IpEndpoint::new(IpAddress::v4(10, 10, 10, 1), 12345),
+        ));
+
+        assert!(matches!(send.as_mut().poll(&mut cx), Poll::Ready(Ok(6))));
+        assert!(receiver.try_recv().is_ok());
+
+        let mut notified = Box::pin(wake.notified());
+        assert!(matches!(notified.as_mut().poll(&mut cx), Poll::Ready(())));
     }
 }
