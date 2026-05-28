@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::IpAddr,
+    sync::Arc,
     time::SystemTime,
 };
 
@@ -19,7 +20,10 @@ use smoltcp::{
         Ipv4Packet, Ipv6Packet, TcpPacket, UdpPacket,
     },
 };
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{
+    mpsc::{channel, Receiver, Sender},
+    Notify,
+};
 
 use crate::{tcp::TcpStream, Packet, Tun, TypeConverter};
 
@@ -27,6 +31,12 @@ pub struct Traffic {
     rx_bytes: usize,
     tx_bytes: usize,
     begin_traffic: std::time::Instant,
+}
+
+#[derive(Default)]
+struct EgressState {
+    made_progress: bool,
+    has_pending: bool,
 }
 
 impl Traffic {
@@ -74,6 +84,7 @@ pub struct TunDevice<'a, T: Tun> {
     last_shrink: std::time::Instant,
 
     tcp_response: HashMap<IpEndpoint, VecDeque<BytesMut>>,
+    wake: Arc<Notify>,
 }
 
 fn is_private_v4(addr: IpAddress) -> bool {
@@ -127,10 +138,29 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             last_shrink: std::time::Instant::now(),
 
             tcp_response: Default::default(),
+            wake: Arc::new(Notify::new()),
         };
         let interface = device.create_interface();
         device.interface.replace(interface);
         device
+    }
+
+    pub fn notifier(&self) -> Arc<Notify> {
+        self.wake.clone()
+    }
+
+    pub fn poll_delay(&mut self) -> Option<std::time::Duration> {
+        self.interface
+            .as_mut()?
+            .poll_delay(Instant::now(), &self.sockets)
+            .map(|delay| {
+                let millis = delay.total_millis();
+                if millis <= 0 {
+                    std::time::Duration::ZERO
+                } else {
+                    std::time::Duration::from_millis(millis as u64)
+                }
+            })
     }
 
     pub fn add_black_ip(&mut self, server_addr: impl Into<IpAddr>) {
@@ -223,6 +253,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                 self.tcp_sender.clone(),
                 source,
                 self.tcp_ip2handle.get(&source).unwrap().1,
+                self.wake.clone(),
             );
             streams.push(stream);
         }
@@ -234,7 +265,12 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         for target in std::mem::take(&mut self.new_udp) {
             let (sender, receiver) = channel(self.channel_buffer_size);
             self.udp_req_senders.insert(target, sender);
-            let socket = crate::udp::UdpSocket::new(target, receiver, self.udp_sender.clone());
+            let socket = crate::udp::UdpSocket::new(
+                target,
+                receiver,
+                self.udp_sender.clone(),
+                self.wake.clone(),
+            );
             sockets.push(socket);
         }
         sockets
@@ -282,21 +318,36 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             self.udp_ip2handle.len(), self.tcp_req_senders.len(), self.udp_req_senders.len());
     }
 
-    pub fn poll(&mut self) -> (Vec<TcpStream>, Vec<crate::udp::UdpSocket>) {
+    pub fn maintenance(&mut self) {
+        if self.last_shrink.elapsed().as_secs() > 1 {
+            self.shrink_maps();
+            self.last_shrink = std::time::Instant::now();
+        }
+    }
+
+    fn poll_interface(&mut self) {
         let mut interface = self.interface.take().unwrap();
         let sockets = &mut self.sockets as *mut SocketSet;
         interface.poll(smoltcp::time::Instant::now(), self, unsafe {
             &mut *sockets
         });
         self.interface.replace(interface);
-        let tcp = self.accept_tcp();
-        let udp = self.accept_udp();
-        self.process_ingress();
+    }
+
+    pub fn poll(&mut self) -> (Vec<TcpStream>, Vec<crate::udp::UdpSocket>) {
         self.process_egress();
-        if self.last_shrink.elapsed().as_secs() > 1 {
-            self.shrink_maps();
-            self.last_shrink = std::time::Instant::now();
+        self.poll_interface();
+        let mut tcp = self.accept_tcp();
+        let mut udp = self.accept_udp();
+        self.process_ingress();
+        let egress = self.process_egress();
+        if egress.made_progress || egress.has_pending {
+            self.poll_interface();
+            tcp.extend(self.accept_tcp());
+            udp.extend(self.accept_udp());
+            self.process_ingress();
         }
+        self.maintenance();
         (tcp, udp)
     }
 
@@ -314,13 +365,13 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                     if let Some(source) = socket.remote_endpoint() {
                         let sender = self.tcp_req_senders.get(&source).unwrap();
                         while socket.can_recv() && sender.capacity() > 0 {
-                            log::info!("dispatch ingress tcp {} {}", source, socket.state());
+                            log::debug!("dispatch ingress tcp {} {}", source, socket.state());
                             let mut buffer = BytesMut::with_capacity(socket.recv_queue());
                             unsafe {
                                 buffer.set_len(socket.recv_queue());
                             }
                             if let Ok(n) = socket.recv_slice(buffer.as_mut()) {
-                                log::info!("receive {} bytes from {}", n, source);
+                                log::debug!("receive {} bytes from {}", n, source);
                                 if n != buffer.len() {
                                     log::error!("tcp recv_slice do not drain the buffer");
                                     unsafe {
@@ -357,7 +408,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                     let target: IpEndpoint = socket.endpoint().convert();
                     let sender = self.udp_req_senders.get(&target).unwrap();
                     while socket.can_recv() && sender.capacity() > 0 {
-                        log::info!("dispatch udp {}", target);
+                        log::debug!("dispatch udp {}", target);
                         let mut buffer = BytesMut::with_capacity(self.mtu);
                         unsafe {
                             buffer.set_len(self.mtu);
@@ -393,7 +444,8 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         }
     }
 
-    fn process_egress(&mut self) {
+    fn process_egress(&mut self) -> EgressState {
+        let mut state = EgressState::default();
         let mut response = std::mem::take(&mut self.tcp_response);
         while let Ok((source, data)) = self.tcp_receiver.try_recv() {
             response.entry(source).or_default().push_back(data);
@@ -404,11 +456,12 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                 to_be_removed.push(*source);
                 continue;
             }
-            log::info!("get tcp socket:{}", source);
+            log::debug!("get tcp socket:{}", source);
             let socket = self.get_tcp_socket(*source);
             while let Some(mut data) = packets.pop_front() {
                 if !data.is_empty() {
                     if let Ok(n) = socket.send_slice(data.as_ref()) {
+                        state.made_progress |= n > 0;
                         data.advance(n);
                         if data.is_empty() {
                             continue;
@@ -431,6 +484,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         for source in to_be_removed {
             response.remove(&source);
         }
+        state.has_pending = response.values().any(|packets| !packets.is_empty());
         self.tcp_response = response;
 
         let mut response: HashMap<IpEndpoint, Vec<(IpEndpoint, BytesMut)>> = HashMap::new();
@@ -441,19 +495,26 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
             if !self.udp_ip2handle.contains_key(&target) {
                 continue;
             }
-            log::info!("get udp socket:{}", target);
+            log::debug!("get udp socket:{}", target);
             let socket = self.get_udp_socket(target);
             let mut remove = false;
             for (source, data) in packets {
-                if data.is_empty() || socket.send_slice(data.as_ref(), source).is_err() {
+                if data.is_empty() {
                     remove = true;
                     break;
+                }
+                if socket.send_slice(data.as_ref(), source).is_err() {
+                    remove = true;
+                    break;
+                } else {
+                    state.made_progress = true;
                 }
             }
             if remove {
                 self.remove_udp(target);
             }
         }
+        state
     }
 
     fn remove_tcp_handle(&mut self, handle: SocketHandle) {
@@ -595,8 +656,14 @@ impl<'a, T: Tun> smoltcp::phy::TxToken for TxToken<'a, T> {
 }
 
 impl<'b, T: Tun + Clone> Device for TunDevice<'b, T> {
-    type RxToken<'a> = RxToken<T> where Self: 'a;
-    type TxToken<'a> = TxToken<'a, T> where Self: 'a;
+    type RxToken<'a>
+        = RxToken<T>
+    where
+        Self: 'a;
+    type TxToken<'a>
+        = TxToken<'a, T>
+    where
+        Self: 'a;
 
     fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         self.tun.receive().unwrap().map(|packet| {
@@ -623,5 +690,62 @@ impl<'b, T: Tun + Clone> Device for TunDevice<'b, T> {
         dc.medium = Medium::Ip;
         dc.max_transmission_unit = self.mtu;
         dc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Result;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct TestTun;
+
+    struct TestPacket(Vec<u8>);
+
+    impl Tun for TestTun {
+        type Packet = TestPacket;
+
+        fn receive(&self) -> Result<Option<Self::Packet>> {
+            Ok(None)
+        }
+
+        fn send(&self, _: Self::Packet) -> Result<()> {
+            Ok(())
+        }
+
+        fn allocate_packet(&self, len: usize) -> Result<Self::Packet> {
+            Ok(TestPacket(vec![0; len]))
+        }
+
+        fn mtu(&self) -> usize {
+            1500
+        }
+    }
+
+    impl Packet for TestPacket {
+        fn as_mut(&mut self) -> &mut [u8] {
+            self.0.as_mut_slice()
+        }
+
+        fn as_ref(&self) -> &[u8] {
+            self.0.as_slice()
+        }
+
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+    }
+
+    #[test]
+    fn maintenance_can_run_without_polling_stack() {
+        let mut device = TunDevice::new(TestTun);
+        let before = std::time::Instant::now() - std::time::Duration::from_secs(2);
+        device.last_shrink = before;
+
+        device.maintenance();
+
+        assert!(device.last_shrink > before);
     }
 }

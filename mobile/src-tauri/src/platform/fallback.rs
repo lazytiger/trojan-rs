@@ -1,7 +1,13 @@
 use crate::{types::VpnError, InstalledApp};
 
+use std::time::Duration;
+
 pub struct Session {
     mtu: usize,
+}
+
+pub struct TunReady {
+    interval: tokio::time::Interval,
 }
 
 pub struct Packet {
@@ -11,6 +17,23 @@ pub struct Packet {
 impl Session {
     pub fn new(_: i32, mtu: usize, _: bool) -> Self {
         Self { mtu }
+    }
+}
+
+impl TunReady {
+    pub fn new(_: &Session) -> std::io::Result<Self> {
+        Ok(Self {
+            interval: tokio::time::interval(Duration::from_millis(10)),
+        })
+    }
+
+    pub async fn readable(&mut self) -> std::io::Result<()> {
+        self.interval.tick().await;
+        Ok(())
+    }
+
+    pub async fn clear_ready(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
