@@ -11,6 +11,7 @@ use async_smoltcp::{Packet, Tun};
 const UTUN_CONTROL_NAME: &[u8] = b"com.apple.net.utun_control\0";
 const UTUN_OPT_IFNAME: libc::c_int = 2;
 const UTUN_HEADER_SIZE: usize = 4;
+const UTUN_RECEIVE_BUFFER_SIZE: usize = 16 * 1024;
 
 #[derive(Clone)]
 pub struct OsxTun {
@@ -50,8 +51,9 @@ impl Tun for OsxTun {
     type Packet = TunPacket;
 
     fn receive(&self) -> Result<Option<Self::Packet>> {
-        let mut buf = vec![0u8; self.mtu + UTUN_HEADER_SIZE];
-        let read = unsafe { libc::read(self.fd.0, buf.as_mut_ptr().cast(), buf.len()) };
+        let mut buf = [0u8; UTUN_RECEIVE_BUFFER_SIZE];
+        let len = (self.mtu + UTUN_HEADER_SIZE).min(buf.len());
+        let read = unsafe { libc::read(self.fd.0, buf.as_mut_ptr().cast(), len) };
         if read < 0 {
             let err = Error::last_os_error();
             return if err.kind() == ErrorKind::WouldBlock {
@@ -64,9 +66,10 @@ impl Tun for OsxTun {
         if read <= UTUN_HEADER_SIZE {
             return Ok(None);
         }
-        buf.drain(..UTUN_HEADER_SIZE);
-        buf.truncate(read - UTUN_HEADER_SIZE);
-        Ok(Some(TunPacket(buf)))
+        let packet_len = read - UTUN_HEADER_SIZE;
+        let mut packet_buf = vec![0u8; packet_len];
+        packet_buf.copy_from_slice(&buf[UTUN_HEADER_SIZE..read]);
+        Ok(Some(TunPacket(packet_buf)))
     }
 
     fn send(&self, packet: Self::Packet) -> Result<()> {
@@ -80,12 +83,24 @@ impl Tun for OsxTun {
                 ))
             }
         };
-        let mut buf = Vec::with_capacity(packet.0.len() + UTUN_HEADER_SIZE);
-        buf.extend_from_slice(&family.to_be_bytes());
-        buf.extend_from_slice(&packet.0);
-        let written = unsafe { libc::write(self.fd.0, buf.as_ptr().cast(), buf.len()) };
+        let family_bytes = family.to_be_bytes();
+        let iov = [
+            libc::iovec {
+                iov_base: family_bytes.as_ptr() as *mut _,
+                iov_len: family_bytes.len(),
+            },
+            libc::iovec {
+                iov_base: packet.0.as_ptr() as *mut _,
+                iov_len: packet.0.len(),
+            },
+        ];
+        let written = unsafe { libc::writev(self.fd.0, iov.as_ptr(), iov.len() as i32) };
         if written < 0 {
             return Err(Error::last_os_error());
+        }
+        let expected = family_bytes.len() + packet.0.len();
+        if written as usize != expected {
+            return Err(Error::new(ErrorKind::WriteZero, "short utun packet write"));
         }
         Ok(())
     }
