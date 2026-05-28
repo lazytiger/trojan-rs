@@ -2,7 +2,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::Path,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossbeam::channel::{unbounded, Sender};
@@ -15,7 +15,7 @@ use winapi::{
 
 use server::DnsServer;
 pub use wintool::adapter::{
-    get_adapter_index, get_adapter_ip, get_main_adapter_gwif, set_dns_server,
+    get_adapter_ip, get_adapter_ready, get_main_adapter_gwif, set_dns_server, AdapterReady,
 };
 
 use crate::{
@@ -33,6 +33,30 @@ const DNS_TRUSTED: usize = 2;
 const DNS_POISONED: usize = 3;
 /// Token for local DNS server
 const DNS_LOCAL: usize = 4;
+const TUN_READY_TIMEOUT: Duration = Duration::from_secs(30);
+const TUN_READY_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+fn wait_tun_ready(name: &str) -> Result<AdapterReady> {
+    let started = Instant::now();
+    loop {
+        if let Some(ready) = get_adapter_ready(name) {
+            log::info!(
+                "tun adapter ready name:{} ip:{} index:{}",
+                name,
+                ready.ip,
+                ready.index
+            );
+            return Ok(ready);
+        }
+        if started.elapsed() >= TUN_READY_TIMEOUT {
+            return Err(TrojanError::Custom(format!(
+                "tun adapter {name} not ready after {} seconds",
+                TUN_READY_TIMEOUT.as_secs()
+            )));
+        }
+        thread::sleep(TUN_READY_POLL_INTERVAL);
+    }
+}
 
 extern "system" fn console_callback(ctrl_type: DWORD) -> BOOL {
     log::warn!("console_callback called:{}", ctrl_type);
@@ -75,9 +99,7 @@ pub fn run() -> Result<()> {
         }
     }
 
-    while get_adapter_ip(OPTIONS.dns_args().tun_name.as_str()).is_none() {
-        thread::sleep(Duration::new(1, 0));
-    }
+    let tun = wait_tun_ready(OPTIONS.dns_args().tun_name.as_str())?;
 
     if let Some((main_gw, main_index)) = get_main_adapter_gwif() {
         log::warn!(
@@ -94,7 +116,7 @@ pub fn run() -> Result<()> {
         log::error!("main adapter gateway not found");
         return Err(TrojanError::MainAdapterNotFound);
     }
-    let index = get_adapter_index(OPTIONS.dns_args().tun_name.as_str()).unwrap();
+    let index = tun.index;
 
     let (sender, receiver) = unbounded();
     let monitor = FileMonitor { sender };

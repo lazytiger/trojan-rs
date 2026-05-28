@@ -10,7 +10,7 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use backtrace::Backtrace;
@@ -33,7 +33,12 @@ use tauri_plugin_shell::{
 };
 
 #[cfg(windows)]
-use wintool::adapter::{get_dns_server, get_main_adapter_ip};
+use wintool::adapter::{get_adapter_ready, get_dns_server, get_main_adapter_ip};
+
+#[cfg(windows)]
+const TUN_READY_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+const TUN_READY_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -181,6 +186,29 @@ fn tun_status_file() -> &'static str {
     "logs/osxtun.status"
 }
 
+#[cfg(windows)]
+async fn wait_tun_ready(name: &str) -> Result<()> {
+    let started = Instant::now();
+    loop {
+        if let Some(ready) = get_adapter_ready(name) {
+            log::info!(
+                "tun adapter ready name:{} ip:{} index:{}",
+                name,
+                ready.ip,
+                ready.index
+            );
+            return Ok(());
+        }
+        if started.elapsed() >= TUN_READY_TIMEOUT {
+            return Err(Error::Custom(format!(
+                "tun adapter {name} not ready after {} seconds",
+                TUN_READY_TIMEOUT.as_secs()
+            )));
+        }
+        tokio::time::sleep(TUN_READY_POLL_INTERVAL).await;
+    }
+}
+
 type TrojanState = Arc<Mutex<TrojanProxy>>;
 
 #[tauri::command]
@@ -270,7 +298,14 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
             };
             #[cfg(windows)]
             if state.lock().unwrap().config.enable_dns {
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                if let Err(err) = wait_tun_ready(&config.iface_name).await {
+                    log::error!("wait tun ready failed:{:?}", err);
+                    if let Some(wintun) = state.lock().unwrap().wintun.take() {
+                        let _ = wintun.kill();
+                    }
+                    emit_state_update_event(false, window);
+                    return;
+                }
                 let dns_listen = config.dns_listen.clone() + ":53";
                 let default_dns = state.lock().unwrap().default_dns.clone();
                 let config_domains = window

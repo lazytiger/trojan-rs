@@ -195,6 +195,35 @@ pub fn get_adapter_ip(name: &str) -> Option<String> {
     ret
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdapterReady {
+    pub ip: String,
+    pub index: u32,
+}
+
+pub fn get_adapter_ready(name: &str) -> Option<AdapterReady> {
+    let mut ret = None;
+    unsafe {
+        get_adapters_addresses(|adapter| {
+            let adapter_name = adapter.description();
+            if !adapter_name.contains(name) || !adapter.is_up() {
+                return false;
+            }
+            for ip in adapter.address() {
+                if ip.is_ipv4() {
+                    ret = Some(AdapterReady {
+                        ip: ip.to_string(),
+                        index: adapter.if_index(),
+                    });
+                    return true;
+                }
+            }
+            false
+        });
+    }
+    ret
+}
+
 pub fn get_adapter_index(name: &str) -> Option<u32> {
     let mut index = None;
     unsafe {
