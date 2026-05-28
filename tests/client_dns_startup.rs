@@ -34,3 +34,62 @@ fn dns_sidecar_waits_for_strict_adapter_readiness() {
         "dns sidecar should use strict adapter readiness shared with the client"
     );
 }
+
+#[test]
+fn trojan_client_reports_starting_until_dns_is_ready() {
+    let backend = include_str!("../trojan-client/src-tauri/src/main.rs");
+    let frontend = include_str!("../trojan-client/src/app.vue");
+
+    assert!(
+        backend.contains("emit_state_update_event(ClientState::Starting"),
+        "backend should report starting immediately after start is accepted"
+    );
+    assert!(
+        backend.contains("emit_state_update_event(ClientState::Running"),
+        "backend should report running only after sidecars are ready"
+    );
+
+    let dns_registered = backend
+        .find("state.dns.replace(child)")
+        .expect("dns child should be stored after it starts");
+    let running_emitted = backend[dns_registered..]
+        .find("emit_state_update_event(ClientState::Running")
+        .map(|offset| dns_registered + offset)
+        .expect("running state should be emitted after startup completes");
+    assert!(
+        dns_registered < running_emitted,
+        "running state should be emitted after the dns sidecar is registered"
+    );
+
+    assert!(
+        frontend.contains("connectionState: \"stopped\""),
+        "frontend should track stopped/starting/running state explicitly"
+    );
+    assert!(
+        frontend.contains("this.connectionState = \"starting\""),
+        "start click should immediately move the button into starting state"
+    );
+    assert!(
+        frontend.contains("this.label = \"启动中\""),
+        "button label should show starting while startup is in progress"
+    );
+}
+
+#[test]
+fn trojan_client_disables_stop_while_starting() {
+    let backend = include_str!("../trojan-client/src-tauri/src/main.rs");
+    let frontend = include_str!("../trojan-client/src/app.vue");
+
+    assert!(
+        backend.contains("state.status == ClientState::Starting"),
+        "backend stop command should ignore requests while startup is in progress"
+    );
+    assert!(
+        frontend.contains("this.connectionState === \"starting\""),
+        "frontend should treat starting as a disabled action state"
+    );
+    assert!(
+        frontend.contains(":disabled=\"is_action_disabled()\""),
+        "start/stop button should be disabled while startup is in progress"
+    );
+}

@@ -27,6 +27,7 @@ export default {
       },
       label: "开始",
       running: false,
+      connectionState: "stopped",
       homeVisible: true,
       domainVisible: false,
       domains: [],
@@ -43,15 +44,41 @@ export default {
     },
     start() {
       info("start trojan now");
-      invoke("start", {"config": this.config});
+      this.connectionState = "starting";
+      this.label = "启动中";
+      this.running = true;
+      invoke("start", {"config": this.config}).catch(async (err) => {
+        await info("start trojan failed:" + err);
+        this.apply_state("stopped");
+      });
     },
     is_config_ok() {
       return this.check_ipv4(this.config.dns_listen) === true &&
           this.check_ipv4(this.config.trust_dns) === true;
     },
     stop() {
+      if (this.connectionState === "starting") {
+        return;
+      }
       info("stop trojan now");
       invoke("stop", {});
+    },
+    apply_state(state) {
+      this.connectionState = state;
+      if (state === "starting") {
+        this.label = "启动中";
+        this.running = true;
+      } else if (state === "running") {
+        this.label = "停止";
+        this.running = true;
+      } else {
+        this.label = "开始";
+        this.running = false;
+      }
+    },
+    is_action_disabled() {
+      return this.connectionState === "starting" ||
+          (this.connectionState === "stopped" && !this.is_config_ok());
     },
     showHome() {
       this.homeVisible = true;
@@ -98,17 +125,17 @@ export default {
     async update_state() {
       appWindow.listen("state-update", async (event) => {
         await info("event:state-update, label:" + event.windowLabel + ", payload:" + event.payload);
-        if (event.payload) {
-          this.label = "停止";
-          this.running = true;
-        } else {
-          this.label = "开始";
-          this.running = false;
-        }
+        const state = typeof event.payload === "boolean"
+            ? (event.payload ? "running" : "stopped")
+            : event.payload;
+        this.apply_state(state);
       });
     },
     do_action() {
-      if (!this.running) {
+      if (this.connectionState === "starting") {
+        return;
+      }
+      if (this.connectionState === "stopped") {
         this.start();
       } else {
         this.stop();
@@ -174,7 +201,7 @@ export default {
                           label="可信DNS地址" variant="outlined"></v-text-field>
           </div>
         </v-container>
-        <v-btn :disabled="!is_config_ok()" block color="blue" size="x-large" @click="do_action">{{ label }}</v-btn>
+        <v-btn :disabled="is_action_disabled()" block color="blue" size="x-large" @click="do_action">{{ label }}</v-btn>
       </v-container>
       </div>
       <div v-if="domainVisible">
