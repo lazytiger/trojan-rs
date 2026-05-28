@@ -306,6 +306,10 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                     emit_state_update_event(false, window);
                     return;
                 }
+                if state.lock().unwrap().wintun.is_none() {
+                    log::warn!("wintun was stopped while waiting for adapter readiness");
+                    return;
+                }
                 let dns_listen = config.dns_listen.clone() + ":53";
                 let default_dns = state.lock().unwrap().default_dns.clone();
                 let config_domains = window
@@ -351,7 +355,13 @@ fn start(config: Config, state: State<TrojanState>, window: WebviewWindow<Wry>) 
                     .spawn()
                 {
                     Ok((rx, child)) => {
-                        state.lock().unwrap().dns.replace(child);
+                        let mut state = state.lock().unwrap();
+                        if state.wintun.is_none() {
+                            log::warn!("wintun was stopped before dns sidecar was registered");
+                            let _ = child.kill();
+                            return;
+                        }
+                        state.dns.replace(child);
                         rxs.insert("dns", rx);
                     }
                     Err(err) => {

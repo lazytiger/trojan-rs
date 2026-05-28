@@ -11,6 +11,14 @@ fn trojan_client_dns_start_waits_for_tun_readiness() {
         source.contains("wait_tun_ready(&config.iface_name).await"),
         "dns startup should wait for the configured tun interface before spawning dns"
     );
+    assert!(
+        source.contains("wintun was stopped while waiting for adapter readiness"),
+        "dns startup should abort when wintun is stopped during adapter readiness wait"
+    );
+    assert!(
+        source.contains("wintun was stopped before dns sidecar was registered"),
+        "dns startup should kill the dns sidecar if wintun is stopped before registration"
+    );
 }
 
 #[test]
