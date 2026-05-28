@@ -1910,6 +1910,7 @@ dependencies = [
  "itertools",
  "jni",
  "lazy_static",
+ "libc",
  "log",
  "mio 0.8.9",
  "rayon",

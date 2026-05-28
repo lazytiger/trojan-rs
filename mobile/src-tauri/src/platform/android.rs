@@ -443,22 +443,31 @@ impl Session {
 
 impl TunReady {
     pub fn new(session: &Session) -> std::io::Result<Self> {
+        let fd = session.raw_fd();
+        set_nonblocking(fd)?;
         Ok(Self {
-            fd: tokio::io::unix::AsyncFd::new(RawTunFd(session.raw_fd()))?,
+            fd: tokio::io::unix::AsyncFd::new(RawTunFd(fd))?,
         })
     }
 
     pub async fn readable(&mut self) -> std::io::Result<()> {
-        let guard = self.fd.readable().await?;
-        drop(guard);
-        Ok(())
-    }
-
-    pub async fn clear_ready(&mut self) -> std::io::Result<()> {
         let mut guard = self.fd.readable().await?;
         guard.clear_ready();
         Ok(())
     }
+}
+
+fn set_nonblocking(fd: RawFd) -> std::io::Result<()> {
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 impl Tun for Session {

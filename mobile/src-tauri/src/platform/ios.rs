@@ -31,10 +31,6 @@ impl TunReady {
         self.interval.tick().await;
         Ok(())
     }
-
-    pub async fn clear_ready(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }
 
 impl async_smoltcp::Tun for Session {
