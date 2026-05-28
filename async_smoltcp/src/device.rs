@@ -153,14 +153,7 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
         self.interface
             .as_mut()?
             .poll_delay(Instant::now(), &self.sockets)
-            .map(|delay| {
-                let millis = delay.total_millis();
-                if millis <= 0 {
-                    std::time::Duration::ZERO
-                } else {
-                    std::time::Duration::from_millis(millis as u64)
-                }
-            })
+            .map(|delay| std::time::Duration::from_millis(delay.total_millis()))
     }
 
     pub fn add_black_ip(&mut self, server_addr: impl Into<IpAddr>) {

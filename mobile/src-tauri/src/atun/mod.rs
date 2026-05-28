@@ -67,12 +67,6 @@ async fn wait_stack_delay(delay: Option<Duration>) {
     }
 }
 
-enum PollTrigger {
-    TunReady,
-    DeviceWake,
-    StackTimer,
-}
-
 pub async fn async_run(
     fd: i32,
     dns: String,
@@ -148,22 +142,19 @@ pub async fn async_run(
     let mut speed_tick = interval(Duration::from_millis(speed_update_ms));
     speed_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     speed_tick.tick().await;
-    let mut shutdown_tick = interval(Duration::from_millis(250));
-    shutdown_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    shutdown_tick.tick().await;
     let mut maintenance_tick = interval(Duration::from_secs(1));
     maintenance_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     maintenance_tick.tick().await;
 
     while running.load(Ordering::Relaxed) {
         let stack_delay = device.poll_delay();
-        let poll_trigger = tokio::select! {
+        let poll_stack = tokio::select! {
             result = tun_ready.readable() => {
                 result?;
-                Some(PollTrigger::TunReady)
+                true
             }
-            _ = device_wake.notified() => Some(PollTrigger::DeviceWake),
-            _ = wait_stack_delay(stack_delay) => Some(PollTrigger::StackTimer),
+            _ = device_wake.notified() => true,
+            _ = wait_stack_delay(stack_delay) => true,
             _ = speed_tick.tick() => {
                 let (rx_speed, tx_speed) = device.calculate_speed();
                 let (rx_speed, rx_unit) = get_speed_and_unit(rx_speed);
@@ -175,27 +166,19 @@ pub async fn async_run(
                         rx_speed, rx_unit, tx_speed, tx_unit
                     ),
                 )?;
-                None
+                false
             }
             _ = maintenance_tick.tick() => {
                 device.maintenance();
-                None
+                false
             }
-            _ = shutdown_tick.tick() => None,
         };
 
-        let Some(poll_trigger) = poll_trigger else {
-            continue;
-        };
-
-        if !running.load(Ordering::Relaxed) {
+        if !running.load(Ordering::Relaxed) || !poll_stack {
             continue;
         }
 
         let (tcp_streams, udp_sockets) = device.poll();
-        if matches!(poll_trigger, PollTrigger::TunReady) {
-            tun_ready.clear_ready().await?;
-        }
 
         for stream in tcp_streams {
             log::info!(
