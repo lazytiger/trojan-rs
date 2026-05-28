@@ -45,6 +45,10 @@ impl OsxTun {
     pub fn interface_name(&self) -> &str {
         &self.interface_name
     }
+
+    pub fn raw_fd(&self) -> RawFd {
+        self.fd.0
+    }
 }
 
 impl Tun for OsxTun {

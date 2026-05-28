@@ -2135,6 +2135,7 @@ dependencies = [
  "webpki-roots",
  "widestring",
  "winapi",
+ "windows-sys 0.52.0",
  "wintool",
  "wintun",
 ]

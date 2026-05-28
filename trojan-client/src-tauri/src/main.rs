@@ -19,11 +19,13 @@ use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{
     image::Image,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem},
     path::BaseDirectory,
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, WindowEvent, Wry,
 };
+#[cfg(debug_assertions)]
+use tauri::menu::PredefinedMenuItem;
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
