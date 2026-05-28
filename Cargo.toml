@@ -52,6 +52,7 @@ env_logger = "0.11"
 wintun = "0.5.1"
 wintool = { path = "wintool" }
 winapi = { version = "0.3", features = ["netioapi", "impl-debug", "impl-default", "combaseapi", "ipifcons", "consoleapi"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [target.'cfg(not(windows))'.dependencies]
 backtrace-on-stack-overflow = "0.3"
