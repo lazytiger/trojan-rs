@@ -449,4 +449,12 @@ mod tests {
     fn open_config_event_name_is_stable() {
         assert_eq!(EventType::OpenConfig.to_str(), "open_config");
     }
+
+    #[test]
+    fn installed_apps_changed_event_name_is_stable() {
+        assert_eq!(
+            EventType::InstalledAppsChanged.to_str(),
+            "installed_apps_changed"
+        );
+    }
 }

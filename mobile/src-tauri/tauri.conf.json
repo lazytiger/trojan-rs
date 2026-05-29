@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AppRouter",
-  "version": "0.0.1",
+  "version": "0.17.3",
   "identifier": "com.bmshi.router.mobile",
   "build": {
     "beforeDevCommand": "npm run dev",

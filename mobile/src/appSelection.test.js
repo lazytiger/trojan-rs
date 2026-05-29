@@ -7,6 +7,7 @@ import {
   getInstalledGmsPackages,
   removeSelectedApp,
   setGmsAppsSelected,
+  toAppItems,
 } from "./appSelection.js";
 
 test("addSelectedApp appends a new app and ignores duplicates", () => {
@@ -40,6 +41,29 @@ test("filterAvailableApps hides already selected apps", () => {
   assert.deepEqual(
     filterAvailableApps(apps, ["com.openai.chatgpt", "com.android.chrome"]),
     [{ title: "Google Play services", value: "com.google.android.gms" }],
+  );
+});
+
+test("toAppItems maps installed app payloads for selection controls", () => {
+  assert.deepEqual(
+    toAppItems([
+      { label: "Chrome", package_name: "com.android.chrome" },
+      { label: "Play Store", package_name: "com.android.vending" },
+    ]),
+    [
+      {
+        label: "Chrome",
+        packageName: "com.android.chrome",
+        title: "Chrome (com.android.chrome)",
+        value: "com.android.chrome",
+      },
+      {
+        label: "Play Store",
+        packageName: "com.android.vending",
+        title: "Play Store (com.android.vending)",
+        value: "com.android.vending",
+      },
+    ],
   );
 });
 

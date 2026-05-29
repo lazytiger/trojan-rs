@@ -8,6 +8,7 @@ import {
   getInstalledGmsPackages,
   removeSelectedApp,
   setGmsAppsSelected,
+  toAppItems,
 } from "./appSelection.js";
 
 const VPN_PERMISSION = "android.permission.BIND_VPN_SERVICE";
@@ -104,6 +105,13 @@ export default {
         value: JSON.stringify(this.config),
       });
     },
+    async refreshInstalledApps() {
+      try {
+        this.apps = toAppItems(await invoke("list_installed_apps", {}));
+      } catch (err) {
+        console.error("Failed to refresh installed apps", err);
+      }
+    },
     async start() {
       await this.saveConfig();
       if (!this.running) {
@@ -151,7 +159,10 @@ export default {
         }
       });
       await listen("open_config", async () => {
-        this.showHome();
+        await this.showHome();
+      });
+      await listen("installed_apps_changed", async () => {
+        await this.refreshInstalledApps();
       });
     },
     do_action() {
@@ -172,9 +183,10 @@ export default {
         (this.label === "开始" || this.label === "停止")
       );
     },
-    showHome() {
+    async showHome() {
       this.homeVisible = true;
       this.ladderVisible = false;
+      await this.refreshInstalledApps();
     },
     showLadder() {
       this.ladderVisible = true;
@@ -255,12 +267,7 @@ export default {
       }
       this.config.speed_update_ms = 2000;
     }
-    this.apps = (await invoke("list_installed_apps", {})).map((app) => ({
-      label: app.label,
-      packageName: app.package_name,
-      title: `${app.label} (${app.package_name})`,
-      value: app.package_name,
-    }));
+    await this.refreshInstalledApps();
     this.configReady = true;
     await invoke("init_window", { logLevel: this.config.log_level });
     await this.init_listener();

@@ -19,6 +19,15 @@ export function removeSelectedApp(selectedApps, packageName) {
   return apps.filter((selectedApp) => selectedApp !== app);
 }
 
+export function toAppItems(apps) {
+  return (Array.isArray(apps) ? apps : []).map((app) => ({
+    label: app.label,
+    packageName: app.package_name,
+    title: `${app.label} (${app.package_name})`,
+    value: app.package_name,
+  }));
+}
+
 export function filterAvailableApps(apps, selectedApps) {
   const selected = new Set(Array.isArray(selectedApps) ? selectedApps : []);
   return (Array.isArray(apps) ? apps : []).filter(

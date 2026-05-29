@@ -1,7 +1,10 @@
 package com.bmshi.router.mobile
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ApplicationInfo
 import android.net.VpnService
@@ -29,6 +32,16 @@ class MainActivity : TauriActivity() {
 
   private external fun onPermissionResult(isGranted: Boolean)
   private external fun onOpenConfigIntent()
+  private external fun onInstalledAppsChanged()
+
+  private var hasCompletedInitialResume = false
+
+  private val packageChangedReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      Logger.info("installed apps changed: ${intent?.action ?: "unknown"}")
+      onInstalledAppsChanged()
+    }
+  }
 
   companion object {
     const val OPEN_CONFIG_ACTION = "com.bmshi.router.mobile.OPEN_CONFIG"
@@ -185,7 +198,26 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     instance = this
     initRust()
+    registerPackageChangedReceiver()
     handleOpenConfigIntent(intent)
+  }
+
+  override fun onResume() {
+    super.onResume()
+    if (hasCompletedInitialResume) {
+      onInstalledAppsChanged()
+    } else {
+      hasCompletedInitialResume = true
+    }
+  }
+
+  override fun onDestroy() {
+    try {
+      unregisterReceiver(packageChangedReceiver)
+    } catch (e: IllegalArgumentException) {
+      Logger.warn(e.toString())
+    }
+    super.onDestroy()
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -206,6 +238,22 @@ class MainActivity : TauriActivity() {
     if (intent?.action == OPEN_CONFIG_ACTION) {
       onOpenConfigIntent()
     }
+  }
+
+  private fun registerPackageChangedReceiver() {
+    val filter = IntentFilter().apply {
+      addAction(Intent.ACTION_PACKAGE_ADDED)
+      addAction(Intent.ACTION_PACKAGE_REMOVED)
+      addAction(Intent.ACTION_PACKAGE_CHANGED)
+      addAction(Intent.ACTION_PACKAGE_REPLACED)
+      addDataScheme("package")
+    }
+    ContextCompat.registerReceiver(
+      this,
+      packageChangedReceiver,
+      filter,
+      ContextCompat.RECEIVER_NOT_EXPORTED
+    )
   }
 
   private fun doActivityResult(resultCode: Int) {

@@ -47,6 +47,7 @@ pub enum EventType {
     PermissionResult,
     UpdateSpeed,
     OpenConfig,
+    InstalledAppsChanged,
 }
 
 impl EventType {
@@ -56,6 +57,7 @@ impl EventType {
             EventType::PermissionResult => "on_permission_result",
             EventType::UpdateSpeed => "update_speed",
             EventType::OpenConfig => "open_config",
+            EventType::InstalledAppsChanged => "installed_apps_changed",
         }
     }
 }

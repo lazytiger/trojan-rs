@@ -127,6 +127,17 @@ pub extern "system" fn Java_com_bmshi_router_mobile_MainActivity_onOpenConfigInt
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_bmshi_router_mobile_MainActivity_onInstalledAppsChanged<'local>(
+    _: JNIEnv<'local>,
+    _: JObject<'local>,
+) {
+    log::info!("onInstalledAppsChanged");
+    if let Err(err) = crate::emit_event(EventType::InstalledAppsChanged, true) {
+        log::error!("onInstalledAppsChanged failed:{:?}", err);
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_bmshi_router_mobile_TrojanProxy_onStart<'local>(
     mut env: JNIEnv<'local>,
     _: JObject<'local>,
