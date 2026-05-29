@@ -23,7 +23,13 @@ pub async fn start_tcp(
 ) {
     let client = init_tls_conn(connector, server_name).await;
     if let Ok(client) = client {
-        let dst_addr = client.get_ref().0.peer_addr().unwrap();
+        let dst_addr = match client.get_ref().0.peer_addr() {
+            Ok(addr) => addr,
+            Err(err) => {
+                log::error!("get remote tcp peer address failed:{}", err);
+                return;
+            }
+        };
         let (read_half, write_half) = split(client);
         let (reader, writer) = local.into_split();
         spawn(local_to_remote(reader, write_half));
@@ -89,5 +95,19 @@ where
             log::warn!("tcp {} failed, write shutdown", message);
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tls_peer_address_error_does_not_panic() {
+        let source = include_str!("tcp.rs");
+        let peer_addr_unwrap = concat!("peer_addr()", ".unwrap()");
+
+        assert!(
+            !source.contains(peer_addr_unwrap),
+            "tls peer address lookup can fail during shutdown and should not panic"
+        );
     }
 }

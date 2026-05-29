@@ -356,7 +356,12 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                         return;
                     }
                     if let Some(source) = socket.remote_endpoint() {
-                        let sender = self.tcp_req_senders.get(&source).unwrap();
+                        let Some(sender) = self.tcp_req_senders.get(&source) else {
+                            log::warn!("tcp ingress sender missing for {}", source);
+                            socket.close();
+                            tcp_endpoints.push(source);
+                            return;
+                        };
                         while socket.can_recv() && sender.capacity() > 0 {
                             log::debug!("dispatch ingress tcp {} {}", source, socket.state());
                             let mut buffer = BytesMut::with_capacity(socket.recv_queue());
@@ -399,7 +404,11 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                         return;
                     }
                     let target: IpEndpoint = socket.endpoint().convert();
-                    let sender = self.udp_req_senders.get(&target).unwrap();
+                    let Some(sender) = self.udp_req_senders.get(&target) else {
+                        log::warn!("udp ingress sender missing for {}", target);
+                        udp_endpoints.push(target);
+                        return;
+                    };
                     while socket.can_recv() && sender.capacity() > 0 {
                         log::debug!("dispatch udp {}", target);
                         let mut buffer = BytesMut::with_capacity(self.mtu);
@@ -552,10 +561,9 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
     }
 
     fn preprocess_packet(&mut self, packet: &T::Packet) {
-        let (dst_addr, src_addr, payload, protocol) =
-            match IpVersion::of_packet(packet.as_ref()).unwrap() {
-                IpVersion::Ipv4 => {
-                    let packet = Ipv4Packet::new_checked(packet.as_ref()).unwrap();
+        let (dst_addr, src_addr, payload, protocol) = match IpVersion::of_packet(packet.as_ref()) {
+            Ok(IpVersion::Ipv4) => match Ipv4Packet::new_checked(packet.as_ref()) {
+                Ok(packet) => {
                     let dst_addr = packet.dst_addr();
                     let src_addr = packet.src_addr();
                     (
@@ -565,8 +573,13 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                         packet.next_header(),
                     )
                 }
-                IpVersion::Ipv6 => {
-                    let packet = Ipv6Packet::new_checked(packet.as_ref()).unwrap();
+                Err(err) => {
+                    log::warn!("ignore invalid ipv4 packet: {}", err);
+                    return;
+                }
+            },
+            Ok(IpVersion::Ipv6) => match Ipv6Packet::new_checked(packet.as_ref()) {
+                Ok(packet) => {
                     let dst_addr = packet.dst_addr();
                     let src_addr = packet.src_addr();
                     (
@@ -576,14 +589,29 @@ impl<'a, T: Tun + Clone> TunDevice<'a, T> {
                         packet.next_header(),
                     )
                 }
-            };
+                Err(err) => {
+                    log::warn!("ignore invalid ipv6 packet: {}", err);
+                    return;
+                }
+            },
+            Err(err) => {
+                log::warn!("ignore packet with invalid ip version: {}", err);
+                return;
+            }
+        };
         let (dst_port, src_port, connect) = match protocol {
             IpProtocol::Udp => {
-                let packet = UdpPacket::new_checked(payload).unwrap();
+                let Ok(packet) = UdpPacket::new_checked(payload) else {
+                    log::warn!("ignore invalid udp packet");
+                    return;
+                };
                 (packet.dst_port(), packet.src_port(), None)
             }
             IpProtocol::Tcp => {
-                let packet = TcpPacket::new_checked(payload).unwrap();
+                let Ok(packet) = TcpPacket::new_checked(payload) else {
+                    log::warn!("ignore invalid tcp packet");
+                    return;
+                };
                 (
                     packet.dst_port(),
                     packet.src_port(),
@@ -637,14 +665,20 @@ impl<'a, T: Tun> smoltcp::phy::TxToken for TxToken<'a, T> {
         F: FnOnce(&mut [u8]) -> R,
     {
         self.traffic.tx_bytes += len;
-        self.tun
-            .allocate_packet(len)
-            .map(|mut packet| {
+        match self.tun.allocate_packet(len) {
+            Ok(mut packet) => {
                 let r = f(packet.as_mut());
-                self.tun.send(packet).unwrap();
+                if let Err(err) = self.tun.send(packet) {
+                    log::error!("tun send failed: {}", err);
+                }
                 r
-            })
-            .unwrap()
+            }
+            Err(err) => {
+                log::error!("tun packet allocation failed: {}", err);
+                let mut packet = vec![0; len];
+                f(packet.as_mut_slice())
+            }
+        }
     }
 }
 
@@ -659,16 +693,23 @@ impl<'b, T: Tun + Clone> Device for TunDevice<'b, T> {
         Self: 'a;
 
     fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        self.tun.receive().unwrap().map(|packet| {
-            self.traffic.rx_bytes += packet.len();
-            self.preprocess_packet(&packet);
-            let rx = RxToken { packet };
-            let tx = TxToken {
-                tun: self.tun.clone(),
-                traffic: &mut self.traffic,
-            };
-            (rx, tx)
-        })
+        match self.tun.receive() {
+            Ok(Some(packet)) => {
+                self.traffic.rx_bytes += packet.len();
+                self.preprocess_packet(&packet);
+                let rx = RxToken { packet };
+                let tx = TxToken {
+                    tun: self.tun.clone(),
+                    traffic: &mut self.traffic,
+                };
+                Some((rx, tx))
+            }
+            Ok(None) => None,
+            Err(err) => {
+                log::error!("tun receive failed: {}", err);
+                None
+            }
+        }
     }
 
     fn transmit(&mut self, _timestamp: Instant) -> Option<Self::TxToken<'_>> {
@@ -740,5 +781,60 @@ mod tests {
         device.maintenance();
 
         assert!(device.last_shrink > before);
+    }
+
+    #[test]
+    fn ingress_missing_sender_paths_do_not_unwrap() {
+        let source = include_str!("device.rs");
+        let tcp_sender_unwrap = concat!("self.tcp_req_senders.get(&source)", ".unwrap()");
+        let udp_sender_unwrap = concat!("self.udp_req_senders.get(&target)", ".unwrap()");
+
+        assert!(
+            !source.contains(tcp_sender_unwrap),
+            "tcp ingress sender may be removed before smoltcp socket is fully gone"
+        );
+        assert!(
+            !source.contains(udp_sender_unwrap),
+            "udp ingress sender may be removed before smoltcp socket is fully gone"
+        );
+    }
+
+    #[test]
+    fn malformed_packet_paths_do_not_unwrap() {
+        let source = include_str!("device.rs");
+        let ip_version_unwrap = concat!("IpVersion::of_packet(packet.as_ref())", ".unwrap()");
+        let ipv4_packet_unwrap = concat!("Ipv4Packet::new_checked(packet.as_ref())", ".unwrap()");
+        let ipv6_packet_unwrap = concat!("Ipv6Packet::new_checked(packet.as_ref())", ".unwrap()");
+        let udp_packet_unwrap = concat!("UdpPacket::new_checked(payload)", ".unwrap()");
+        let tcp_packet_unwrap = concat!("TcpPacket::new_checked(payload)", ".unwrap()");
+
+        for pattern in [
+            ip_version_unwrap,
+            ipv4_packet_unwrap,
+            ipv6_packet_unwrap,
+            udp_packet_unwrap,
+            tcp_packet_unwrap,
+        ] {
+            assert!(
+                !source.contains(pattern),
+                "malformed tun packets should be ignored instead of panicking at {pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn tun_io_error_paths_do_not_unwrap() {
+        let source = include_str!("device.rs");
+        let send_unwrap = concat!("self.tun.send(packet)", ".unwrap()");
+        let receive_unwrap = concat!("self.tun.receive()", ".unwrap()");
+
+        assert!(
+            !source.contains(send_unwrap),
+            "tun send errors can happen during shutdown and should not panic"
+        );
+        assert!(
+            !source.contains(receive_unwrap),
+            "tun receive errors can happen during shutdown and should not panic"
+        );
     }
 }
