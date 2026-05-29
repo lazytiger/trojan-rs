@@ -49,8 +49,7 @@ pub async fn run_udp_dispatch(
             }
         };
         match ret {
-            DispatchReturn::Data(ret) => {
-                let (src_addr, dst_addr, data) = ret.unwrap();
+            DispatchReturn::Data(Some((src_addr, dst_addr, data))) => {
                 log::info!(
                     "found data {} - {} {} bytes",
                     src_addr,
@@ -65,7 +64,10 @@ pub async fn run_udp_dispatch(
                     Some(sender) => sender,
                     None => {
                         log::info!("remote for {} not found", src_addr);
-                        let local = locals.get(&dst_addr).unwrap().clone();
+                        let Some(local) = locals.get(&dst_addr).cloned() else {
+                            log::warn!("socket:{} removed before remote creation", dst_addr);
+                            continue;
+                        };
                         let (req_sender, req_receiver) = channel(mtu);
                         req_senders.insert(src_addr, req_sender);
 
@@ -78,18 +80,28 @@ pub async fn run_udp_dispatch(
                             close_sender.clone(),
                             request.clone(),
                         ));
-                        req_senders.get(&src_addr).unwrap()
+                        let Some(sender) = req_senders.get(&src_addr) else {
+                            log::warn!("remote sender for {} missing after insert", src_addr);
+                            continue;
+                        };
+                        sender
                     }
                 };
                 let _ = sender.send((dst_addr, data)).await;
             }
-            DispatchReturn::Socket(ret) => {
-                let socket = ret.unwrap();
+            DispatchReturn::Data(None) => {
+                log::info!("udp data channel closed");
+                break;
+            }
+            DispatchReturn::Socket(Some(socket)) => {
                 log::info!("add socket for {}", socket.peer_addr());
                 locals.insert(socket.peer_addr(), socket);
             }
-            DispatchReturn::Close(ret) => {
-                let (addr, is_remote) = ret.unwrap();
+            DispatchReturn::Socket(None) => {
+                log::info!("udp socket channel closed");
+                break;
+            }
+            DispatchReturn::Close(Some((addr, is_remote))) => {
                 log::info!("close {} {}", addr, is_remote);
                 if is_remote {
                     req_senders.remove(&addr);
@@ -98,6 +110,10 @@ pub async fn run_udp_dispatch(
                     locals.remove(&addr);
                     locals.shrink_to_fit();
                 }
+            }
+            DispatchReturn::Close(None) => {
+                log::info!("udp close channel closed");
+                break;
             }
         }
     }
@@ -139,7 +155,14 @@ async fn local_to_remote(
     let dst_addr = local.peer_addr();
     let (mut remote, remote_local_addr) =
         if let Ok(client) = init_tls_conn(connector, server_name.clone()).await {
-            let local_addr = client.get_ref().0.local_addr().unwrap();
+            let local_addr = match client.get_ref().0.local_addr() {
+                Ok(addr) => addr,
+                Err(err) => {
+                    log::error!("get remote udp local address failed:{}", err);
+                    let _ = sender.send((src_addr, true)).await;
+                    return;
+                }
+            };
             let (read_half, mut write_half) = split(client);
             if let Err(err) = write_half.write_all(request.as_ref()).await {
                 log::error!("udp send handshake failed:{}", err);
@@ -233,5 +256,59 @@ async fn remote_to_local(
 
     if let Err(err) = sender.send((source, true)).await {
         log::info!("udp channel send failed:{}", err);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bytes::BytesMut;
+    use rustls::{ClientConfig, RootCertStore};
+    use rustls_pki_types::ServerName;
+    use tokio::sync::mpsc::channel;
+    use tokio_rustls::TlsConnector;
+
+    use super::run_udp_dispatch;
+
+    fn test_connector() -> TlsConnector {
+        TlsConnector::from(Arc::new(
+            ClientConfig::builder()
+                .with_root_certificates(RootCertStore::empty())
+                .with_no_client_auth(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn udp_dispatch_exits_when_socket_channel_closes() {
+        let (_data_sender, data_receiver) = channel(1);
+        let (socket_sender, socket_receiver) = channel(1);
+        let (close_sender, close_receiver) = channel(1);
+        drop(socket_sender);
+
+        let result = tokio::spawn(run_udp_dispatch(
+            data_receiver,
+            socket_receiver,
+            ServerName::try_from("example.com").unwrap(),
+            test_connector(),
+            1500,
+            Arc::new(BytesMut::new()),
+            close_receiver,
+            close_sender,
+        ))
+        .await;
+
+        assert!(result.is_ok(), "udp dispatch should exit without panic");
+    }
+
+    #[test]
+    fn tls_local_address_error_does_not_panic() {
+        let source = include_str!("udp.rs");
+        let local_addr_unwrap = concat!("local_addr()", ".unwrap()");
+
+        assert!(
+            !source.contains(local_addr_unwrap),
+            "tls local address lookup can fail during shutdown and should not panic"
+        );
     }
 }
