@@ -48,6 +48,7 @@ pub enum EventType {
     UpdateSpeed,
     OpenConfig,
     InstalledAppsChanged,
+    AllowedAppsChanged,
 }
 
 impl EventType {
@@ -58,6 +59,7 @@ impl EventType {
             EventType::UpdateSpeed => "update_speed",
             EventType::OpenConfig => "open_config",
             EventType::InstalledAppsChanged => "installed_apps_changed",
+            EventType::AllowedAppsChanged => "vpn_allowed_apps_changed",
         }
     }
 }
