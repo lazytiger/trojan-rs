@@ -50,4 +50,14 @@ class TrojanProxyTest {
     assertEquals(emptyList<String>(), result.missing)
     assertEquals(listOf("com.google.android.gms"), added)
   }
+
+  @Test
+  fun allowedApplicationsJsonSerializesActualAddedPackages() {
+    assertEquals(
+      "[\"com.google.android.gsf\",\"com.android.vending\"]",
+      allowedApplicationsJson(
+        listOf("com.google.android.gsf", "com.android.vending")
+      )
+    )
+  }
 }

@@ -143,20 +143,31 @@ pub extern "system" fn Java_com_bmshi_router_mobile_TrojanProxy_onStart<'local>(
     _: JObject<'local>,
     fd: jint,
     dns: JObject<'local>,
+    allowed_apps: JObject<'local>,
 ) {
     let dns: JString<'local> = dns.into();
     let dns = env.get_string(&dns).unwrap();
-    if let Err(err) = on_vpn_start(fd, dns.to_string_lossy().to_string()) {
+    let allowed_apps: JString<'local> = allowed_apps.into();
+    let allowed_apps = env.get_string(&allowed_apps).unwrap();
+    if let Err(err) = on_vpn_start(
+        fd,
+        dns.to_string_lossy().to_string(),
+        allowed_apps.to_string_lossy().to_string(),
+    ) {
         log::error!("onStart failed:{:?}", err);
     }
 }
 
-fn on_vpn_start(fd: i32, dns: String) -> Result<(), VpnError> {
+fn on_vpn_start(fd: i32, dns: String, allowed_apps: String) -> Result<(), VpnError> {
+    let allowed_apps: Vec<String> = serde_json::from_str(&allowed_apps)?;
     let (context, lock) = get_mut_context()?;
     context.fd = fd;
     context.running = Arc::new(AtomicBool::new(true));
     context.dns = dns;
     drop(lock);
+    if let Err(err) = emit_event(EventType::AllowedAppsChanged, allowed_apps) {
+        log::error!("emit allowed apps changed failed:{:?}", err);
+    }
     start_vpn_process()
 }
 

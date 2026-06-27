@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import {
   addSelectedApp,
   filterAvailableApps,
+  getDisplayedSelectedApps,
   getInstalledGmsPackages,
   removeSelectedApp,
   setGmsAppsSelected,
   toAppItems,
+  toSelectedAppItems,
 } from "./appSelection.js";
 
 test("addSelectedApp appends a new app and ignores duplicates", () => {
@@ -108,5 +110,51 @@ test("setGmsAppsSelected removes only GMS packages", () => {
       false,
     ),
     ["com.openai.chatgpt"],
+  );
+});
+
+test("getDisplayedSelectedApps returns configured apps while VPN is stopped", () => {
+  assert.deepEqual(
+    getDisplayedSelectedApps(
+      ["com.openai.chatgpt", "com.google.android.gms"],
+      ["com.openai.chatgpt"],
+      false,
+    ),
+    ["com.openai.chatgpt", "com.google.android.gms"],
+  );
+});
+
+test("getDisplayedSelectedApps returns actual allowed apps while VPN is running", () => {
+  assert.deepEqual(
+    getDisplayedSelectedApps(
+      ["com.openai.chatgpt", "com.google.android.gms"],
+      ["com.openai.chatgpt"],
+      true,
+    ),
+    ["com.openai.chatgpt"],
+  );
+});
+
+test("toSelectedAppItems maps package names to installed labels with package fallback", () => {
+  const apps = [
+    {
+      label: "ChatGPT",
+      packageName: "com.openai.chatgpt",
+      value: "com.openai.chatgpt",
+    },
+  ];
+
+  assert.deepEqual(
+    toSelectedAppItems(["com.openai.chatgpt", "com.missing.app"], apps),
+    [
+      {
+        label: "ChatGPT",
+        packageName: "com.openai.chatgpt",
+      },
+      {
+        label: "com.missing.app",
+        packageName: "com.missing.app",
+      },
+    ],
   );
 });

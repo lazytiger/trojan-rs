@@ -53,9 +53,15 @@ internal fun addAllowedApplications(
   return AllowedApplicationsResult(added, missing)
 }
 
+internal fun allowedApplicationsJson(allowedApps: Iterable<String>): String {
+  return allowedApps.joinToString(separator = ",", prefix = "[", postfix = "]") { app ->
+    "\"" + app.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+  }
+}
+
 
 class TrojanProxy : VpnService() {
-  private external fun onStart(fd: Int, dns: String)
+  private external fun onStart(fd: Int, dns: String, allowedApps: String)
   private external fun onStop()
 
   private external fun onNetworkChanged(available: Boolean)
@@ -180,7 +186,7 @@ class TrojanProxy : VpnService() {
           Logger.info("vpn established for apps=${allowedApplicationResult.added} mtu=$mtu")
           startNetworkMonitor()
           vpnFd = vpn
-          onStart(vpn.fd, "10.10.11.1")
+          onStart(vpn.fd, "10.10.11.1", allowedApplicationsJson(allowedApplicationResult.added))
         } else {
           Logger.error("establish vpn failed")
           close()

@@ -4,6 +4,19 @@ export const GMS_PACKAGES = [
   "com.android.vending",
 ];
 
+export function normalizePackageNames(packageNames) {
+  const seen = new Set();
+  const normalized = [];
+  for (const rawPackageName of Array.isArray(packageNames) ? packageNames : []) {
+    const packageName = String(rawPackageName ?? "").trim();
+    if (packageName !== "" && !seen.has(packageName)) {
+      seen.add(packageName);
+      normalized.push(packageName);
+    }
+  }
+  return normalized;
+}
+
 export function addSelectedApp(selectedApps, packageName) {
   const app = String(packageName ?? "").trim();
   const apps = Array.isArray(selectedApps) ? selectedApps : [];
@@ -33,6 +46,30 @@ export function filterAvailableApps(apps, selectedApps) {
   return (Array.isArray(apps) ? apps : []).filter(
     (app) => !selected.has(app.value),
   );
+}
+
+export function getDisplayedSelectedApps(
+  selectedApps,
+  runningAllowedApps,
+  running,
+) {
+  return normalizePackageNames(running ? runningAllowedApps : selectedApps);
+}
+
+export function toSelectedAppItems(packageNames, apps) {
+  const appMap = new Map(
+    (Array.isArray(apps) ? apps : []).map((app) => [
+      app.packageName ?? app.value,
+      app,
+    ]),
+  );
+  return normalizePackageNames(packageNames).map((packageName) => {
+    const app = appMap.get(packageName);
+    return {
+      label: app?.label ?? packageName,
+      packageName,
+    };
+  });
 }
 
 export function getInstalledGmsPackages(apps) {

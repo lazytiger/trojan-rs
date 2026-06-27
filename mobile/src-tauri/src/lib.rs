@@ -457,4 +457,12 @@ mod tests {
             "installed_apps_changed"
         );
     }
+
+    #[test]
+    fn allowed_apps_changed_event_name_is_stable() {
+        assert_eq!(
+            EventType::AllowedAppsChanged.to_str(),
+            "vpn_allowed_apps_changed"
+        );
+    }
 }
