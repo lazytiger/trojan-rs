@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+  <queries>
+    <package android:name="com.google.android.gms" />
+    <package android:name="com.google.android.gsf" />
+    <package android:name="com.android.vending" />
+  </queries>
+
   <application
     android:icon="@mipmap/ic_launcher"
     android:label="@string/app_name"

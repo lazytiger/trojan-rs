@@ -3,9 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import {
+  GMS_PACKAGES,
   addSelectedApp,
   filterAvailableApps,
-  getInstalledGmsPackages,
   removeSelectedApp,
   setGmsAppsSelected,
   toAppItems,
@@ -59,16 +59,10 @@ export default {
     availableApps() {
       return filterAvailableApps(this.apps, this.config.selected_apps);
     },
-    installedGmsPackages() {
-      return getInstalledGmsPackages(this.apps);
-    },
     gmsSelected: {
       get() {
-        return (
-          this.installedGmsPackages.length > 0 &&
-          this.installedGmsPackages.every((packageName) =>
-            this.config.selected_apps.includes(packageName),
-          )
+        return GMS_PACKAGES.every((packageName) =>
+          this.config.selected_apps.includes(packageName),
         );
       },
       set(selected) {
@@ -80,12 +74,10 @@ export default {
       },
     },
     gmsIndeterminate() {
-      const selectedCount = this.installedGmsPackages.filter((packageName) =>
+      const selectedCount = GMS_PACKAGES.filter((packageName) =>
         this.config.selected_apps.includes(packageName),
       ).length;
-      return (
-        selectedCount > 0 && selectedCount < this.installedGmsPackages.length
-      );
+      return selectedCount > 0 && selectedCount < GMS_PACKAGES.length;
     },
     selectedAppItems() {
       const appMap = new Map(this.apps.map((app) => [app.value, app]));
@@ -313,7 +305,7 @@ export default {
           ></v-text-field>
           <v-checkbox
             v-model="gmsSelected"
-            :disabled="running || installedGmsPackages.length === 0"
+            :disabled="running"
             :indeterminate="gmsIndeterminate"
             density="compact"
             hide-details

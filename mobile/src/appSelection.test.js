@@ -82,15 +82,15 @@ test("getInstalledGmsPackages returns installed GMS packages in bundle order", (
   ]);
 });
 
-test("setGmsAppsSelected adds installed GMS packages without duplicates", () => {
+test("setGmsAppsSelected adds all fixed GMS package names without relying on app list enumeration", () => {
   const apps = [
-    { title: "Google Play Store", value: "com.android.vending" },
-    { title: "Google Play services", value: "com.google.android.gms" },
+    { title: "GSF Proxy", value: "com.google.android.gsf" },
   ];
 
   assert.deepEqual(setGmsAppsSelected(["com.openai.chatgpt"], apps, true), [
     "com.openai.chatgpt",
     "com.google.android.gms",
+    "com.google.android.gsf",
     "com.android.vending",
   ]);
 });
