@@ -44,7 +44,7 @@ export function getInstalledGmsPackages(apps) {
 
 export function setGmsAppsSelected(selectedApps, apps, selected) {
   const current = Array.isArray(selectedApps) ? selectedApps : [];
-  const gmsPackages = selected ? getInstalledGmsPackages(apps) : GMS_PACKAGES;
+  const gmsPackages = GMS_PACKAGES;
 
   if (!selected) {
     const gmsSet = new Set(gmsPackages);

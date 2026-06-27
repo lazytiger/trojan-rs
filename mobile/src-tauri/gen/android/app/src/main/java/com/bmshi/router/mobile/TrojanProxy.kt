@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -19,6 +20,38 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
+
+internal data class AllowedApplicationsResult(
+  val added: List<String>,
+  val missing: List<String>
+)
+
+internal fun addAllowedApplications(
+  allowedApps: Iterable<String>,
+  addAllowedApplication: (String) -> Unit,
+  onMissingApplication: (String, PackageManager.NameNotFoundException) -> Unit = { _, _ -> }
+): AllowedApplicationsResult {
+  val added = mutableListOf<String>()
+  val missing = mutableListOf<String>()
+  val seen = LinkedHashSet<String>()
+
+  for (rawApp in allowedApps) {
+    val app = rawApp.trim()
+    if (app.isEmpty() || !seen.add(app)) {
+      continue
+    }
+
+    try {
+      addAllowedApplication(app)
+      added += app
+    } catch (e: PackageManager.NameNotFoundException) {
+      missing += app
+      onMissingApplication(app, e)
+    }
+  }
+
+  return AllowedApplicationsResult(added, missing)
+}
 
 
 class TrojanProxy : VpnService() {
@@ -124,15 +157,27 @@ class TrojanProxy : VpnService() {
         builder.addRoute("0.0.0.0", 0)
           .addAddress("10.10.10.1", 30)
           .addDnsServer("10.10.11.1")
-        for (app in allowedApps) {
-          builder.addAllowedApplication(app)
+        val allowedApplicationResult = addAllowedApplications(
+          allowedApps,
+          addAllowedApplication = { app -> builder.addAllowedApplication(app) },
+          onMissingApplication = { app, e ->
+            Logger.warn("skip missing allowed application $app: ${e.message ?: "not found"}")
+          }
+        )
+        if (allowedApplicationResult.added.isEmpty()) {
+          Logger.error("no selected apps can be added to VPN allow list")
+          close()
+          return@Runnable
+        }
+        if (allowedApplicationResult.missing.isNotEmpty()) {
+          Logger.warn("missing allowed apps skipped: ${allowedApplicationResult.missing}")
         }
         builder.setSession("gfw")
           .setMtu(mtu)
           .setBlocking(false)
         val vpn = builder.establish()
         if (vpn != null) {
-          Logger.info("vpn established for apps=$allowedApps mtu=$mtu")
+          Logger.info("vpn established for apps=${allowedApplicationResult.added} mtu=$mtu")
           startNetworkMonitor()
           vpnFd = vpn
           onStart(vpn.fd, "10.10.11.1")
