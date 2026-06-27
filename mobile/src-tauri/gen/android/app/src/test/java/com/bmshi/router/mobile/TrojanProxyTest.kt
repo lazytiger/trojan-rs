@@ -2,6 +2,9 @@ package com.bmshi.router.mobile
 
 import android.content.pm.PackageManager
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TrojanProxyTest {
@@ -59,5 +62,47 @@ class TrojanProxyTest {
         listOf("com.google.android.gsf", "com.android.vending")
       )
     )
+  }
+
+  @Test
+  fun closeAndClearDoesNothingForMissingResource() {
+    var closeCalled = false
+
+    val result = closeAndClear<String>(
+      null,
+      close = { closeCalled = true },
+      onError = {}
+    )
+
+    assertNull(result)
+    assertFalse(closeCalled)
+  }
+
+  @Test
+  fun closeAndClearClosesAndClearsResource() {
+    var closed = false
+
+    val result = closeAndClear(
+      "fd",
+      close = { closed = true },
+      onError = {}
+    )
+
+    assertNull(result)
+    assertTrue(closed)
+  }
+
+  @Test
+  fun closeAndClearClearsResourceWhenCloseFails() {
+    var errorObserved = false
+
+    val result = closeAndClear(
+      "fd",
+      close = { throw IllegalStateException("close failed") },
+      onError = { errorObserved = true }
+    )
+
+    assertNull(result)
+    assertTrue(errorObserved)
   }
 }

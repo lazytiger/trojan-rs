@@ -54,9 +54,24 @@ internal fun addAllowedApplications(
 }
 
 internal fun allowedApplicationsJson(allowedApps: Iterable<String>): String {
-  return allowedApps.joinToString(separator = ",", prefix = "[", postfix = "]") { app ->
-    "\"" + app.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+  return JSONArray(allowedApps.toList()).toString()
+}
+
+internal fun <T> closeAndClear(
+  resource: T?,
+  close: (T) -> Unit,
+  onError: (Exception) -> Unit
+): T? {
+  if (resource == null) {
+    return null
   }
+
+  try {
+    close(resource)
+  } catch (e: Exception) {
+    onError(e)
+  }
+  return null
 }
 
 
@@ -228,11 +243,11 @@ class TrojanProxy : VpnService() {
     stopNetworkMonitor()
     stopForeground(STOP_FOREGROUND_REMOVE)
     NotificationManagerCompat.from(this).deleteNotificationChannel("vpn")
-    try {
-      vpnFd.close()
-    } catch (e: Exception) {
-      Logger.info(e.toString())
-    }
+    vpnFd = closeAndClear(
+      vpnFd,
+      close = { it.close() },
+      onError = { Logger.info(it.toString()) }
+    )
     stopSelf()
   }
 
@@ -277,7 +292,7 @@ class TrojanProxy : VpnService() {
 
   companion object {
     private var instance: TrojanProxy? = null
-    private lateinit var vpnFd: ParcelFileDescriptor
+    private var vpnFd: ParcelFileDescriptor? = null
     const val STOP_ACTION = "com.bmshi.router.mobile.STOP_VPN"
     const val NOTIFICATION_ID = 428571
 
@@ -304,8 +319,9 @@ class TrojanProxy : VpnService() {
     @JvmStatic
     fun syncData() {
       try {
-        if (vpnFd.fileDescriptor.valid()) {
-          vpnFd.fileDescriptor.sync()
+        val fd = vpnFd?.fileDescriptor
+        if (fd?.valid() == true) {
+          fd.sync()
         }
       } catch (e: Exception) {
         Logger.warn(e.toString())
