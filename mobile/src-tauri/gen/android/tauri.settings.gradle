@@ -1,0 +1,31 @@
+def cargoLock = new File(settingsDir, "../../Cargo.lock").canonicalFile
+def cargoHome = System.getenv("CARGO_HOME")
+if (cargoHome == null || cargoHome.isBlank()) {
+  cargoHome = new File(System.getProperty("user.home"), ".cargo").path
+}
+
+def crateVersion = { crateName ->
+  def matcher = cargoLock.text =~ /(?ms)^\[\[package\]\]\s*\nname = "${crateName}"\s*\nversion = "([^"]+)"/
+  if (!matcher.find()) {
+    throw new GradleException("Could not find ${crateName} version in ${cargoLock}")
+  }
+  matcher.group(1)
+}
+
+def cargoCrate = { crateName ->
+  def version = crateVersion(crateName)
+  def registrySrc = new File(cargoHome, "registry/src")
+  def crateDir = registrySrc
+    .listFiles()
+    ?.collect { registry -> new File(registry, "${crateName}-${version}") }
+    ?.find { candidate -> candidate.isDirectory() }
+  if (crateDir == null) {
+    throw new GradleException("Could not find ${crateName}-${version} under ${registrySrc}. Run cargo fetch in mobile/src-tauri first.")
+  }
+  crateDir
+}
+
+include ':tauri-android'
+project(':tauri-android').projectDir = new File(cargoCrate("tauri"), "mobile/android")
+include ':tauri-plugin-shell'
+project(':tauri-plugin-shell').projectDir = new File(cargoCrate("tauri-plugin-shell"), "android")
