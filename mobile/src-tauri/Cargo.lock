@@ -1897,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "mobile"
-version = "0.17.4"
+version = "0.18.0"
 dependencies = [
  "android_logger",
  "async_rustls",
