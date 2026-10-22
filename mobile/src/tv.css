@@ -1,0 +1,20 @@
+/* 遥控器焦点样式：老 WebView 不支持 :focus-visible，直接用 :focus 保证可见 */
+:focus {
+  outline: 3px solid #1e88e5;
+  outline-offset: 2px;
+}
+
+.v-btn:focus,
+.v-list-item:focus,
+.v-checkbox:focus,
+.v-slider:focus,
+[role='combobox']:focus {
+  outline: 3px solid #1e88e5;
+  outline-offset: 2px;
+  background-color: rgba(30, 136, 229, 0.12);
+}
+
+/* 列表项获得焦点时，配合圆角不显得突兀 */
+.v-list-item:focus {
+  border-radius: 4px;
+}

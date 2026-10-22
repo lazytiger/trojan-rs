@@ -10,6 +10,10 @@ import android.content.pm.ApplicationInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -200,6 +204,40 @@ class MainActivity : TauriActivity() {
     initRust()
     registerPackageChangedReceiver()
     handleOpenConfigIntent(intent)
+    // Android TV 没有触摸事件，必须主动把焦点交给 WebView，
+    // 否则 D-pad 方向键会被 Activity/DecorView 吃掉，到不了页面。
+    window.decorView.post { focusWebView() }
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus) focusWebView()
+  }
+
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (event.action == KeyEvent.ACTION_DOWN) {
+      focusWebView()
+    }
+    return super.dispatchKeyEvent(event)
+  }
+
+  private fun focusWebView() {
+    val root = findViewById<ViewGroup>(android.R.id.content) ?: return
+    val webView = findWebView(root) ?: return
+    webView.isFocusable = true
+    webView.isFocusableInTouchMode = true
+    if (!webView.hasFocus()) webView.requestFocus()
+  }
+
+  private fun findWebView(view: View?): WebView? {
+    if (view == null) return null
+    if (view is WebView) return view
+    if (view is ViewGroup) {
+      for (i in 0 until view.childCount) {
+        findWebView(view.getChildAt(i))?.let { return it }
+      }
+    }
+    return null
   }
 
   override fun onResume() {
