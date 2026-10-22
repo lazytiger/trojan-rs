@@ -46,15 +46,28 @@ export default {
       query: "",
       network_lost: false,
       process_exit: true,
+      saveTimer: null,
     };
   },
   watch: {
-    "config.selected_apps": {
+    // 所有字段边改边存（防抖 400ms）。
+    // 电视盒子打开软键盘 / 切后台时 WebView 可能被重建，页面重新 mounted 会从存储读回配置，
+    // 未落盘的输入就“被清空”了——之前只有 selected_apps 会即时保存，域名/密码不会。
+    config: {
       deep: true,
-      async handler() {
-        if (this.configReady) {
-          await this.saveConfig();
+      handler() {
+        if (!this.configReady) {
+          return;
         }
+        if (this.saveTimer) {
+          clearTimeout(this.saveTimer);
+        }
+        this.saveTimer = setTimeout(() => {
+          this.saveTimer = null;
+          Promise.resolve(this.saveConfig()).catch((err) => {
+            console.error("Failed to persist config", err);
+          });
+        }, 400);
       },
     },
   },
@@ -254,6 +267,8 @@ export default {
     },
   },
   async mounted() {
+    // 若在 logcat 里反复看到这行，说明页面被重新加载过（输入被清空的直接原因）
+    console.info("[app] mounted", new Date().toISOString());
     let data = await invoke("load_data", { key: "config" });
     if (data !== "") {
       try {
@@ -274,6 +289,23 @@ export default {
       }
       this.config.speed_update_ms = 2000;
     }
+    // 页面被隐藏/关闭时立刻把待写入的改动刷盘，降低被系统回收时的丢失概率
+    const flushConfig = () => {
+      if (this.saveTimer) {
+        clearTimeout(this.saveTimer);
+        this.saveTimer = null;
+      }
+      if (this.configReady) {
+        Promise.resolve(this.saveConfig()).catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        flushConfig();
+      }
+    });
+    window.addEventListener("pagehide", flushConfig);
+
     await this.refreshInstalledApps();
     this.configReady = true;
     await invoke("init_window", { logLevel: this.config.log_level });
